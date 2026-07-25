@@ -65,8 +65,12 @@ const v3CtxOf = (d, body = {}) => {
     businessName: d.company_name,
     businessType: d.business_type,
     ownerName: d.contact_person || '',
-    city: ph.location || '',
-    country: 'India',
+    // City/area drive local search intent; country lets non-India clients (e.g.
+    // an Australian food business) localize captions + local tags. Set the
+    // client's location placeholder to their city and, optionally, country.
+    city: ph.location || ph.city || '',
+    area: ph.area || '',
+    country: ph.country || cs.country || 'India',
     language: body.language || d.language || cs.language || 'English',
     tone: body.tone || cs.tone || 'Friendly',
     targetAudience: d.target_audience || cs.target_audience || '',

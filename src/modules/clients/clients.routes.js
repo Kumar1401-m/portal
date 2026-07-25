@@ -91,13 +91,8 @@ router.get(
       : new Date().toISOString().slice(0, 7);
     const rows = await query(
       `SELECT c.id, c.company_name, c.monthly_deliverables,
-        COALESCE(SUM(d.platform IN ('youtube_short','youtube_long')),0) AS yt_total,
-        COALESCE(SUM(d.platform IN ('youtube_short','youtube_long')
-          AND d.status IN ('approved','scheduled','posted','completed')),0) AS yt_approved,
-        COALESCE(SUM(d.platform = 'instagram_reel'),0) AS reel_total,
-        COALESCE(SUM(d.platform = 'instagram_reel'
-          AND d.status IN ('approved','scheduled','posted','completed')),0) AS reel_approved,
-        COALESCE(COUNT(d.id),0) AS total
+        COALESCE(COUNT(d.id),0) AS total,
+        COALESCE(SUM(d.status IN ('approved','scheduled','posted','completed')),0) AS approved
        FROM clients c
        LEFT JOIN deliverables d ON d.client_id = c.id AND d.month_key = ?
        WHERE c.status != 'churned'

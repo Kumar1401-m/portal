@@ -22,7 +22,7 @@ if (!user || user.role === 'client') window.location.href = '/';
 
 const PLATFORMS = [
   'instagram_reel', 'instagram_post', 'instagram_story', 'facebook_post',
-  'youtube_short', 'youtube_long', 'poster', 'ad_creative', 'other',
+  'ad_creative', 'other',
 ];
 
 /** Ordered production workflow (Status Workflow spec). */

@@ -660,8 +660,8 @@ function updateVideoModal(t, opts = {}) {
         ${statusBadge(t.status)} ${badge(t.approval_status)}
       </div>
       <div class="hint" style="margin-bottom:10px">${stageHint}</div>
-      ${t.status === 'changes_requested' && t.reject_reason ? `<div style="margin-bottom:12px;padding:9px 12px;border-radius:8px;background:#fff5f5;border:1px solid #ffc9c9;color:#c92a2a;font-size:.85rem">
-        <strong>Client's requested change:</strong> ${esc(t.reject_reason)}</div>` : ''}
+      ${t.reject_reason ? `<div style="margin-bottom:12px;padding:9px 12px;border-radius:8px;background:#fff5f5;border:1px solid #ffc9c9;color:#c92a2a;font-size:.85rem">
+        <strong>${t.status === 'changes_requested' ? "Client's requested change" : 'Remark'}:</strong> ${esc(t.reject_reason)}</div>` : ''}
       ${F.input('title', 'Title', t.title)}
       ${F.area('content_hook', isPoster ? "What's on the Poster" : "What's in the Video", t.content_hook, { rows: 3, hint: isPoster ? 'The brief the designer works from.' : 'The content the client reviews and approves before filming.' })}
       ${isPoster && t.edited_link ? `<div class="field"><label>Poster design (from the designer)</label>
@@ -902,8 +902,8 @@ ERP.register('content', async function renderContent(params) {
 ERP.register('approvals', async function renderApprovals(params) {
   const tab = params.get('tab') || 'content';
   const tabs = [
-    ['content', 'Content review (Gate 1)', 'status=content_review'],
-    ['final', 'Final review (Gate 2)', 'status=review'],
+    ['content', 'Content review', 'status=content_review'],
+    ['final', 'Final review', 'status=review'],
     ['changes', 'Changes requested', 'status=changes_requested'],
     ['approved', 'Recently approved', 'approval=approved'],
   ];
@@ -974,15 +974,14 @@ ERP.register('client-report', async function renderClientReport(params) {
   $('#crTable').innerHTML = r.data.clients.length ? `
     <table class="tbl"><thead><tr>
       <th>#</th><th>Name of the Client</th>
-      <th>YouTube Videos</th><th>Approved</th><th>% Approved</th>
-      <th>Educational Reels</th><th>Approved</th><th>% Approved</th><th></th>
+      <th>Content</th><th>Approved</th><th>% Approved</th><th></th>
     </tr></thead><tbody>
     ${r.data.clients.map((c, i) => `
       <tr class="clickable" data-nav="/client-report/${c.id}?month=${month}">
         <td>${i + 1}</td>
         <td class="t-main">${esc(c.company_name)}</td>
-        <td>${c.yt_total}</td><td>${c.yt_approved}</td><td>${pctBar(Number(c.yt_approved), Number(c.yt_total))}</td>
-        <td>${c.reel_total}</td><td>${c.reel_approved}</td><td>${pctBar(Number(c.reel_approved), Number(c.reel_total))}</td>
+        <td>${c.total}</td><td>${c.approved}</td>
+        <td style="min-width:150px">${pctBar(Number(c.approved), Number(c.total))}</td>
         <td class="row-actions"><span class="link-btn">Open →</span></td>
       </tr>`).join('')}
     </tbody></table>` : '<div class="empty">No clients for this month.</div>';
@@ -998,8 +997,7 @@ ERP.register('client-report-detail', async function renderClientReportDetail(id,
   ]);
   const client = clientRes.data;
   const rows = delivRes.data;
-  const ytCount = rows.filter((d) => ['youtube_short', 'youtube_long'].includes(d.platform)).length;
-  const reelCount = rows.filter((d) => d.platform === 'instagram_reel').length;
+  const approvedCount = rows.filter((d) => ['approved', 'scheduled', 'posted', 'completed'].includes(d.status)).length;
 
   const viewLink = (url) => url
     ? `<a class="link-btn" href="${esc(url)}" target="_blank" rel="noopener" data-stop>View</a>` : '<span class="t-sub">N/A</span>';
@@ -1023,9 +1021,8 @@ ERP.register('client-report-detail', async function renderClientReportDetail(id,
       </div>
     </div>
     <div class="chip-row" style="margin-bottom:14px">
-      <span class="badge b-amber" style="font-size:.85rem;padding:8px 14px">▶ YouTube Videos: ${ytCount}</span>
-      <span class="badge b-violet" style="font-size:.85rem;padding:8px 14px">🎓 Educational Reels: ${reelCount}</span>
-      <span class="badge b-blue" style="font-size:.85rem;padding:8px 14px">🎬 Total Videos: ${rows.length}</span>
+      <span class="badge b-blue" style="font-size:.85rem;padding:8px 14px">🎬 Total Content: ${rows.length}</span>
+      <span class="badge b-green" style="font-size:.85rem;padding:8px 14px">✅ Approved: ${approvedCount}</span>
     </div>
     <div class="card"><div class="card-body flush table-wrap" id="cdTable"></div></div>`;
 

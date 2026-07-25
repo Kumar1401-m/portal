@@ -185,7 +185,7 @@ ERP.register('task-new', async function renderTaskNew(params) {
         ${F.select('client_id', 'Client *', clients.map((c) => `<option value="${c.id}" ${preClient === c.id ? 'selected' : ''}>${esc(c.company_name)}</option>`).join(''))}
         ${F.input('title', 'Title *', '', { extra: 'required', ph: 'e.g. Diwali offer reel' })}
         <div class="form-row">
-          ${F.select('platform', 'Platform', '<option value="instagram_reel">Instagram Reel</option><option value="youtube_long">YouTube</option>')}
+          ${F.select('platform', 'Platform', '<option value="instagram_reel">Instagram Reel</option>')}
           ${F.select('video_type', 'Type', selectOptions(['Reel', 'Poster'], 'Reel'))}
         </div>
         ${F.input('due_date', 'Due date', '', { type: 'date' })}
