@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agency ERP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/erp.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234527a0'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'>A</text></svg>" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><div class="logo">A</div><span>Agency ERP</span></div>
+      <nav class="nav" id="nav">
+        <a href="#/poster" data-page="poster" id="posterLink" style="display:none"><i data-lucide="palette"></i><span>My Poster Tasks</span></a>
+        <a href="#/poster-today" data-page="poster-today" id="posterTodayLink" style="display:none"><i data-lucide="calendar-check-2"></i><span>Today's Tasks</span></a>
+        <a href="#/poster-clients" data-page="poster-clients" id="posterClientsLink" style="display:none"><i data-lucide="building-2"></i><span>My Clients</span></a>
+        <a href="#/dashboard" data-page="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
+        <a href="#/today" data-page="today"><i data-lucide="calendar-check-2"></i><span>Today's Tasks</span><span class="nav-count" id="todayCount" hidden></span></a>
+        <a href="#/calendar" data-page="calendar"><i data-lucide="calendar-days"></i><span>Calendar</span></a>
+
+        <div class="nav-label">Workspace</div>
+        <a href="#/clients" data-page="clients"><i data-lucide="building-2"></i><span>Clients</span></a>
+        <a href="#/client-report" data-page="client-report"><i data-lucide="clipboard-list"></i><span>Client Report</span></a>
+        <a href="#/content" data-page="content"><i data-lucide="clapperboard"></i><span>Videos</span></a>
+        <a href="#/posters" data-page="posters"><i data-lucide="image"></i><span>Posters</span></a>
+        <a href="#/approvals" data-page="approvals"><i data-lucide="badge-check"></i><span>Approvals</span><span class="nav-count" id="approvalCount" hidden></span></a>
+        <a href="#/payments" data-page="payments"><i data-lucide="credit-card"></i><span>Payments</span></a>
+
+        <div class="nav-label">Insights</div>
+        <a href="#/analytics" data-page="analytics"><i data-lucide="chart-line"></i><span>Analytics</span></a>
+        <a href="#/reports" data-page="reports"><i data-lucide="file-chart-column"></i><span>Reports</span></a>
+
+        <div class="nav-label" id="adminLabel">Administration</div>
+        <a href="#/team" data-page="team" id="teamLink"><i data-lucide="users"></i><span>Team</span></a>
+        <a href="#/settings" data-page="settings" id="settingsLink"><i data-lucide="settings"></i><span>Settings</span></a>
+      </nav>
+      <div class="side-foot">Powered by Venkat · <span id="aiMode">AI: …</span></div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="iconbtn burger" id="burger" aria-label="Menu"><i data-lucide="menu"></i></button>
+        <button class="iconbtn" id="railToggle" aria-label="Collapse sidebar" title="Collapse sidebar"><i data-lucide="panel-left"></i></button>
+        <div class="search">
+          <i data-lucide="search"></i>
+          <input type="search" id="globalSearch" placeholder="Search clients, content, captions, payments…  ( / )" autocomplete="off" />
+          <div class="search-results" id="searchResults"></div>
+        </div>
+        <div class="spacer"></div>
+
+        <div style="position:relative">
+          <button class="quick-add" id="quickAddBtn"><i data-lucide="plus"></i><span>Quick Add</span></button>
+          <div class="dropdown qa-menu" id="quickAddDrop">
+            <button class="qa-item" data-qa="/tasks/new"><i data-lucide="clapperboard"></i> New Task</button>
+            <button class="qa-item" data-qa="/clients/new"><i data-lucide="building-2"></i> New Client</button>
+            <button class="qa-item" data-qa="invoice"><i data-lucide="receipt-indian-rupee"></i> New Invoice</button>
+          </div>
+        </div>
+
+        <div style="position:relative">
+          <button class="iconbtn" id="notifBtn" aria-label="Notifications">
+            <i data-lucide="bell"></i><span class="dot" id="notifDot" style="display:none">0</span>
+          </button>
+          <div class="dropdown" id="notifDrop">
+            <div class="dd-head">Notifications <button id="markAllRead">Mark all read</button></div>
+            <div id="notifList"></div>
+          </div>
+        </div>
+
+        <div style="position:relative">
+          <div class="user-chip" id="userChip">
+            <div class="avatar" id="userAvatar">A</div>
+            <div class="u-meta"><div class="u-name" id="userName">…</div><div class="u-role" id="userRole"></div></div>
+          </div>
+          <div class="dropdown" id="userDrop" style="width:230px">
+            <div class="dd-head" id="userEmail" style="font-weight:500;font-size:.78rem;color:var(--ink-2)"></div>
+            <div class="notif-item" id="changePwBtn">🔒 &nbsp;Change password</div>
+            <div class="notif-item" id="logoutBtn" style="color:var(--red)">↪ &nbsp;Sign out</div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content" id="page"></main>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" defer></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/erp/core.js"></script>
+  <script src="/js/erp/pages.js"></script>
+  <script src="/js/erp/task.js"></script>
+  <script src="/js/erp/boot.js"></script>
+</body>
+</html>

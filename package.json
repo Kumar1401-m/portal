@@ -1,0 +1,48 @@
+{
+  "name": "agency-erp-crm-portal",
+  "version": "1.0.0",
+  "description": "AI-powered Digital Marketing Agency ERP + CRM + Client Portal (SaaS)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:setup": "node database/setup.js",
+    "db:seed": "node database/seed.js",
+    "db:migrate": "node database/migrate.js",
+    "db:reset": "node database/setup.js --reset && node database/seed.js",
+    "db:backup": "node scripts/backup.js"
+  },
+  "keywords": [
+    "erp",
+    "crm",
+    "agency",
+    "saas",
+    "marketing"
+  ],
+  "author": "Agency ERP",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "mysql2": "^3.11.3",
+    "nodemailer": "^6.9.15",
+    "razorpay": "^2.9.4",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

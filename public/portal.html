@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Client Portal — Agency ERP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234527a0'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'>A</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><div class="logo">A</div><span id="brandName">Client Portal</span></div>
+      <nav class="nav" id="nav">
+        <a href="#/dashboard" data-page="dashboard"><i data-lucide="layout-dashboard"></i> Dashboard</a>
+        <a href="#/calendar" data-page="calendar"><i data-lucide="calendar-days"></i> Content Calendar</a>
+        <a href="#/content" data-page="content"><i data-lucide="clapperboard"></i> My Content</a>
+        <a href="#/payments" data-page="payments"><i data-lucide="credit-card"></i> Payments & Invoices</a>
+        <a href="#/reports" data-page="reports"><i data-lucide="file-chart-column"></i> Reports</a>
+      </nav>
+      <div class="side-foot">Powered by Venkat</div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="iconbtn burger" id="burger" aria-label="Menu"><i data-lucide="menu"></i></button>
+        <div class="spacer"></div>
+        <div style="position:relative">
+          <button class="iconbtn" id="notifBtn" aria-label="Notifications">
+            <i data-lucide="bell"></i><span class="dot" id="notifDot" style="display:none">0</span>
+          </button>
+          <div class="dropdown" id="notifDrop">
+            <div class="dd-head">Notifications <button id="markAllRead">Mark all read</button></div>
+            <div id="notifList"></div>
+          </div>
+        </div>
+        <div style="position:relative">
+          <div class="user-chip" id="userChip">
+            <div class="avatar" id="userAvatar">C</div>
+            <div class="u-meta"><div class="u-name" id="userName">…</div><div class="u-role" id="userRole">Client</div></div>
+          </div>
+          <div class="dropdown" id="userDrop" style="width:220px">
+            <div class="dd-head" id="userEmail" style="font-weight:500;font-size:.8rem;color:var(--ink-2)"></div>
+            <div class="notif-item" id="logoutBtn" style="color:var(--red)">↪ &nbsp;Sign out</div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content" id="page"></main>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" defer></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/portal.js"></script>
+</body>
+</html>
