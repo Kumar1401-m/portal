@@ -5,7 +5,7 @@
 'use strict';
 
 const { query } = require('../config/db');
-const { sendEmail } = require('./emailService');
+const { sendNotificationEmail } = require('./emailService');
 const logger = require('../utils/logger');
 
 /**
@@ -25,7 +25,8 @@ async function notifyUser(userId, type, title, body, link = null, email = null) 
     );
     if (email) {
       // Email is best-effort; do not await failures into the caller.
-      sendEmail(email, title, title, `<p>${body}</p>`).catch(() => {});
+      // Branded notification email with a "View in portal" button (deep link).
+      sendNotificationEmail(email, title, title, body, link).catch(() => {});
     }
   } catch (err) {
     logger.warn('notifyUser failed:', err.message);

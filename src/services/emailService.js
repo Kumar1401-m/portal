@@ -159,6 +159,29 @@ async function sendInvoiceEmail(client, invoice) {
  * @param {object} client  {company_name, contact_person, email}
  * @param {object} payment {amount, invoice_no, method}
  */
+/** Turn an in-app hash link (e.g. "#/content/12") into an absolute portal URL. */
+function absoluteLink(link) {
+  if (!link) return null;
+  if (/^https?:\/\//i.test(link)) return link;
+  return `${env.appUrl}/${String(link).replace(/^\//, '')}`;
+}
+
+/**
+ * Branded notification email — mirrors any in-app notification with a clear
+ * message and a "View in portal" button. Used by the notification service so
+ * every important event (approvals, change requests, submissions, payments…)
+ * reaches people by email as well as in-app.
+ */
+async function sendNotificationEmail(to, subject, title, bodyText, link) {
+  if (!to) return false;
+  const url = absoluteLink(link);
+  const body = `
+    <p>${esc(bodyText)}</p>
+    ${url ? button(url, 'View in portal') : ''}
+    <p style="margin-bottom:0;color:#999;font-size:12px;">You're receiving this because you have an account with ${esc(env.appName)}.</p>`;
+  return sendEmail(to, subject, title, body);
+}
+
 async function sendPaymentReceiptEmail(client, payment) {
   if (!client || !client.email) return false;
   const rows = [['Amount paid', money(payment.amount)]];
@@ -178,6 +201,7 @@ async function sendPaymentReceiptEmail(client, payment) {
 
 module.exports = {
   sendEmail,
+  sendNotificationEmail,
   sendOnboardingEmail,
   sendInvoiceEmail,
   sendPaymentReceiptEmail,
