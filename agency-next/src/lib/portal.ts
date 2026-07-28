@@ -1,6 +1,6 @@
 /** Client-portal queries — all scoped to a single client_id. */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -114,8 +114,11 @@ export async function getPortalDeliverable(
   clientId: number,
   id: number
 ): Promise<PortalDeliverable | null> {
+  const cloud = (await hasColumn("deliverables", "cloud_video_url"))
+    ? "cloud_video_url"
+    : "NULL AS cloud_video_url";
   return queryOne<PortalDeliverable>(
-    `SELECT id, client_id, title, description, caption, edited_link, cloud_video_url, status, service,
+    `SELECT id, client_id, title, description, caption, edited_link, ${cloud}, status, service,
             video_type, content_category, platform, due_date, reject_reason
      FROM deliverables WHERE id = ? AND client_id = ?`,
     [id, clientId]

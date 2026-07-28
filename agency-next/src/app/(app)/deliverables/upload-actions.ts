@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { queryOne, execute } from "@/lib/db";
+import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { presignUpload, buildVideoKey, deleteObject, isStorageConfigured } from "@/lib/storage";
@@ -70,14 +70,23 @@ export async function attachUploadedVideo(
   // Move it along to "ready for review" only from the editing stages, so an
   // already-approved or posted task isn't dragged backwards.
   const advance = ["pending", "raw_uploaded", "editing", "changes_requested"].includes(d.status);
+  const statusSql = advance ? ", status = 'caption_ready'" : "";
 
-  await execute(
-    `UPDATE deliverables
-        SET cloud_video_url = ?, cloud_video_key = ?, edited_link = ?
-            ${advance ? ", status = 'caption_ready'" : ""}
-      WHERE id = ?`,
-    [publicUrl, key, publicUrl, deliverableId]
-  );
+  // The deploy can land before the migration has been run against this
+  // environment; fall back to storing just the link so the upload isn't lost.
+  if (await hasColumn("deliverables", "cloud_video_url")) {
+    await execute(
+      `UPDATE deliverables
+          SET cloud_video_url = ?, cloud_video_key = ?, edited_link = ?${statusSql}
+        WHERE id = ?`,
+      [publicUrl, key, publicUrl, deliverableId]
+    );
+  } else {
+    await execute(
+      `UPDATE deliverables SET edited_link = ?${statusSql} WHERE id = ?`,
+      [publicUrl, deliverableId]
+    );
+  }
 
   revalidatePath("/deliverables");
   revalidatePath(`/deliverables/${deliverableId}`);

@@ -1,6 +1,6 @@
 /** Read/write queries for the deliverables (content) module. */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 import type { CaptionSource } from "./ai";
 import { SERVICE_KEYS, serviceOf, type ServiceKey } from "./services";
 
@@ -132,6 +132,9 @@ export async function getDeliverables(
   f: DeliverableFilters = {}
 ): Promise<DeliverableListRow[]> {
   const { where, params } = buildWhere(f);
+  const cloud = (await hasColumn("deliverables", "cloud_video_url"))
+    ? "d.cloud_video_url"
+    : "NULL AS cloud_video_url";
   const rows = await query<DeliverableListRow>(
     `SELECT d.id, d.client_id, d.title, d.platform, d.video_type, d.service,
             d.content_category, d.status, d.priority,
@@ -139,7 +142,7 @@ export async function getDeliverables(
             d.assigned_to, u.name AS assignee_name,
             d.content_hook, d.caption, d.description, d.writer_notes,
             d.videographer_notes, d.thumbnail_url, d.edited_link,
-            d.promotion_type, d.raw_drive_link, d.cloud_video_url, d.reject_reason
+            d.promotion_type, d.raw_drive_link, ${cloud}, d.reject_reason
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id
      LEFT JOIN users u ON u.id = d.assigned_to
@@ -211,11 +214,14 @@ export type DeliverableDetail = CaptionSource & {
 
 /** Full deliverable + the client fields needed for the caption brief. */
 export async function getDeliverable(id: number): Promise<DeliverableDetail | null> {
+  const cloud = (await hasColumn("deliverables", "cloud_video_url"))
+    ? "d.cloud_video_url"
+    : "NULL AS cloud_video_url";
   const d = await queryOne<DeliverableDetail>(
     `SELECT d.id, d.client_id, d.title, d.description, d.content_hook, d.platform,
             d.video_type, d.promotion_type, d.language, d.target_audience,
             d.custom_instructions, d.ai_prompt, d.month_key, d.status, d.priority,
-            d.due_date, d.caption, d.edited_link, d.raw_drive_link, d.cloud_video_url, d.reject_reason,
+            d.due_date, d.caption, d.edited_link, d.raw_drive_link, ${cloud}, d.reject_reason,
             d.ai_score, d.service, d.content_category, d.assigned_to, d.created_at,
             c.company_name, c.business_type, c.contact_person, c.phone, c.email,
             c.website, c.company_logo_url, c.instagram_link, c.facebook_link,

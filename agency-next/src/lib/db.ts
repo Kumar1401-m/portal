@@ -83,3 +83,32 @@ export async function transaction<T>(
 
 export { getPool };
 export type { ResultSetHeader };
+
+/**
+ * Does a column exist? Cached for the life of the process.
+ *
+ * The app and the database migrate independently — a deploy can land before
+ * `database/migrate.js` has been run against that environment. Rather than
+ * every query 500ing on an unknown column, features that depend on a newer
+ * column check first and degrade to their pre-migration behaviour.
+ */
+const columnCache = new Map<string, boolean>();
+
+export async function hasColumn(table: string, column: string): Promise<boolean> {
+  const cacheKey = `${table}.${column}`;
+  const cached = columnCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const row = await queryOne<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+      [table, column]
+    );
+    const exists = Number(row?.n ?? 0) > 0;
+    columnCache.set(cacheKey, exists);
+    return exists;
+  } catch {
+    return false; // Assume missing; the caller falls back safely.
+  }
+}

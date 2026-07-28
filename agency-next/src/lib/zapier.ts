@@ -4,7 +4,7 @@
  * back once Zapier has actually published it to Instagram.
  */
 import "server-only";
-import { query, queryOne, execute } from "./db";
+import { query, queryOne, execute, hasColumn } from "./db";
 import { notifyAdmins } from "./notify";
 
 export type ZapierReadyItem = {
@@ -114,6 +114,9 @@ export async function getReadyToPostToInstagram(
   category = "Instagram Reel",
   limit = 25
 ): Promise<ZapierReadyItem[]> {
+  const cloud = (await hasColumn("deliverables", "cloud_video_url"))
+    ? "d.cloud_video_url"
+    : "NULL AS cloud_video_url";
   const rows = await query<{
     id: number;
     title: string;
@@ -127,7 +130,7 @@ export async function getReadyToPostToInstagram(
     company_name: string;
     ig_user_id: string;
   }>(
-    `SELECT d.id, d.title, d.caption, d.edited_link, d.cloud_video_url, d.content_category, d.due_date, d.scheduled_at,
+    `SELECT d.id, d.title, d.caption, d.edited_link, ${cloud}, d.content_category, d.due_date, d.scheduled_at,
             c.id AS client_id, c.company_name, c.ig_user_id
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id
