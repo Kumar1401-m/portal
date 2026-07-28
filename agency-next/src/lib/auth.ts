@@ -105,7 +105,7 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 export function homeForRole(role: Role): string {
   if (role === "client") return "/portal";
   if (role === "poster_designer") return "/poster";
-  if (role === "crm") return "/deliverables";
+  if (role === "crm") return "/dashboard";
   return "/dashboard";
 }
 

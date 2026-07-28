@@ -27,7 +27,7 @@ const ADMIN_OR_CRM: Role[] = ["super_admin", "admin", "crm"];
 
 /** Admins see every module — nothing here is hidden from them. */
 export const NAV: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ADMIN, ready: true },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ADMIN_OR_CRM, ready: true },
   { label: "Today's Tasks", href: "/today", icon: CalendarCheck, roles: [...ALL_STAFF, "crm"], ready: true },
   { label: "Clients", href: "/clients", icon: Users, roles: ADMIN_OR_CRM, ready: true },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true },

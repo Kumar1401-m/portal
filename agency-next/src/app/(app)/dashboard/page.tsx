@@ -7,8 +7,14 @@ import {
   CalendarClock,
   Activity,
 } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
-import { getAdminDashboard, getProductionSummary, getServiceMix } from "@/lib/queries";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { crmClientIds } from "@/lib/crm";
+import {
+  getAdminDashboard,
+  getCrmDashboard,
+  getProductionSummary,
+  getServiceMix,
+} from "@/lib/queries";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -21,12 +27,18 @@ export const metadata = { title: "Dashboard · NVK Hub" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  const isCrm = user.role === "crm";
+  const scopeIds = await crmClientIds(user);
+
+  // A crm gets a scoped, money-free dashboard; admins get the agency-wide one.
   const [d, production, serviceMix] = await Promise.all([
-    getAdminDashboard(),
-    getProductionSummary(),
-    getServiceMix(),
+    isCrm ? getCrmDashboard(scopeIds) : getAdminDashboard(),
+    getProductionSummary(scopeIds),
+    isCrm ? Promise.resolve([]) : getServiceMix(),
   ]);
+
+  const admin = isCrm ? null : (d as Awaited<ReturnType<typeof getAdminDashboard>>);
 
   const monthPct = d.deliverables.month_total
     ? Math.round((d.deliverables.month_completed / d.deliverables.month_total) * 100)
@@ -39,7 +51,9 @@ export default async function DashboardPage() {
           Welcome back, {user.name.split(" ")[0]} 👋
         </h1>
         <p className="text-sm text-muted-foreground">
-          Here&apos;s what&apos;s happening across the agency today.
+          {isCrm
+            ? "Here's what's happening across your clients today."
+            : "Here's what's happening across the agency today."}
         </p>
       </div>
 
@@ -48,7 +62,11 @@ export default async function DashboardPage() {
         <StatCard
           title="Active clients"
           value={d.clients.active}
-          hint={`${d.clients.total} total · ${d.clients.new_30d} new in 30d`}
+          hint={
+            admin
+              ? `${d.clients.total} total · ${admin.clients.new_30d} new in 30d`
+              : `${d.clients.total} assigned to you`
+          }
           icon={Users}
           tone="indigo"
         />
@@ -62,17 +80,19 @@ export default async function DashboardPage() {
         <StatCard
           title="Awaiting approval"
           value={d.pending_approvals}
-          hint={`${d.changes_requested} changes requested`}
+          hint={admin ? `${admin.changes_requested} changes requested` : "across your clients"}
           icon={CheckCircle2}
           tone="amber"
         />
-        <StatCard
-          title="Revenue this month"
-          value={money(d.payments.month_received)}
-          hint={`${money(d.payments.pending_amount)} pending`}
-          icon={IndianRupee}
-          tone="emerald"
-        />
+        {admin ? (
+          <StatCard
+            title="Revenue this month"
+            value={money(admin.payments.month_received)}
+            hint={`${money(admin.payments.pending_amount)} pending`}
+            icon={IndianRupee}
+            tone="emerald"
+          />
+        ) : null}
       </div>
 
       {/* Secondary row */}
@@ -83,7 +103,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Workload split by service — colour-coded shortcuts into the task tabs */}
-      <ServiceMix rows={serviceMix} />
+      {!isCrm ? <ServiceMix rows={serviceMix} /> : null}
 
       {/* Per-client production summary (reference image 4) */}
       <ProductionSummary rows={production} />
@@ -162,18 +182,20 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Client progress */}
+      {/* Client progress — the production summary above already covers this
+          for a crm, scoped to their own clients. */}
+      {admin ? (
       <Card>
         <CardHeader>
           <CardTitle>This month&apos;s client progress</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {d.client_progress.length === 0 ? (
+          {admin.client_progress.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
               No active clients yet.
             </p>
           ) : (
-            d.client_progress.map((c) => {
+            admin.client_progress.map((c) => {
               const target = c.monthly_deliverables || c.planned || 0;
               const pct = target ? Math.min(100, Math.round((c.completed / target) * 100)) : 0;
               return (
@@ -196,6 +218,7 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+      ) : null}
     </div>
   );
 }

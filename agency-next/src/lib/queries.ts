@@ -210,7 +210,10 @@ export type ProductionRow = {
  *   Required (monthly target) · Designed (produced) · Approved ·
  *   Pending Approvals (on client's desk) · Changes Recommended · Pending (target − designed).
  */
-export async function getProductionSummary(): Promise<ProductionRow[]> {
+export async function getProductionSummary(clientIds?: number[] | null): Promise<ProductionRow[]> {
+  if (clientIds && clientIds.length === 0) return [];
+  const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
+  const scope = ids ? `AND c.id IN (${ids.join(",")})` : "";
   const rows = await query<Record<string, unknown>>(
     `SELECT c.id, c.company_name, c.monthly_deliverables AS required,
        COALESCE(COUNT(d.id),0) AS designed,
@@ -221,7 +224,7 @@ export async function getProductionSummary(): Promise<ProductionRow[]> {
      LEFT JOIN deliverables d
        ON d.client_id = c.id AND d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
        AND d.status NOT IN ('cancelled','rejected')
-     WHERE c.status != 'churned'
+     WHERE c.status != 'churned' ${scope}
      GROUP BY c.id ORDER BY c.company_name`
   );
   return rows.map((r) => {
@@ -273,4 +276,100 @@ export async function getClients(clientIds?: number[] | null): Promise<ClientRow
     monthly_deliverables: n(r.monthly_deliverables),
     monthly_package: r.monthly_package == null ? null : n(r.monthly_package),
   }));
+}
+
+/* ------------------------------ CRM dashboard ------------------------------ */
+
+export type CrmDashboard = {
+  clients: { total: number; active: number };
+  deliverables: {
+    month_total: number;
+    month_completed: number;
+    today: number;
+    upcoming: number;
+    overdue: number;
+  };
+  pending_approvals: number;
+  recent_activities: AdminDashboard["recent_activities"];
+  upcoming_tasks: AdminDashboard["upcoming_tasks"];
+};
+
+/**
+ * The dashboard a CRM sees: their own clients only, and no money.
+ *
+ * Deliberately a separate query rather than a filtered getAdminDashboard —
+ * revenue is then absent by construction rather than by remembering to hide a
+ * card, so it can't leak back in later.
+ */
+export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDashboard> {
+  const empty: CrmDashboard = {
+    clients: { total: 0, active: 0 },
+    deliverables: { month_total: 0, month_completed: 0, today: 0, upcoming: 0, overdue: 0 },
+    pending_approvals: 0,
+    recent_activities: [],
+    upcoming_tasks: [],
+  };
+  if (clientIds && clientIds.length === 0) return empty;
+
+  // ids come from client_crm_access, but coerce anyway before interpolating.
+  const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
+  const cScope = ids ? `AND id IN (${ids.join(",")})` : "";
+  const dScope = ids ? `AND client_id IN (${ids.join(",")})` : "";
+  const jScope = ids ? `AND d.client_id IN (${ids.join(",")})` : "";
+
+  const [clients, deliverables, approvals, activities, upcoming] = await Promise.all([
+    queryOne<Record<string, unknown>>(
+      `SELECT COUNT(*) AS total, SUM(status='active') AS active
+         FROM clients WHERE status != 'churned' ${cScope}`
+    ),
+    queryOne<Record<string, unknown>>(
+      `SELECT
+         SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')) AS month_total,
+         SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
+             AND status IN ('approved','scheduled','posted','completed')) AS month_completed,
+         SUM(due_date = CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS today,
+         SUM(due_date > CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
+         SUM(due_date < CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
+       FROM deliverables WHERE 1=1 ${dScope}`
+    ),
+    queryOne<Record<string, unknown>>(
+      `SELECT COUNT(*) AS awaiting FROM deliverables
+        WHERE status IN ('content_review','review') ${dScope}`
+    ),
+    query<AdminDashboard["recent_activities"][number]>(
+      // Activity is agency-wide, so narrow it to this crm's own clients by
+      // matching the deliverables they can see.
+      ids
+        ? `SELECT a.actor_name, a.action, a.entity_type, a.entity_id, a.description, a.created_at
+             FROM activity_logs a
+             LEFT JOIN deliverables d ON a.entity_type = 'deliverable' AND d.id = a.entity_id
+            WHERE (a.entity_type = 'deliverable' AND d.client_id IN (${ids.join(",")}))
+               OR (a.entity_type = 'client' AND a.entity_id IN (${ids.join(",")}))
+            ORDER BY a.id DESC LIMIT 12`
+        : `SELECT actor_name, action, entity_type, entity_id, description, created_at
+             FROM activity_logs ORDER BY id DESC LIMIT 12`
+    ),
+    query<AdminDashboard["upcoming_tasks"][number]>(
+      `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
+              d.video_type, d.content_category, c.company_name
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE d.due_date >= CURDATE()
+          AND d.status NOT IN ('posted','completed','cancelled','rejected') ${jScope}
+        ORDER BY d.due_date ASC LIMIT 8`
+    ),
+  ]);
+
+  return {
+    clients: { total: n(clients?.total), active: n(clients?.active) },
+    deliverables: {
+      month_total: n(deliverables?.month_total),
+      month_completed: n(deliverables?.month_completed),
+      today: n(deliverables?.today),
+      upcoming: n(deliverables?.upcoming),
+      overdue: n(deliverables?.overdue),
+    },
+    pending_approvals: n(approvals?.awaiting),
+    recent_activities: activities,
+    upcoming_tasks: upcoming,
+  };
 }
