@@ -101,6 +101,7 @@ export type PortalDeliverable = {
   caption: string | null;
   edited_link: string | null;
   cloud_video_url: string | null;
+  cloud_video_key: string | null;
   status: string;
   service: string | null;
   video_type: string | null;
@@ -115,8 +116,8 @@ export async function getPortalDeliverable(
   id: number
 ): Promise<PortalDeliverable | null> {
   const cloud = (await hasColumn("deliverables", "cloud_video_url"))
-    ? "cloud_video_url"
-    : "NULL AS cloud_video_url";
+    ? "cloud_video_url, cloud_video_key"
+    : "NULL AS cloud_video_url, NULL AS cloud_video_key";
   return queryOne<PortalDeliverable>(
     `SELECT id, client_id, title, description, caption, edited_link, ${cloud}, status, service,
             video_type, content_category, platform, due_date, reject_reason

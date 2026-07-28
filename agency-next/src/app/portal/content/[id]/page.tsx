@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, MessageSquareWarning } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getPortalDeliverable } from "@/lib/portal";
+import { resolveVideoUrl } from "@/lib/storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge } from "@/components/ui/service-badge";
@@ -23,6 +24,10 @@ export default async function PortalContentDetail({
   const { id } = await params;
   const d = user.clientId ? await getPortalDeliverable(user.clientId, Number(id)) : null;
   if (!d) notFound();
+
+  // Resolved per render: with a private bucket this is a short-lived signed
+  // link, so the client streams from R2 without the bucket being public.
+  const videoUrl = await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url);
 
   const needsReview = ["content_review", "review"].includes(d.status);
   const needsRawFootage = d.status === "waiting_for_raw";
@@ -54,23 +59,23 @@ export default async function PortalContentDetail({
             </div>
           ) : null}
 
-          {d.cloud_video_url || d.edited_link ? (
+          {videoUrl || d.edited_link ? (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Preview</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {/* Hosted with us — play it right here rather than sending them away. */}
-                {d.cloud_video_url ? (
+                {videoUrl ? (
                   <video
                     controls
                     playsInline
                     preload="metadata"
-                    src={d.cloud_video_url}
+                    src={videoUrl}
                     className="max-h-[70vh] w-full rounded-lg bg-black"
                   />
                 ) : null}
-                {d.edited_link && d.edited_link !== d.cloud_video_url ? (
+                {d.edited_link && d.edited_link !== videoUrl ? (
                   <a
                     href={d.edited_link}
                     target="_blank"

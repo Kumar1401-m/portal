@@ -54,10 +54,14 @@ export type SignArgs = {
 };
 
 /**
- * Query-signed PUT URL. Only `host` is signed, so the browser may add its own
- * Content-Type header without invalidating the signature.
+ * Query-signed URL. Only `host` is signed, so the browser may add its own
+ * headers (Content-Type on an upload, Range on a video seek) without
+ * invalidating the signature.
  */
-export function presignPut(args: SignArgs & { expiresIn: number }): string {
+export function presign(
+  method: "PUT" | "GET",
+  args: SignArgs & { expiresIn: number }
+): string {
   const { host, path, accessKeyId, secretAccessKey, region, service, date, expiresIn } = args;
   const { amzDate, dateStamp } = amzDates(date);
   const scope = `${dateStamp}/${region}/${service}/aws4_request`;
@@ -80,7 +84,7 @@ export function presignPut(args: SignArgs & { expiresIn: number }): string {
     .join("&");
 
   const canonicalRequest = [
-    "PUT",
+    method,
     canonicalUri,
     canonicalQuery,
     `host:${host}\n`,
@@ -96,6 +100,9 @@ export function presignPut(args: SignArgs & { expiresIn: number }): string {
 
   return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
+
+export const presignPut = (args: SignArgs & { expiresIn: number }) => presign("PUT", args);
+export const presignGet = (args: SignArgs & { expiresIn: number }) => presign("GET", args);
 
 /** Header-signed DELETE (no body), for removing a replaced object. */
 export function signDelete(args: SignArgs): { url: string; headers: Record<string, string> } {

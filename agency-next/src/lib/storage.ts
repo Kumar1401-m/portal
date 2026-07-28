@@ -10,7 +10,7 @@
  */
 import "server-only";
 import { getSettings } from "./settings";
-import { presignPut, signDelete, encodePath } from "./sigv4";
+import { presignPut, presignGet, signDelete, encodePath } from "./sigv4";
 
 const REGION = "auto"; // R2 is region-less, but the signature still needs a value.
 const SERVICE = "s3";
@@ -33,8 +33,9 @@ export async function getR2Config(): Promise<R2Config | null> {
     secretAccessKey: s.r2_secret_access_key.trim(),
     publicBaseUrl: s.r2_public_base_url.trim().replace(/\/+$/, ""),
   };
-  const complete =
-    cfg.accountId && cfg.bucket && cfg.accessKeyId && cfg.secretAccessKey && cfg.publicBaseUrl;
+  // The public bucket URL is optional: without one we hand out short-lived
+  // signed links instead, which keeps the bucket private.
+  const complete = cfg.accountId && cfg.bucket && cfg.accessKeyId && cfg.secretAccessKey;
   return complete ? cfg : null;
 }
 
@@ -63,7 +64,38 @@ export async function presignUpload(
     expiresIn: expiresInSeconds,
   });
 
-  return { uploadUrl, publicUrl: `${cfg.publicBaseUrl}/${encodePath(key)}` };
+  // With a public bucket the URL is stable and shareable; without one, fall
+  // back to the key itself and resolve a signed link at render time.
+  const publicUrl = cfg.publicBaseUrl ? `${cfg.publicBaseUrl}/${encodePath(key)}` : "";
+  return { uploadUrl, publicUrl };
+}
+
+/**
+ * A watchable link for a stored object. Uses the public URL when the bucket has
+ * one, otherwise a short-lived signed GET — so a private bucket still streams
+ * straight from R2 rather than proxying bytes through us.
+ */
+export async function resolveVideoUrl(
+  key: string | null | undefined,
+  storedUrl?: string | null,
+  expiresInSeconds = 6 * 60 * 60
+): Promise<string | null> {
+  if (storedUrl) return storedUrl; // public bucket, or a plain external link
+  if (!key) return null;
+
+  const cfg = await getR2Config();
+  if (!cfg) return null;
+
+  return presignGet({
+    host: hostFor(cfg),
+    path: `/${cfg.bucket}/${key}`,
+    accessKeyId: cfg.accessKeyId,
+    secretAccessKey: cfg.secretAccessKey,
+    region: REGION,
+    service: SERVICE,
+    date: new Date(),
+    expiresIn: expiresInSeconds,
+  });
 }
 
 /**
