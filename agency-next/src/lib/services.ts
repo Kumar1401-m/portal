@@ -14,10 +14,8 @@
 export const SERVICE_KEYS = [
   "video_editing",
   "poster_designing",
-  "website_development",
   "meta_ads",
   "content_writing",
-  "social_media_posting",
 ] as const;
 
 export type ServiceKey = (typeof SERVICE_KEYS)[number];
@@ -42,8 +40,7 @@ export type ServiceDef = {
 
 /**
  * Colours are fixed per the agency's convention:
- *   Video → purple · Poster → orange · Website → blue
- *   Meta Ads → green · Content → pink · Social posting → cyan
+ *   Video → purple · Poster → orange · Meta Ads → green · Content → pink
  * Class strings are written out literally so Tailwind's scanner picks them up.
  */
 export const SERVICES: Record<ServiceKey, ServiceDef> = {
@@ -69,17 +66,6 @@ export const SERVICES: Record<ServiceKey, ServiceDef> = {
     surface: "bg-orange-500/8 border-orange-500/20",
     tab: "bg-orange-500/12 text-orange-700 ring-1 ring-inset ring-orange-500/40 dark:text-orange-300",
   },
-  website_development: {
-    key: "website_development",
-    label: "Website Development",
-    short: "Website",
-    color: "blue",
-    chip: "bg-blue-500/12 text-blue-700 ring-1 ring-inset ring-blue-500/30 dark:text-blue-300",
-    dot: "bg-blue-500",
-    accent: "border-l-blue-500",
-    surface: "bg-blue-500/8 border-blue-500/20",
-    tab: "bg-blue-500/12 text-blue-700 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300",
-  },
   meta_ads: {
     key: "meta_ads",
     label: "Meta Ads Management",
@@ -101,17 +87,6 @@ export const SERVICES: Record<ServiceKey, ServiceDef> = {
     accent: "border-l-pink-500",
     surface: "bg-pink-500/8 border-pink-500/20",
     tab: "bg-pink-500/12 text-pink-700 ring-1 ring-inset ring-pink-500/40 dark:text-pink-300",
-  },
-  social_media_posting: {
-    key: "social_media_posting",
-    label: "Social Media Posting",
-    short: "Social",
-    color: "cyan",
-    chip: "bg-cyan-500/12 text-cyan-700 ring-1 ring-inset ring-cyan-500/30 dark:text-cyan-300",
-    dot: "bg-cyan-500",
-    accent: "border-l-cyan-500",
-    surface: "bg-cyan-500/8 border-cyan-500/20",
-    tab: "bg-cyan-500/12 text-cyan-700 ring-1 ring-inset ring-cyan-500/40 dark:text-cyan-300",
   },
 };
 
@@ -185,14 +160,6 @@ export const DEFAULT_CATEGORIES: Record<ServiceKey, string[]> = {
     "Thumbnail",
     "Banner",
   ],
-  website_development: [
-    "Landing Page",
-    "Business Website",
-    "Portfolio Website",
-    "Ecommerce Website",
-    "Maintenance",
-    "Bug Fix",
-  ],
   meta_ads: [
     "Lead Generation",
     "Awareness Campaign",
@@ -209,14 +176,6 @@ export const DEFAULT_CATEGORIES: Record<ServiceKey, string[]> = {
     "Ad Copy",
     "Script",
     "Lead Magnet PDF",
-  ],
-  social_media_posting: [
-    "Instagram Post",
-    "Instagram Story",
-    "Facebook Post",
-    "YouTube Upload",
-    "LinkedIn Post",
-    "Scheduled Posting",
   ],
 };
 

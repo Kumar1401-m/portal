@@ -46,7 +46,9 @@ export function TaskQuickView({
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title={d.title}>
-        <div className="flex-1 space-y-5 overflow-y-auto p-6">
+        {/* min-h-0 lets this flex child shrink so it actually scrolls; without
+            it the panel's overflow-hidden clips long briefs. */}
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Building2 className="h-4 w-4" /> {d.company_name}

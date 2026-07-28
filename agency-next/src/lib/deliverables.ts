@@ -166,10 +166,8 @@ export async function getServiceCounts(f: DeliverableFilters = {}): Promise<Serv
     `SELECT COUNT(*) AS all_count,
        COALESCE(SUM(d.service = 'video_editing' OR ${legacyVideo}),0)        AS video_editing,
        COALESCE(SUM(d.service = 'poster_designing' OR ${legacyPoster}),0)    AS poster_designing,
-       COALESCE(SUM(d.service = 'website_development'),0)                    AS website_development,
        COALESCE(SUM(d.service = 'meta_ads'),0)                               AS meta_ads,
-       COALESCE(SUM(d.service = 'content_writing'),0)                        AS content_writing,
-       COALESCE(SUM(d.service = 'social_media_posting'),0)                   AS social_media_posting
+       COALESCE(SUM(d.service = 'content_writing'),0)                        AS content_writing
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      ${where}`,
     params
