@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { queryOne, execute } from "@/lib/db";
+import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
@@ -20,6 +20,7 @@ type Row = {
   service: string | null;
   content_category: string | null;
   edited_link: string | null;
+  cloud_video_key: string | null;
   ig_user_id: string | null;
   placeholder_values: unknown;
 };
@@ -34,9 +35,14 @@ async function clientTransition(
   if (!user.clientId) return { ok: false, error: "No client profile linked." };
   if (!id) return { ok: false, error: "Missing item." };
 
+  // A video uploaded to our own storage has no edited_link, so the presence of
+  // a cloud key counts as having a deliverable too.
+  const cloudCol = (await hasColumn("deliverables", "cloud_video_key"))
+    ? "d.cloud_video_key"
+    : "NULL AS cloud_video_key";
   const d = await queryOne<Row>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.title, d.service, d.content_category,
-            d.edited_link, c.ig_user_id, c.placeholder_values
+            d.edited_link, ${cloudCol}, c.ig_user_id, c.placeholder_values
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE d.id = ? AND d.client_id = ?`,
     [id, user.clientId]
@@ -78,7 +84,7 @@ async function clientTransition(
       d.content_category != null &&
       AUTO_SCHEDULE_CATEGORIES.includes(d.content_category) &&
       Boolean(d.ig_user_id) &&
-      Boolean(d.edited_link);
+      Boolean(d.edited_link || d.cloud_video_key);
     if (autoPostable) {
       const ph = (d.placeholder_values && typeof d.placeholder_values === "object"
         ? d.placeholder_values
