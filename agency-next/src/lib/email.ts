@@ -67,8 +67,15 @@ export async function sendEmail(
   }
 }
 
+/**
+ * Email links must be absolute — a mail client has no origin to resolve
+ * "/portal" against, so a relative href simply does nothing when clicked.
+ */
+const absolute = (href: string) =>
+  /^https?:\/\//i.test(href) ? href : `${env.appUrl}${href.startsWith("/") ? "" : "/"}${href}`;
+
 const button = (href: string, label: string) =>
-  `<p><a href="${esc(href)}" style="display:inline-block;background:#ea580c;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600">${esc(label)}</a></p>`;
+  `<p><a href="${esc(absolute(href))}" style="display:inline-block;background:#ea580c;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600">${esc(label)}</a></p>`;
 
 /* ------------------------- Formal templates ------------------------- */
 

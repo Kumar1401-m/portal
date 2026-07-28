@@ -10,8 +10,22 @@ const toInt = (v: string | undefined, fallback: number) => {
   return Number.isNaN(n) ? fallback : n;
 };
 
+/**
+ * Absolute base URL for links that leave the app — chiefly email, where a
+ * relative path like "/portal" is meaningless to the mail client. Prefers an
+ * explicit APP_URL, then the domain Vercel injects, then local dev.
+ */
+function resolveAppUrl(): string {
+  const explicit = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
+  return "http://localhost:3000";
+}
+
 export const env = {
   appName: process.env.APP_NAME || "NVK Hub",
+  appUrl: resolveAppUrl(),
   isProd: process.env.NODE_ENV === "production",
 
   db: {
