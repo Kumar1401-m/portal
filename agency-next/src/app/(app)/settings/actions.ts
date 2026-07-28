@@ -165,6 +165,31 @@ export async function toggleCategory(_prev: ActionState, fd: FormData): Promise<
   return OK(next ? `"${cat.name}" enabled.` : `"${cat.name}" hidden from new tasks.`);
 }
 
+/* ----------------------------- Danger zone ----------------------------- */
+
+/**
+ * Wipe every task so the portal can be started fresh. Clients, team and
+ * settings are untouched; feedback/comments cascade with their deliverable.
+ * Guarded by a typed confirmation so it can't fire on a stray click.
+ */
+export async function clearAllTasks(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  if (s(fd, "confirm").toUpperCase() !== "DELETE") {
+    return FAIL('Type DELETE to confirm — nothing was removed.');
+  }
+
+  const before = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM deliverables");
+  const total = Number(before?.n ?? 0);
+  if (total === 0) return OK("There were no tasks to clear.");
+
+  await execute("DELETE FROM deliverables");
+
+  for (const p of ["/deliverables", "/today", "/approvals", "/dashboard", "/reports", "/poster", "/portal"]) {
+    revalidatePath(p);
+  }
+  return OK(`Cleared ${total} task${total === 1 ? "" : "s"}. Clients and team were kept.`);
+}
+
 /* ------------------------------- Team ------------------------------- */
 
 const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "crm", "super_admin"];
@@ -249,6 +274,44 @@ export async function renameTeamMember(
   await execute("UPDATE users SET name = ? WHERE id = ?", [name, id]);
   revalidatePath("/settings");
   return OK(`Renamed to ${name}.`);
+}
+
+/**
+ * Permanently remove a staff account. Their work is preserved: the schema
+ * nulls out deliverables.assigned_to / created_by and task_comments.author_id,
+ * while their own sessions, notifications and CRM client access cascade away.
+ */
+export async function deleteTeamMember(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  const me = await requireUser(SUPER_ADMIN_ROLES);
+  const id = Number(fd.get("id"));
+  if (!id) return FAIL("Missing user.");
+  if (id === me.id) return FAIL("You can't delete your own account.");
+
+  const u = await queryOne<{ name: string; role: string }>(
+    "SELECT name, role FROM users WHERE id = ?",
+    [id]
+  );
+  if (!u) return FAIL("User not found.");
+  if (u.role === "client") {
+    return FAIL("Client logins are managed from the Clients module.");
+  }
+  if (u.role === "super_admin") {
+    const others = await queryOne<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM users WHERE role = 'super_admin' AND is_active = 1 AND id <> ?",
+      [id]
+    );
+    if (Number(others?.n ?? 0) === 0) {
+      return FAIL("Keep at least one active super admin.");
+    }
+  }
+
+  await execute("DELETE FROM users WHERE id = ?", [id]);
+  revalidatePath("/settings");
+  revalidatePath("/deliverables");
+  return OK(`${u.name} deleted. Their tasks were kept and are now unassigned.`);
 }
 
 export async function resetTeamPassword(

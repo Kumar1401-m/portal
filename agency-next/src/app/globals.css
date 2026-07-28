@@ -4,95 +4,96 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ---------------------------------------------------------------------------
-   Design tokens — brand indigo/violet echoing the original portal (#4527a0).
-   Light is the default; .dark overrides. Consumed via @theme inline below so
-   utilities like bg-background / text-foreground / border-border just work.
+   Design tokens — brand orange, on a warm neutral base. Light is the default;
+   .dark overrides. Consumed via @theme inline below so utilities like
+   bg-background / text-foreground / border-border just work.
 --------------------------------------------------------------------------- */
 :root {
-  --background: #f6f7fb;
-  --foreground: #0f172a;
+  --background: #faf8f6;
+  --foreground: #1c1512;
 
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #1c1512;
 
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
+  --popover-foreground: #1c1512;
 
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
+  --muted: #f5f1ed;
+  --muted-foreground: #78706b;
 
-  --border: #e6e8ef;
-  --input: #e2e8f0;
-  --ring: #6366f1;
+  --border: #ece5df;
+  --input: #e5dcd4;
+  --ring: #fb923c;
 
-  --primary: #4f46e5;
+  --primary: #ea580c;
   --primary-foreground: #ffffff;
 
-  --secondary: #eef1f6;
-  --secondary-foreground: #1e293b;
+  --secondary: #f5efe9;
+  --secondary-foreground: #2b211c;
 
-  --accent: #ede9fe;
-  --accent-foreground: #5b21b6;
+  --accent: #ffedd5;
+  --accent-foreground: #9a3412;
 
-  --destructive: #ef4444;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
 
   --success: #16a34a;
   --success-foreground: #ffffff;
 
-  --warning: #f59e0b;
+  /* Yellow rather than amber, so "warning" stays distinct from brand orange. */
+  --warning: #ca8a04;
   --warning-foreground: #ffffff;
 
   /* Sidebar surface */
   --sidebar: #ffffff;
-  --sidebar-foreground: #334155;
-  --sidebar-accent: #f1f0fe;
-  --sidebar-accent-foreground: #4f46e5;
-  --sidebar-border: #eceef4;
+  --sidebar-foreground: #4a423d;
+  --sidebar-accent: #fff1e4;
+  --sidebar-accent-foreground: #ea580c;
+  --sidebar-border: #f0eae4;
 
   --radius: 0.75rem;
 }
 
 .dark {
-  --background: #0b1020;
-  --foreground: #e6e9f2;
+  --background: #14100d;
+  --foreground: #f2ece7;
 
-  --card: #111827;
-  --card-foreground: #e6e9f2;
+  --card: #1e1815;
+  --card-foreground: #f2ece7;
 
-  --popover: #111827;
-  --popover-foreground: #e6e9f2;
+  --popover: #1e1815;
+  --popover-foreground: #f2ece7;
 
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
+  --muted: #2a221d;
+  --muted-foreground: #a89e97;
 
-  --border: #1f2a3c;
-  --input: #26324a;
-  --ring: #818cf8;
+  --border: #322721;
+  --input: #3b2f28;
+  --ring: #fb923c;
 
-  --primary: #6366f1;
-  --primary-foreground: #ffffff;
+  --primary: #f97316;
+  --primary-foreground: #1a1005;
 
-  --secondary: #1e293b;
-  --secondary-foreground: #e2e8f0;
+  --secondary: #2a221d;
+  --secondary-foreground: #ede4dd;
 
-  --accent: #312e81;
-  --accent-foreground: #c7d2fe;
+  --accent: #7c2d12;
+  --accent-foreground: #fed7aa;
 
   --destructive: #f87171;
-  --destructive-foreground: #0b1020;
+  --destructive-foreground: #14100d;
 
   --success: #22c55e;
-  --success-foreground: #0b1020;
+  --success-foreground: #14100d;
 
-  --warning: #fbbf24;
-  --warning-foreground: #0b1020;
+  --warning: #facc15;
+  --warning-foreground: #14100d;
 
-  --sidebar: #0e1526;
-  --sidebar-foreground: #cbd5e1;
-  --sidebar-accent: #1b2036;
-  --sidebar-accent-foreground: #c7d2fe;
-  --sidebar-border: #1a2236;
+  --sidebar: #191411;
+  --sidebar-foreground: #d6cbc3;
+  --sidebar-accent: #3a2416;
+  --sidebar-accent-foreground: #fed7aa;
+  --sidebar-border: #2b221c;
 }
 
 @theme inline {

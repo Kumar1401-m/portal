@@ -40,7 +40,7 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
       <div className="w-full overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gradient-to-r from-indigo-700 to-violet-700 text-white">
+            <tr className="bg-gradient-to-r from-orange-600 to-amber-600 text-white">
               <Th>#</Th>
               <Th>Client</Th>
               <Th>

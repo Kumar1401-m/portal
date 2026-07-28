@@ -22,6 +22,7 @@ import { ServiceTabs } from "@/components/admin/service-tabs";
 import { TaskFilters } from "@/components/admin/task-filters";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
+import { TaskQuickView } from "./task-quick-view";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { fmtDate } from "@/lib/utils";
@@ -114,12 +115,7 @@ export default async function DeliverablesPage({
               {rows.map((d) => (
                 <TR key={d.id}>
                   <TD className="max-w-[16rem]">
-                    <Link
-                      href={`/deliverables/${d.id}`}
-                      className="font-medium text-foreground hover:text-primary hover:underline"
-                    >
-                      {d.title}
-                    </Link>
+                    <TaskQuickView deliverable={d}>{d.title}</TaskQuickView>
                     <div className="text-xs text-muted-foreground">{d.company_name}</div>
                   </TD>
                   <TD>

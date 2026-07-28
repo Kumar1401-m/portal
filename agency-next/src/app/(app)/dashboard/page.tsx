@@ -186,7 +186,7 @@ export default async function DashboardPage() {
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500"
+                      className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-500"
                       style={{ width: `${pct}%` }}
                     />
                   </div>

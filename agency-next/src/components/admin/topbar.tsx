@@ -55,7 +55,7 @@ export function Topbar({
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-muted"
         >
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-xs font-semibold text-white">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-xs font-semibold text-white">
             {initials(user.name)}
           </span>
           <span className="hidden text-left sm:block">

@@ -8,6 +8,7 @@ import { generateCaption, type ComposedCaption, type CaptionSource } from "@/lib
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
+import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey } from "@/lib/utils";
@@ -357,15 +358,38 @@ async function applyStatus(
     );
   }
 
-  // Notify the client (staff-initiated transitions).
+  // Notify the client (staff-initiated transitions). For the two approval
+  // gates we send a formal branded email, so `mail: false` keeps the generic
+  // notification copy from doubling up.
   const link = `/portal/content/${id}`;
-  if (effective === "content_review") {
-    await notifyClientById(d.client_id, "approval_needed", "Content ready for your review",
-      `"${d.title}" — please review and approve or request changes.`, link);
-  } else if (effective === "review") {
+  if (effective === "content_review" || effective === "review") {
+    const stage = effective === "content_review" ? "content" : "final";
     const kind = String(d.video_type).toLowerCase() === "poster" ? "poster" : "final video";
-    await notifyClientById(d.client_id, "approval_needed", `Your ${kind} is ready for review`,
-      `"${d.title}" — please review and approve or request changes.`, link);
+    const title =
+      stage === "content" ? "Content ready for your review" : `Your ${kind} is ready for review`;
+
+    await notifyClientById(
+      d.client_id,
+      "approval_needed",
+      title,
+      `"${d.title}" — please review and approve or request changes.`,
+      link,
+      false
+    );
+
+    const client = await queryOne<{
+      company_name: string;
+      contact_person: string | null;
+      email: string | null;
+    }>("SELECT company_name, contact_person, email FROM clients WHERE id = ?", [d.client_id]);
+    if (client) {
+      sendApprovalRequestEmail(client, {
+        title: d.title,
+        stage,
+        kind: d.video_type,
+        link,
+      }).catch(() => {});
+    }
   } else if (["scheduled", "posted", "completed", "rejected", "resolved"].includes(effective)) {
     await notifyClientById(d.client_id, "general", `"${d.title}" — ${effective.replace(/_/g, " ")}`,
       reason || "Status updated by the agency.", link);

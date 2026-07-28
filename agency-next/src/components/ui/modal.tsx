@@ -37,7 +37,7 @@ export function Modal({
         onClick={onClose}
       />
       <div className="animate-pop-in relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-4 text-white">
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4 text-white">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="rounded-md p-1 transition-colors hover:bg-white/15">
             <X className="h-5 w-5" />

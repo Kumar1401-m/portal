@@ -20,7 +20,7 @@ export function Sidebar({
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-5">
-        <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white">
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 text-white">
           <Sparkles className="h-5 w-5" />
         </div>
         <span className="text-base font-semibold text-foreground">NVK Hub</span>

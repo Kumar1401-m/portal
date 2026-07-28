@@ -8,6 +8,7 @@ import {
   setTeamMemberActive,
   resetTeamPassword,
   renameTeamMember,
+  deleteTeamMember,
 } from "./actions";
 import { ActionForm } from "./action-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,19 +75,30 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
                     Password
                   </button>
                   {m.id === currentUserId ? null : (
-                    <ActionForm
-                      action={setTeamMemberActive}
-                      submitLabel={m.is_active ? "Deactivate" : "Reactivate"}
-                      size="sm"
-                      variant={m.is_active ? "ghost" : "secondary"}
-                      confirm={
-                        m.is_active
-                          ? `Deactivate ${m.name}? They'll be signed out and can't log in.`
-                          : undefined
-                      }
-                    >
-                      <input type="hidden" name="id" value={m.id} />
-                    </ActionForm>
+                    <>
+                      <ActionForm
+                        action={setTeamMemberActive}
+                        submitLabel={m.is_active ? "Deactivate" : "Reactivate"}
+                        size="sm"
+                        variant={m.is_active ? "ghost" : "secondary"}
+                        confirm={
+                          m.is_active
+                            ? `Deactivate ${m.name}? They'll be signed out and can't log in.`
+                            : undefined
+                        }
+                      >
+                        <input type="hidden" name="id" value={m.id} />
+                      </ActionForm>
+                      <ActionForm
+                        action={deleteTeamMember}
+                        submitLabel="Delete"
+                        size="sm"
+                        variant="destructive"
+                        confirm={`Permanently delete ${m.name}? They'll disappear from the portal for good. Their tasks are kept but become unassigned.`}
+                      >
+                        <input type="hidden" name="id" value={m.id} />
+                      </ActionForm>
+                    </>
                   )}
                 </div>
               </div>

@@ -23,6 +23,7 @@ import { ServiceTabs } from "@/components/admin/service-tabs";
 import { TaskFilters } from "@/components/admin/task-filters";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
+import { TaskQuickView } from "../deliverables/task-quick-view";
 import { fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
@@ -118,9 +119,7 @@ export default async function TodayPage({
                 return (
                   <TR key={d.id}>
                     <TD className="max-w-[16rem]">
-                      <Link href={`/deliverables/${d.id}`} className="font-medium hover:text-primary hover:underline">
-                        {d.company_name}
-                      </Link>
+                      <TaskQuickView deliverable={d}>{d.company_name}</TaskQuickView>
                       <div className="truncate text-xs text-muted-foreground">{d.title}</div>
                     </TD>
                     <TD>
