@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
-/** Centered modal dialog. Renders nothing when closed (so children remount on open). */
+/**
+ * Centered modal dialog. Renders nothing when closed (so children remount on open).
+ *
+ * Portalled to <body>: these modals are opened from deep inside tables and
+ * cards, and a `position: fixed` overlay is anchored to the nearest ancestor
+ * that has a transform (an animation's fill counts) rather than the viewport —
+ * which then gets clipped by that ancestor's overflow.
+ */
 export function Modal({
   open,
   onClose,
@@ -15,6 +23,10 @@ export function Modal({
   title: string;
   children: React.ReactNode;
 }) {
+  // document.body only exists once mounted on the client.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -28,9 +40,9 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       <div
         className="animate-fade-in absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -51,6 +63,7 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

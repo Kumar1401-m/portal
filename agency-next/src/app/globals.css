@@ -171,13 +171,20 @@ body {
   to   { background-position: -200% 0; }
 }
 
-.animate-fade-up { animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.animate-fade-in { animation: fade-in 0.25s ease-out both; }
-.animate-pop-in  { animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/*
+ * `backwards`, never `forwards`/`both`. A forwards fill keeps the final
+ * keyframe applied, and since these keyframes animate `transform`, the settled
+ * computed value is an identity matrix rather than `none`. Any transform other
+ * than `none` makes the element a containing block for `position: fixed`
+ * descendants, which anchors (and clips) modals opened from inside it.
+ */
+.animate-fade-up { animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-fade-in { animation: fade-in 0.25s ease-out backwards; }
+.animate-pop-in  { animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 
 /* Stagger helper: children fade up in sequence. */
 .stagger > * {
-  animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 .stagger > *:nth-child(1) { animation-delay: 0.02s; }
 .stagger > *:nth-child(2) { animation-delay: 0.06s; }
