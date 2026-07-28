@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
-import { presignUpload, buildVideoKey, deleteObject, isStorageConfigured } from "@/lib/storage";
+import {
+  presignUpload,
+  buildVideoKey,
+  deleteObject,
+  isStorageConfigured,
+  resolveVideoUrl,
+} from "@/lib/storage";
 
 export type PresignResult =
   | { ok: true; uploadUrl: string; publicUrl: string; key: string }
@@ -38,7 +44,7 @@ export async function getVideoUploadUrl(
   return { ok: true, uploadUrl: signed.uploadUrl, publicUrl: signed.publicUrl, key };
 }
 
-export type AttachResult = { ok: boolean; error?: string; message?: string };
+export type AttachResult = { ok: boolean; error?: string; message?: string; previewUrl?: string };
 
 /**
  * Record the uploaded video against the task. Deliberately does NOT send it to
@@ -72,20 +78,35 @@ export async function attachUploadedVideo(
   const advance = ["pending", "raw_uploaded", "editing", "changes_requested"].includes(d.status);
   const statusSql = advance ? ", status = 'caption_ready'" : "";
 
-  // The deploy can land before the migration has been run against this
-  // environment; fall back to storing just the link so the upload isn't lost.
-  if (await hasColumn("deliverables", "cloud_video_url")) {
+  // A private bucket has no stable public URL, so `publicUrl` is empty. Store
+  // the key regardless — that's what a signed link is derived from — and only
+  // touch the shareable link fields when there genuinely is one, rather than
+  // blanking out whatever link was already there.
+  const hasCloudCols = await hasColumn("deliverables", "cloud_video_url");
+
+  if (hasCloudCols && publicUrl) {
     await execute(
       `UPDATE deliverables
           SET cloud_video_url = ?, cloud_video_key = ?, edited_link = ?${statusSql}
         WHERE id = ?`,
       [publicUrl, key, publicUrl, deliverableId]
     );
-  } else {
+  } else if (hasCloudCols) {
     await execute(
-      `UPDATE deliverables SET edited_link = ?${statusSql} WHERE id = ?`,
-      [publicUrl, deliverableId]
+      `UPDATE deliverables SET cloud_video_url = NULL, cloud_video_key = ?${statusSql} WHERE id = ?`,
+      [key, deliverableId]
     );
+  } else if (publicUrl) {
+    await execute(`UPDATE deliverables SET edited_link = ?${statusSql} WHERE id = ?`, [
+      publicUrl,
+      deliverableId,
+    ]);
+  } else {
+    return {
+      ok: false,
+      error:
+        "The video uploaded, but this database is missing the cloud video columns — run the migration, then upload again.",
+    };
   }
 
   revalidatePath("/deliverables");
@@ -95,6 +116,7 @@ export async function attachUploadedVideo(
 
   return {
     ok: true,
+    previewUrl: (await resolveVideoUrl(key, publicUrl || null)) ?? undefined,
     message: advance
       ? "Video uploaded — the task is ready to send to the client."
       : "Video uploaded.",

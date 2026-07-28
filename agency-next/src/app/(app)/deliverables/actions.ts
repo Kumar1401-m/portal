@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { queryOne, execute } from "@/lib/db";
+import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, type SessionUser } from "@/lib/auth";
 import { generateCaption, type ComposedCaption, type CaptionSource } from "@/lib/ai";
 import { getDeliverable } from "@/lib/deliverables";
@@ -209,7 +209,20 @@ export async function updateVideoDetails(
   const orNull = (v: string) => (v === "" ? null : v);
   const editedLink = val("edited_link");
 
-  if (mode === "approval" && !editedLink) {
+  // A video uploaded to our own storage is a deliverable in its own right,
+  // even though a private bucket leaves no shareable link to paste.
+  const hasCloudVideo =
+    (await hasColumn("deliverables", "cloud_video_key")) &&
+    Boolean(
+      (
+        await queryOne<{ cloud_video_key: string | null }>(
+          "SELECT cloud_video_key FROM deliverables WHERE id = ?",
+          [id]
+        )
+      )?.cloud_video_key
+    );
+
+  if (mode === "approval" && !editedLink && !hasCloudVideo) {
     return { ok: false, error: "Add the video link before sending for approval.", mode };
   }
 

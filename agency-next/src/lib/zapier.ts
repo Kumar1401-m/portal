@@ -5,6 +5,7 @@
  */
 import "server-only";
 import { query, queryOne, execute, hasColumn } from "./db";
+import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
 
 export type ZapierReadyItem = {
@@ -115,14 +116,15 @@ export async function getReadyToPostToInstagram(
   limit = 25
 ): Promise<ZapierReadyItem[]> {
   const cloud = (await hasColumn("deliverables", "cloud_video_url"))
-    ? "d.cloud_video_url"
-    : "NULL AS cloud_video_url";
+    ? "d.cloud_video_url, d.cloud_video_key"
+    : "NULL AS cloud_video_url, NULL AS cloud_video_key";
   const rows = await query<{
     id: number;
     title: string;
     caption: string | null;
     edited_link: string;
     cloud_video_url: string | null;
+    cloud_video_key: string | null;
     content_category: string | null;
     due_date: string | null;
     scheduled_at: string | null;
@@ -141,27 +143,31 @@ export async function getReadyToPostToInstagram(
        AND d.status = 'scheduled'
        AND d.scheduled_at IS NOT NULL AND d.scheduled_at <= NOW()
        AND d.instagram_status != 'posted'
-       AND d.edited_link IS NOT NULL AND d.edited_link <> ''
+       AND (d.cloud_video_key IS NOT NULL OR (d.edited_link IS NOT NULL AND d.edited_link <> ''))
      ORDER BY d.scheduled_at ASC, d.id ASC
      LIMIT ${Number(limit)}`,
     [category]
   );
 
-  return rows.map((r) => ({
+  return Promise.all(rows.map(async (r) => ({
     id: r.id,
     title: r.title,
     caption: r.caption,
     // A cloud-hosted file is directly fetchable, so prefer it over a Drive
     // share link (which returns an HTML page, not video bytes).
-    video_url: r.cloud_video_url || r.edited_link,
-    drive_file_id: r.cloud_video_url ? null : extractDriveFileId(r.edited_link),
+    // Prefer our own storage: directly fetchable, unlike a Drive share link
+    // (which returns an HTML page). A private bucket yields a signed link long
+    // enough for Zapier to pull the file.
+    video_url:
+      (await resolveVideoUrl(r.cloud_video_key, r.cloud_video_url)) || r.edited_link,
+    drive_file_id: r.cloud_video_key ? null : extractDriveFileId(r.edited_link),
     category: r.content_category,
     due_date: r.due_date,
     scheduled_at: r.scheduled_at,
     client_id: r.client_id,
     client_name: r.company_name,
     instagram_account_id: r.ig_user_id,
-  }));
+  })));
 }
 
 export type MarkPostedResult = { ok: boolean; error?: string; alreadyPosted?: boolean };

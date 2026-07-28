@@ -78,9 +78,11 @@ export function VideoUpload({
       return;
     }
 
-    setUrl(signed.publicUrl);
+    // A private bucket returns a signed preview link rather than a public URL.
+    const shown = saved.previewUrl || signed.publicUrl;
+    setUrl(shown);
     setPhase("done");
-    onUploaded?.(signed.publicUrl);
+    if (signed.publicUrl) onUploaded?.(signed.publicUrl);
   }
 
   function copy() {
