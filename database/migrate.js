@@ -233,6 +233,83 @@ async function main() {
     }
   }
 
+  /* ---- Cluster I: service + category taxonomy (task organisation) ----
+     Purely additive. Every task now carries a `service` (one of six agency
+     services) and a category (reuses the existing `content_category` column).
+     `video_type` is left untouched so the poster workflow, reports and the
+     client portal keep working exactly as before. */
+  await addColumn('deliverables', 'service', "service VARCHAR(40) DEFAULT NULL AFTER content_type");
+  await addColumn('clients', 'services', 'services JSON DEFAULT NULL');
+
+  {
+    const [idx] = await query(
+      `SELECT 1 AS x FROM information_schema.statistics
+       WHERE table_schema = ? AND table_name = 'deliverables' AND index_name = 'idx_deliv_service' LIMIT 1`,
+      [env.db.database]
+    );
+    if (idx) {
+      console.log('  = deliverables.idx_deliv_service already present');
+    } else {
+      await query('ALTER TABLE deliverables ADD INDEX idx_deliv_service (service)');
+      console.log('  + deliverables.idx_deliv_service added');
+    }
+  }
+
+  await run('task_categories table', `
+    CREATE TABLE IF NOT EXISTS task_categories (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      service    VARCHAR(40) NOT NULL,
+      name       VARCHAR(120) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      is_active  TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_taskcat (service, name),
+      KEY idx_taskcat_service (service)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Seed the starter categories. INSERT IGNORE keeps admin edits/renames safe
+  // on re-run, and admins can add their own from Settings → Task categories.
+  {
+    const SEED = {
+      video_editing: ['Instagram Reel', 'YouTube Short', 'YouTube Long Video', 'Lead Magnet Reel',
+        'Graphic Reel', 'Promotional Video', 'Testimonial Video', 'Educational Video',
+        'Podcast', 'Event Video', 'Advertisement Video'],
+      poster_designing: ['Educational Poster', 'Offer Poster', 'Festival Poster', 'Awareness Poster',
+        'Promotional Poster', 'Announcement Poster', 'Social Media Post', 'Thumbnail', 'Banner'],
+      website_development: ['Landing Page', 'Business Website', 'Portfolio Website',
+        'Ecommerce Website', 'Maintenance', 'Bug Fix'],
+      meta_ads: ['Lead Generation', 'Awareness Campaign', 'Engagement Campaign',
+        'Traffic Campaign', 'Conversion Campaign', 'Remarketing'],
+      content_writing: ['Instagram Caption', 'Facebook Caption', 'YouTube Description', 'Blog',
+        'Ad Copy', 'Script', 'Lead Magnet PDF'],
+      social_media_posting: ['Instagram Post', 'Instagram Story', 'Facebook Post',
+        'YouTube Upload', 'LinkedIn Post', 'Scheduled Posting'],
+    };
+    let seeded = 0;
+    for (const [service, names] of Object.entries(SEED)) {
+      for (let i = 0; i < names.length; i += 1) {
+        const res = await query(
+          `INSERT IGNORE INTO task_categories (service, name, sort_order) VALUES (?,?,?)`,
+          [service, names[i], i]
+        );
+        seeded += res.affectedRows || 0;
+      }
+    }
+    console.log(`  + task_categories seeded (${seeded} new)`);
+  }
+
+  // Backfill: existing posters keep their identity, everything else is video
+  // editing. Admins can re-tag from the task list.
+  {
+    const res = await query(
+      `UPDATE deliverables
+       SET service = IF(LOWER(COALESCE(video_type,'')) = 'poster', 'poster_designing', 'video_editing')
+       WHERE service IS NULL OR service = ''`
+    );
+    console.log(`  + deliverables.service backfilled (${res.affectedRows} rows)`);
+  }
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

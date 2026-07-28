@@ -1,0 +1,391 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { queryOne, execute } from "@/lib/db";
+import { requireUser, ADMIN_ROLES, type SessionUser } from "@/lib/auth";
+import { generateCaption, type ComposedCaption, type CaptionSource } from "@/lib/ai";
+import { getDeliverable } from "@/lib/deliverables";
+import { notifyClientById } from "@/lib/notify";
+import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
+import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
+import { monthKey } from "@/lib/utils";
+
+const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
+
+/* ------------------------- Create deliverable ------------------------- */
+
+export async function createDeliverable(formData: FormData): Promise<void> {
+  const user = await requireUser(ADMIN_ROLES);
+
+  const clientId = Number(formData.get("client_id"));
+  const title = String(formData.get("title") || "").trim();
+  if (!clientId || title.length < 2) {
+    redirect("/deliverables/new?error=1");
+  }
+
+  const client = await queryOne<{ id: number; designer_id: number | null }>(
+    "SELECT id, designer_id FROM clients WHERE id = ?",
+    [clientId]
+  );
+  if (!client) redirect("/deliverables/new?error=notfound");
+
+  // Task organisation: every task belongs to a service + category.
+  const serviceRaw = String(formData.get("service") || "");
+  const service: ServiceKey = isServiceKey(serviceRaw) ? serviceRaw : "video_editing";
+  const category = String(formData.get("content_category") || "").trim();
+  if (!category) redirect("/deliverables/new?error=category");
+  // `video_type` stays in step with the service so the Posters module, the
+  // reports scorecard and the client portal keep reading what they expect.
+  const videoType = videoTypeForService(service, category);
+
+  const platformRaw = String(formData.get("platform") || "other");
+  const platform = (PLATFORMS as readonly string[]).includes(platformRaw) ? platformRaw : "other";
+  const priorityRaw = String(formData.get("priority") || "medium");
+  const priority = (PRIORITIES as readonly string[]).includes(priorityRaw) ? priorityRaw : "medium";
+  const dueDate = String(formData.get("due_date") || "").trim() || null;
+  const description = String(formData.get("description") || "").trim() || null;
+  const contentHook = String(formData.get("content_hook") || "").trim() || null;
+  const language = String(formData.get("language") || "").trim() || null;
+  const targetAudience = String(formData.get("target_audience") || "").trim() || null;
+  const promotionType = String(formData.get("promotion_type") || "").trim() || null;
+  const customInstructions = String(formData.get("custom_instructions") || "").trim() || null;
+  const assignedToRaw = Number(formData.get("assigned_to"));
+  const assignedTo = assignedToRaw > 0 ? assignedToRaw : (client.designer_id ?? null);
+
+  const mk = dueDate ? dueDate.slice(0, 7) : monthKey();
+
+  const result = await execute(
+    `INSERT INTO deliverables
+      (client_id, title, description, platform, content_hook, service, content_category,
+       video_type, language, target_audience, promotion_type, custom_instructions,
+       due_date, priority, status, month_key, created_by, assigned_to)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)`,
+    [
+      clientId,
+      title,
+      description,
+      platform,
+      contentHook,
+      service,
+      category,
+      videoType,
+      language,
+      targetAudience,
+      promotionType,
+      customInstructions,
+      dueDate,
+      priority,
+      mk,
+      user.id,
+      assignedTo,
+    ]
+  );
+
+  revalidatePath("/deliverables");
+  redirect(`/deliverables/${result.insertId}`);
+}
+
+/* --------------------------- Generate caption --------------------------- */
+
+export type CaptionState = {
+  ok: boolean;
+  error?: string;
+  provider?: ComposedCaption["provider"];
+  caption?: string;
+  hashtags?: string;
+  alternates?: string[];
+  isPoster?: boolean;
+};
+
+export async function generateCaptionAction(
+  _prev: CaptionState,
+  formData: FormData
+): Promise<CaptionState> {
+  const user = await requireUser(ADMIN_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing deliverable." };
+
+  const d = await getDeliverable(id);
+  if (!d) return { ok: false, error: "Deliverable not found." };
+
+  const opts = {
+    tone: String(formData.get("tone") || "") || undefined,
+    language: String(formData.get("language") || "") || undefined,
+    goal: String(formData.get("goal") || "") || undefined,
+    length: String(formData.get("length") || "") || undefined,
+    include_contact: formData.get("include_contact") !== "off",
+  };
+
+  let out: ComposedCaption;
+  try {
+    out = await generateCaption(d as CaptionSource, opts);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Generation failed." };
+  }
+
+  // Persist to the caption library + set the deliverable's caption.
+  await execute(
+    `INSERT INTO captions
+      (deliverable_id, client_id, platform, month_key, body, hashtags, cta, hooks, is_ai_generated, created_by)
+     VALUES (?,?,?,?,?,?,?,?,1,?)`,
+    [
+      d.id,
+      d.client_id,
+      d.platform,
+      d.month_key || monthKey(),
+      out.caption,
+      out.hashtags || null,
+      out.cta || null,
+      JSON.stringify(out.alternate_captions || []),
+      user.id,
+    ]
+  );
+  await execute(
+    "UPDATE deliverables SET caption = ?, status = IF(status IN ('editing','raw_uploaded'),'caption_ready',status) WHERE id = ?",
+    [out.caption, d.id]
+  );
+
+  revalidatePath(`/deliverables/${d.id}`);
+  return {
+    ok: true,
+    provider: out.provider,
+    caption: out.caption,
+    hashtags: out.hashtags,
+    alternates: out.alternate_captions,
+    isPoster: out.is_poster,
+  };
+}
+
+/* ----------------------------- Save caption ----------------------------- */
+
+export async function saveCaptionAction(
+  _prev: { ok: boolean; error?: string },
+  formData: FormData
+): Promise<{ ok: boolean; error?: string }> {
+  await requireUser(ADMIN_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  const caption = String(formData.get("caption") || "");
+  if (!id) return { ok: false, error: "Missing deliverable." };
+  await execute("UPDATE deliverables SET caption = ? WHERE id = ?", [caption, id]);
+  revalidatePath(`/deliverables/${id}`);
+  return { ok: true };
+}
+
+/* --------------------- Quick-edit "Update Video Details" --------------------- */
+
+export type VideoDetailsState = { ok: boolean; error?: string; mode?: "draft" | "approval" };
+
+/** Save the video/content details modal — Save Draft or Send To Approval. */
+export async function updateVideoDetails(
+  _prev: VideoDetailsState,
+  formData: FormData
+): Promise<VideoDetailsState> {
+  const me = await requireUser(ADMIN_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  const mode = formData.get("mode") === "approval" ? "approval" : "draft";
+  if (!id) return { ok: false, error: "Missing deliverable." };
+  // Saving a draft is open to any admin; actually sending it to the client
+  // for review is reserved for super_admin.
+  if (mode === "approval" && me.role !== "super_admin") {
+    return { ok: false, error: "Only a super admin can send content to the client for review.", mode };
+  }
+
+  const d = await queryOne<{ id: number; client_id: number; title: string; video_type: string | null }>(
+    "SELECT id, client_id, title, video_type FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!d) return { ok: false, error: "Deliverable not found." };
+
+  const val = (k: string) => String(formData.get(k) || "").trim();
+  const orNull = (v: string) => (v === "" ? null : v);
+  const editedLink = val("edited_link");
+
+  if (mode === "approval" && !editedLink) {
+    return { ok: false, error: "Add the video link before sending for approval.", mode };
+  }
+
+  const updates: Record<string, string | null> = {
+    content_hook: orNull(val("content_hook")),
+    caption: orNull(val("caption")),
+    writer_notes: orNull(val("writer_notes")),
+    edited_link: orNull(editedLink),
+  };
+  const title = val("title");
+  if (title) updates.title = title; // title is required — don't null it out
+
+  // Re-tagging: service + category travel together, and video_type follows.
+  const serviceRaw = val("service");
+  if (isServiceKey(serviceRaw)) {
+    const category = val("content_category");
+    if (!category) return { ok: false, error: "Pick a category for this task.", mode };
+    updates.service = serviceRaw;
+    updates.content_category = category;
+    updates.video_type = videoTypeForService(serviceRaw, category);
+  }
+
+  if (mode === "approval") {
+    updates.status = "review";
+    updates.approval_status = "pending";
+    updates.reject_reason = null;
+  }
+
+  const keys = Object.keys(updates);
+  await execute(`UPDATE deliverables SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [
+    ...keys.map((k) => updates[k]),
+    id,
+  ]);
+
+  if (mode === "approval") {
+    // Use the just-saved type, so re-tagging in the same submit is respected.
+    const effectiveType = updates.video_type ?? d.video_type;
+    const kind = String(effectiveType).toLowerCase() === "poster" ? "poster" : "final video";
+    await notifyClientById(
+      d.client_id,
+      "approval_needed",
+      `Your ${kind} is ready for review`,
+      `"${title || d.title}" — please review and approve or request changes.`,
+      `/portal/content/${id}`
+    );
+  }
+
+  revalidatePath("/deliverables");
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/today");
+  revalidatePath("/approvals");
+  revalidatePath("/poster");
+  return { ok: true, mode };
+}
+
+/* ------------------------- Workflow transitions ------------------------- */
+
+export type StatusState = { ok: boolean; error?: string; effective?: string };
+
+const nowStr = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+type WfRow = {
+  id: number;
+  client_id: number;
+  status: string;
+  video_type: string | null;
+  posted_at: string | null;
+  title: string;
+};
+
+/**
+ * Apply a workflow status transition — faithful port of the original
+ * /deliverables/:id/status logic, incl. the two-gate approval rule:
+ * approving while in `content_review` approves the CONTENT (advances to
+ * waiting_for_raw), not the final video. Records the approval trail + feedback.
+ */
+async function applyStatus(
+  user: SessionUser,
+  id: number,
+  status: string,
+  reason?: string
+): Promise<StatusState> {
+  if (!id) return { ok: false, error: "Missing deliverable." };
+  if (!(STATUS_LIST as readonly string[]).includes(status)) {
+    return { ok: false, error: "Invalid status." };
+  }
+  const d = await queryOne<WfRow>(
+    "SELECT id, client_id, status, video_type, posted_at, title FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!d) return { ok: false, error: "Deliverable not found." };
+  if (REASON_REQUIRED.includes(status) && !reason) {
+    return { ok: false, error: `A reason is required to mark this as ${status.replace(/_/g, " ")}.` };
+  }
+  // Sending content to the client (either approval gate) is reserved for
+  // super_admin — everything else in the workflow stays open to any admin.
+  if (["content_review", "review"].includes(status) && user.role !== "super_admin") {
+    return { ok: false, error: "Only a super admin can send content to the client for review." };
+  }
+
+  // Gate 1: approving content_review approves the CONTENT → waiting_for_raw.
+  const contentGate = status === "approved" && d.status === "content_review";
+  const effective = contentGate ? "waiting_for_raw" : status;
+
+  const updates: Record<string, string | null> = { status: effective };
+  if (reason) updates.reject_reason = reason;
+  if (["content_review", "review"].includes(effective)) {
+    updates.reject_reason = null;
+    updates.approval_status = "pending";
+  }
+  if (contentGate) updates.approval_status = "pending";
+  else if (effective === "approved") updates.approval_status = "approved";
+  if (effective === "changes_requested") updates.approval_status = "changes_requested";
+  if (effective === "rejected") {
+    updates.approval_status = "rejected";
+    updates.posting_status = "rejected";
+  }
+  if (effective === "scheduled") updates.posting_status = "scheduled";
+  if (effective === "posted" || effective === "completed") {
+    updates.posting_status = "posted";
+    if (!d.posted_at) updates.posted_at = nowStr();
+  }
+
+  const keys = Object.keys(updates);
+  await execute(
+    `UPDATE deliverables SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`,
+    [...keys.map((k) => updates[k]), id]
+  );
+
+  if (["approved", "changes_requested", "rejected"].includes(status)) {
+    await execute(
+      "INSERT INTO approvals (deliverable_id, client_id, action, reason, acted_by) VALUES (?,?,?,?,?)",
+      [id, d.client_id, status === "approved" ? "approved" : status, reason || null, user.id]
+    );
+  }
+  if (reason) {
+    await execute(
+      "INSERT INTO feedback (deliverable_id, author_id, author_role, message) VALUES (?,?,?,?)",
+      [id, user.id, user.role, reason]
+    );
+  }
+
+  // Notify the client (staff-initiated transitions).
+  const link = `/portal/content/${id}`;
+  if (effective === "content_review") {
+    await notifyClientById(d.client_id, "approval_needed", "Content ready for your review",
+      `"${d.title}" — please review and approve or request changes.`, link);
+  } else if (effective === "review") {
+    const kind = String(d.video_type).toLowerCase() === "poster" ? "poster" : "final video";
+    await notifyClientById(d.client_id, "approval_needed", `Your ${kind} is ready for review`,
+      `"${d.title}" — please review and approve or request changes.`, link);
+  } else if (["scheduled", "posted", "completed", "rejected", "resolved"].includes(effective)) {
+    await notifyClientById(d.client_id, "general", `"${d.title}" — ${effective.replace(/_/g, " ")}`,
+      reason || "Status updated by the agency.", link);
+  }
+
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/deliverables");
+  revalidatePath("/today");
+  revalidatePath("/approvals");
+  return { ok: true, effective };
+}
+
+/** For the detail-page workflow controls (shows errors via useActionState). */
+export async function changeStatusAction(
+  _prev: StatusState,
+  formData: FormData
+): Promise<StatusState> {
+  const user = await requireUser(ADMIN_ROLES);
+  return applyStatus(
+    user,
+    Number(formData.get("deliverable_id")),
+    String(formData.get("status") || ""),
+    String(formData.get("reason") || "").trim() || undefined
+  );
+}
+
+/** For reason-free inline buttons on the Approvals worklist. */
+export async function quickStatus(formData: FormData): Promise<void> {
+  const user = await requireUser(ADMIN_ROLES);
+  await applyStatus(
+    user,
+    Number(formData.get("deliverable_id")),
+    String(formData.get("status") || ""),
+    undefined
+  );
+}

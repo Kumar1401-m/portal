@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS clients (
   caption_settings  JSON DEFAULT NULL,                  -- {language, tone, length, emoji_style, target_audience, cta, seo_keywords, branded_hashtags}
   placeholder_values JSON DEFAULT NULL,                 -- {business_name, service, location, phone, whatsapp, website, offer, keywords}
   caption_template  TEXT DEFAULT NULL,                  -- per-client caption template (with {{placeholders}})
+  services          JSON DEFAULT NULL,                   -- ["video_editing","poster_designing",...] — filtering/reporting only
   created_by        BIGINT UNSIGNED DEFAULT NULL,
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS deliverables (
   description     TEXT DEFAULT NULL,
   platform        VARCHAR(40) NOT NULL DEFAULT 'other',
   content_type    VARCHAR(60) DEFAULT NULL,             -- reel, post, short, poster...
+  service         VARCHAR(40) DEFAULT NULL,             -- video_editing, poster_designing, website_development, meta_ads, content_writing, social_media_posting
   due_date        DATE DEFAULT NULL,
   scheduled_at    DATETIME DEFAULT NULL,
   posted_at       DATETIME DEFAULT NULL,
@@ -152,6 +154,7 @@ CREATE TABLE IF NOT EXISTS deliverables (
   KEY idx_deliv_due (due_date),
   KEY idx_deliv_month (month_key),
   KEY idx_deliv_platform (platform),
+  KEY idx_deliv_service (service),
   KEY idx_deliv_approval (approval_status),
   CONSTRAINT fk_deliv_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
   CONSTRAINT fk_deliv_assignee FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
@@ -397,6 +400,21 @@ CREATE TABLE IF NOT EXISTS settings (
   setting_value TEXT DEFAULT NULL,
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- TASK CATEGORIES  (per-service category list; admin-editable in Settings)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS task_categories (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  service    VARCHAR(40) NOT NULL,
+  name       VARCHAR(120) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  is_active  TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_taskcat (service, name),
+  KEY idx_taskcat_service (service)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
