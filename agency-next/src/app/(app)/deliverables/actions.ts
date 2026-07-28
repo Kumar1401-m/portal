@@ -18,7 +18,7 @@ const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
 /* ------------------------- Create deliverable ------------------------- */
 
 export async function createDeliverable(formData: FormData): Promise<void> {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
 
   const clientId = Number(formData.get("client_id"));
   const title = String(formData.get("title") || "").trim();
@@ -31,6 +31,9 @@ export async function createDeliverable(formData: FormData): Promise<void> {
     [clientId]
   );
   if (!client) redirect("/deliverables/new?error=notfound");
+  // The page already scopes the dropdown, but the action is the real gate:
+  // a crm must not create work against a client they cannot access.
+  if (!(await canAccessClient(user, clientId))) redirect("/deliverables/new?error=notfound");
 
   // Task organisation: every task belongs to a service + category.
   const serviceRaw = String(formData.get("service") || "");

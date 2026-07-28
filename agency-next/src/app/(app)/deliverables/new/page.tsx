@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { crmClientIds } from "@/lib/crm";
 import { getClientsMini, getAssignees } from "@/lib/deliverables";
 import { getCategoryMap } from "@/lib/categories";
 import { isServiceKey } from "@/lib/services";
@@ -23,9 +24,11 @@ export default async function NewDeliverablePage({
 }: {
   searchParams: Promise<{ error?: string; service?: string }>;
 }) {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  // A crm only ever picks from the clients they have access to.
+  const scopeIds = await crmClientIds(user);
   const [clients, assignees, categories, sp] = await Promise.all([
-    getClientsMini(),
+    getClientsMini(scopeIds),
     getAssignees(),
     getCategoryMap(),
     searchParams,

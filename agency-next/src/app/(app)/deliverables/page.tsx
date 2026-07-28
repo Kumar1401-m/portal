@@ -72,11 +72,9 @@ export default async function DeliverablesPage({
             {hasFilters ? " (filtered)" : ""}
           </p>
         </div>
-        {user.role !== "crm" ? (
-          <Link href={newHref} className={buttonClasses()}>
-            <Plus className="h-4 w-4" /> New task
-          </Link>
-        ) : null}
+        <Link href={newHref} className={buttonClasses()}>
+          <Plus className="h-4 w-4" /> New task
+        </Link>
       </div>
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
