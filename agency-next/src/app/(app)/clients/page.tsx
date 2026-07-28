@@ -40,7 +40,7 @@ export default async function ClientsPage() {
             {clients.length} total · {active} active
           </p>
         </div>
-        {user.role !== "crm" ? (
+        {true ? (
           <Link href="/clients/new" className={buttonClasses()}>
             <Plus className="h-4 w-4" /> New client
           </Link>

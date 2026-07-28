@@ -377,6 +377,17 @@ async function main() {
   // Object key inside the bucket — kept so the file can be replaced/removed.
   await addColumn('deliverables', 'cloud_video_key', 'cloud_video_key VARCHAR(400) DEFAULT NULL');
 
+  /* ---------------------------------------------------------------------
+   * Cluster L — package split by service
+   * A monthly package covers videos AND posters; one combined number
+   * couldn't express "8 reels + 12 posters", so posters get their own target.
+   * ------------------------------------------------------------------- */
+  await addColumn(
+    'clients',
+    'monthly_posters',
+    'monthly_posters INT UNSIGNED NOT NULL DEFAULT 0'
+  );
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

@@ -23,6 +23,7 @@ export type ClientDefaults = Partial<{
   monthly_package: string;
   package_amount: string;
   monthly_deliverables: string;
+  monthly_posters: string;
   payment_plan: string;
   joining_date: string;
   renewal_date: string;
@@ -260,8 +261,11 @@ export function ClientForm({
           <Field label="Package amount (₹)" name="package_amount">
             <Input id="package_amount" name="package_amount" type="number" min="0" step="1" defaultValue={d.package_amount} />
           </Field>
-          <Field label="Monthly deliverables" name="monthly_deliverables">
+          <Field label="Monthly videos" name="monthly_deliverables">
             <Input id="monthly_deliverables" name="monthly_deliverables" type="number" min="0" defaultValue={d.monthly_deliverables} />
+          </Field>
+          <Field label="Monthly posters" name="monthly_posters">
+            <Input id="monthly_posters" name="monthly_posters" type="number" min="0" defaultValue={d.monthly_posters} />
           </Field>
           <Field label="Payment plan" name="payment_plan">
             <Select id="payment_plan" name="payment_plan" defaultValue={d.payment_plan || "monthly"}>

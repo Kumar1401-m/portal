@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDesigners } from "@/lib/clients";
 import { getCrmUsers } from "@/lib/crm";
 import { createClient } from "../actions";
@@ -22,7 +22,7 @@ export default async function NewClientPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const isSuperAdmin = user.role === "super_admin";
   const [designers, crmUsers, sp] = await Promise.all([
     getDesigners(),

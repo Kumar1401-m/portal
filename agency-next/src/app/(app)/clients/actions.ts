@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { randomInt } from "crypto";
 import bcrypt from "bcryptjs";
 import { queryOne, execute, transaction, type ResultSetHeader } from "@/lib/db";
-import { requireUser, ADMIN_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
@@ -45,6 +45,7 @@ function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
     monthly_package: orNull(s(fd, "monthly_package")),
     package_amount: Number(s(fd, "package_amount") || 0),
     monthly_deliverables: Number(s(fd, "monthly_deliverables") || 0),
+    monthly_posters: Number(s(fd, "monthly_posters") || 0),
     payment_plan: PAYMENT_PLANS.includes(payment_plan) ? payment_plan : "monthly",
     status: STATUSES.includes(status) ? status : "active",
     joining_date: orNull(s(fd, "joining_date")),
@@ -76,7 +77,7 @@ function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
 /* ------------------------------- Create ------------------------------- */
 
 export async function createClient(formData: FormData): Promise<void> {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const isSuperAdmin = user.role === "super_admin";
   const { columns, captionSettings, placeholderValues } = parseClient(formData, isSuperAdmin);
   const portalPassword = s(formData, "portal_password");
@@ -125,6 +126,10 @@ export async function createClient(formData: FormData): Promise<void> {
       .map(Number)
       .filter((n) => Number.isFinite(n) && n > 0);
     await setClientCrmAccess(clientId, crmUserIds);
+  } else if (user.role === "crm") {
+    // A crm who onboards a client keeps access to it; the super admin can
+    // still reassign or revoke that later from the client's own page.
+    await setClientCrmAccess(clientId, [user.id]);
   }
 
   // Formal onboarding email (best-effort; includes creds when a login was made).
