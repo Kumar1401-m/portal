@@ -114,6 +114,26 @@ export function buildVideoKey(clientId: number, deliverableId: number, filename:
 /** Guard for the invariant above — a key must be safe to sign as-is. */
 export const isSafeKey = (key: string) => /^[a-z0-9][a-z0-9/._-]*$/.test(key);
 
+const IMAGE_EXT = ["jpg", "jpeg", "png", "webp", "gif", "avif"];
+
+/** Object key for a client's profile picture. Same safe-charset rules as video. */
+export function buildAvatarKey(clientId: number, filename: string): string {
+  const raw = (filename.match(/\.([A-Za-z0-9]{1,5})$/)?.[1] || "jpg").toLowerCase();
+  const ext = IMAGE_EXT.includes(raw) ? raw : "jpg";
+  return `avatars/${Math.trunc(clientId)}/${Date.now()}.${ext}`;
+}
+
+/**
+ * `clients.company_logo_url` holds either an external URL (pasted by an admin)
+ * or an R2 object key (uploaded through the portal). Reusing the one column
+ * avoids a migration; this is the single place that tells the two apart.
+ */
+export async function resolveAvatarUrl(value: string | null | undefined): Promise<string | null> {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  return resolveVideoUrl(value, null, 24 * 60 * 60);
+}
+
 /** Remove an object (used when a video is replaced). Never throws. */
 export async function deleteObject(key: string): Promise<boolean> {
   const cfg = await getR2Config();

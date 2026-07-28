@@ -253,6 +253,7 @@ export type ClientRow = {
   monthly_deliverables: number;
   renewal_date: string | null;
   created_at: string;
+  company_logo_url: string | null;
 };
 
 /** `clientIds` scopes the list for a crm user; omit/null for unrestricted (admin). */
@@ -261,7 +262,7 @@ export async function getClients(clientIds?: number[] | null): Promise<ClientRow
   const scope = clientIds && clientIds.length ? `AND id IN (${clientIds.map(() => "?").join(",")})` : "";
   const rows = await query<ClientRow>(
     `SELECT id, company_name, contact_person, email, phone, status,
-       monthly_package, monthly_deliverables, renewal_date, created_at
+       monthly_package, monthly_deliverables, renewal_date, created_at, company_logo_url
      FROM clients
      WHERE status != 'churned' ${scope}
      ORDER BY (status='active') DESC, company_name ASC`,

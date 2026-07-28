@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
-import { requireUser, STAFF_ROLES } from "@/lib/auth";
+import { requireUser, STAFF_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import {
   presignUpload,
@@ -121,4 +121,33 @@ export async function attachUploadedVideo(
       ? "Video uploaded — the task is ready to send to the client."
       : "Video uploaded.",
   };
+}
+
+export type DeleteTaskResult = { ok: boolean; error?: string };
+
+/**
+ * Permanently delete one task. Super admin only — the same restriction that
+ * covered the old bulk "clear all tasks". Feedback, comments and approvals
+ * cascade with the row; the uploaded video is removed from the bucket too, so
+ * deleting a task doesn't quietly leave storage behind.
+ */
+export async function deleteDeliverable(deliverableId: number): Promise<DeleteTaskResult> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  if (!deliverableId) return { ok: false, error: "Missing task." };
+
+  const hasCloudCols = await hasColumn("deliverables", "cloud_video_key");
+  const d = await queryOne<{ id: number; title: string; cloud_video_key: string | null }>(
+    `SELECT id, title${hasCloudCols ? ", cloud_video_key" : ", NULL AS cloud_video_key"}
+       FROM deliverables WHERE id = ?`,
+    [deliverableId]
+  );
+  if (!d) return { ok: false, error: "Task not found." };
+
+  if (d.cloud_video_key) await deleteObject(d.cloud_video_key).catch(() => false);
+  await execute("DELETE FROM deliverables WHERE id = ?", [deliverableId]);
+
+  for (const p of ["/deliverables", "/today", "/approvals", "/dashboard", "/reports", "/poster"]) {
+    revalidatePath(p);
+  }
+  return { ok: true };
 }

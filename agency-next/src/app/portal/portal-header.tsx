@@ -2,21 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkles, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import type { NotificationRow } from "@/lib/notifications";
 import { logout } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/admin/notification-bell";
 import { ThemeToggle } from "@/components/admin/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { ClientAvatar } from "./client-avatar";
 
 export function PortalHeader({
   companyName,
+  avatarUrl,
   notifications,
   unread,
   actionCounts,
 }: {
   companyName: string;
+  avatarUrl: string | null;
   notifications: NotificationRow[];
   unread: number;
   actionCounts: { content: number; invoices: number };
@@ -32,7 +35,7 @@ export function PortalHeader({
     <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-5xl items-center gap-4 px-4 sm:px-6">
         <div className="flex items-center gap-2 font-semibold text-primary">
-          <Sparkles className="h-5 w-5" />
+          <ClientAvatar companyName={companyName} initialUrl={avatarUrl} size={36} />
           <span className="hidden sm:inline">{companyName}</span>
         </div>
 

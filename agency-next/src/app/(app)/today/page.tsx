@@ -161,6 +161,7 @@ export default async function TodayPage({
                         deliverable={d}
                         categories={categoryMap}
                         canSendToClient={user.role === "super_admin" || user.role === "crm"}
+                        canDelete={user.role === "super_admin"}
                       />
                     </TD>
                   </TR>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { SquarePen, Loader2, Send, Wand2, UploadCloud } from "lucide-react";
+import { SquarePen, Loader2, Send, Wand2, UploadCloud, Trash2 } from "lucide-react";
 import {
   updateVideoDetails,
   generateCaptionAction,
@@ -13,6 +13,7 @@ import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload } from "./video-upload";
+import { deleteDeliverable } from "./upload-actions";
 import {
   ServiceCategoryPicker,
   type CategoryOptions,
@@ -26,10 +27,12 @@ export function EditVideoModal({
   deliverable: d,
   categories,
   canSendToClient,
+  canDelete = false,
 }: {
   deliverable: DeliverableListRow;
   categories: CategoryOptions;
   canSendToClient: boolean;
+  canDelete?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
@@ -43,6 +46,7 @@ export function EditVideoModal({
   const [caption, setCaption] = useState(d.caption ?? "");
   const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
   const [genPending, startGen] = useTransition();
+  const [delPending, startDel] = useTransition();
   const [genError, setGenError] = useState<string | null>(null);
 
   // Reset the caption editor to the latest saved value each time the modal opens.
@@ -199,8 +203,27 @@ export function EditVideoModal({
             {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           </div>
 
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-4">
-            <Button type="button" variant="destructive" onClick={() => setOpen(false)}>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border p-4">
+            {canDelete ? (
+              <button
+                type="button"
+                disabled={delPending}
+                onClick={() => {
+                  if (!confirm(`Permanently delete "${d.title}"? This also removes its comments, feedback and uploaded video. There is no undo.`)) return;
+                  startDel(async () => {
+                    const res = await deleteDeliverable(d.id);
+                    if (res.ok) setOpen(false);
+                    else alert(res.error || "Could not delete this task.");
+                  });
+                }}
+                className={buttonClasses({ variant: "destructive", size: "sm" })}
+              >
+                {delPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete task
+              </button>
+            ) : null}
+            <div className="flex-1" />
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               Cancel
             </Button>
             <button

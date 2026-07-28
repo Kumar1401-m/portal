@@ -3,6 +3,8 @@ import { Users, Plus } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClients } from "@/lib/queries";
 import { crmClientIds } from "@/lib/crm";
+import { resolveAvatarUrl } from "@/lib/storage";
+import { ClientAvatar } from "@/app/portal/client-avatar";
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -16,6 +18,14 @@ export default async function ClientsPage() {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const clientIds = await crmClientIds(user);
   const clients = await getClients(clientIds);
+
+  // Signed links for any picture stored in our own bucket, resolved once here
+  // rather than per row.
+  const avatars: Record<number, string | null> = Object.fromEntries(
+    await Promise.all(
+      clients.map(async (c) => [c.id, await resolveAvatarUrl(c.company_logo_url)] as const)
+    )
+  );
   const active = clients.filter((c) => c.status === "active").length;
 
   return (
@@ -58,13 +68,23 @@ export default async function ClientsPage() {
               {clients.map((c) => (
                 <TR key={c.id}>
                   <TD>
-                    <Link
-                      href={`/clients/${c.id}`}
-                      className="font-medium text-foreground hover:text-primary hover:underline"
-                    >
-                      {c.company_name}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">{c.email || "—"}</div>
+                    <div className="flex items-center gap-2.5">
+                      <ClientAvatar
+                        companyName={c.company_name}
+                        initialUrl={avatars[c.id] ?? null}
+                        editable={false}
+                        size={32}
+                      />
+                      <div className="min-w-0">
+                        <Link
+                          href={`/clients/${c.id}`}
+                          className="font-medium text-foreground hover:text-primary hover:underline"
+                        >
+                          {c.company_name}
+                        </Link>
+                        <div className="text-xs text-muted-foreground">{c.email || "—"}</div>
+                      </div>
+                    </div>
                   </TD>
                   <TD>
                     <div>{c.contact_person || "—"}</div>

@@ -3,6 +3,7 @@ import { getNotifications, getUnreadCount } from "@/lib/notifications";
 import { getPortalActionCounts } from "@/lib/portal";
 import { queryOne } from "@/lib/db";
 import { PortalHeader } from "./portal-header";
+import { resolveAvatarUrl } from "@/lib/storage";
 
 export default async function PortalLayout({
   children,
@@ -14,7 +15,7 @@ export default async function PortalLayout({
     getNotifications(user.id),
     getUnreadCount(user.id),
     user.clientId
-      ? queryOne<{ company_name: string }>("SELECT company_name FROM clients WHERE id = ?", [
+      ? queryOne<{ company_name: string; company_logo_url: string | null }>("SELECT company_name, company_logo_url FROM clients WHERE id = ?", [
           user.clientId,
         ])
       : Promise.resolve(null),
@@ -25,6 +26,7 @@ export default async function PortalLayout({
     <div className="min-h-screen">
       <PortalHeader
         companyName={client?.company_name || "Client Portal"}
+        avatarUrl={await resolveAvatarUrl(client?.company_logo_url)}
         notifications={notifications}
         unread={unread}
         actionCounts={actionCounts}
