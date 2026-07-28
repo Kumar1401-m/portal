@@ -9,3 +9,7 @@ coverage/
 dist/
 tmp/
 .next/
+
+# Local throwaway verification scripts
+zz-*.mjs
+zz-*.js
