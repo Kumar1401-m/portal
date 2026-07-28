@@ -56,7 +56,16 @@ export async function createDeliverable(formData: FormData): Promise<void> {
   const promotionType = String(formData.get("promotion_type") || "").trim() || null;
   const customInstructions = String(formData.get("custom_instructions") || "").trim() || null;
   const assignedToRaw = Number(formData.get("assigned_to"));
-  const assignedTo = assignedToRaw > 0 ? assignedToRaw : (client.designer_id ?? null);
+  // The client's default designer only stands in for poster work — that's what
+  // designer_id means. Applying it to every service silently assigned video
+  // tasks to a poster designer nobody had picked; leaving those unassigned is
+  // both honest and visible.
+  const assignedTo =
+    assignedToRaw > 0
+      ? assignedToRaw
+      : service === "poster_designing"
+        ? (client.designer_id ?? null)
+        : null;
 
   const mk = dueDate ? dueDate.slice(0, 7) : monthKey();
 
@@ -237,6 +246,13 @@ export async function updateVideoDetails(
   };
   const title = val("title");
   if (title) updates.title = title; // title is required — don't null it out
+
+  // Reassignment, including clearing it: the field is only present when the
+  // caller may change it, so an absent value leaves the assignee alone.
+  if (formData.has("assigned_to")) {
+    const raw = Number(val("assigned_to"));
+    updates.assigned_to = raw > 0 ? String(raw) : null;
+  }
 
   // Re-tagging: service + category travel together, and video_type follows.
   const serviceRaw = val("service");

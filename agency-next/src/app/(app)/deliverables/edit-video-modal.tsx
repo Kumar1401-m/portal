@@ -22,17 +22,20 @@ import { Button, buttonClasses } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 export function EditVideoModal({
   deliverable: d,
   categories,
   canSendToClient,
   canDelete = false,
+  assignees = [],
 }: {
   deliverable: DeliverableListRow;
   categories: CategoryOptions;
   canSendToClient: boolean;
   canDelete?: boolean;
+  assignees?: { id: number; name: string; role: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
@@ -142,6 +145,20 @@ export function EditVideoModal({
               <Label htmlFor={`t-${d.id}`}>Title</Label>
               <Input id={`t-${d.id}`} name="title" defaultValue={d.title} />
             </div>
+
+            {assignees.length ? (
+              <div className="space-y-1.5">
+                <Label htmlFor={`as-${d.id}`}>Assigned to</Label>
+                <Select id={`as-${d.id}`} name="assigned_to" defaultValue={d.assigned_to ? String(d.assigned_to) : ""}>
+                  <option value="">Unassigned</option>
+                  {assignees.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor={`ch-${d.id}`}>Content in Video</Label>

@@ -156,6 +156,7 @@ export default async function DeliverablesPage({
                       categories={categoryMap}
                       canSendToClient={user.role === "super_admin" || user.role === "crm"}
                         canDelete={user.role === "super_admin"}
+                        assignees={assignees}
                     />
                   </TD>
                 </TR>
