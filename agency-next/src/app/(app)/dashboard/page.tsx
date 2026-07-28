@@ -5,7 +5,6 @@ import {
   IndianRupee,
   AlertTriangle,
   CalendarClock,
-  Activity,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { crmClientIds } from "@/lib/crm";
@@ -108,9 +107,9 @@ export default async function DashboardPage() {
       {/* Per-client production summary (reference image 4) */}
       <ProductionSummary rows={production} />
 
-      <div className={admin ? "grid gap-6 lg:grid-cols-3" : "grid gap-6"}>
+      <div className="grid gap-6">
         {/* Upcoming tasks */}
-        <Card className={admin ? "lg:col-span-2" : undefined}>
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-muted-foreground" />
@@ -145,43 +144,6 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent activity — agency-wide, so admins only. */}
-        {admin ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5 text-muted-foreground" />
-              Recent activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {admin.recent_activities.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                No activity yet.
-              </p>
-            ) : (
-              <ul className="space-y-3">
-                {admin.recent_activities.slice(0, 8).map((a, i) => (
-                  <li key={i} className="flex gap-3 text-sm">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary/60" />
-                    <div className="min-w-0">
-                      <p className="leading-snug">
-                        <span className="font-medium">{a.actor_name || "System"}</span>{" "}
-                        <span className="text-muted-foreground">
-                          {a.description || label(a.action)}
-                        </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {fmtDate(a.created_at)}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-        ) : null}
       </div>
 
       {/* Client progress — the production summary above already covers this

@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
-import { requireUser, STAFF_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, SUPER_ADMIN_ROLES, type Role } from "@/lib/auth";
+
+/** Uploading the finished video is editing work — deliberately excludes crm. */
+const VIDEO_UPLOAD_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
 import { canAccessClient } from "@/lib/crm";
 import {
   presignUpload,
@@ -24,7 +27,7 @@ export async function getVideoUploadUrl(
   deliverableId: number,
   filename: string
 ): Promise<PresignResult> {
-  const user = await requireUser(STAFF_ROLES);
+  const user = await requireUser(VIDEO_UPLOAD_ROLES);
 
   if (!(await isStorageConfigured())) {
     return { ok: false, error: "Video storage isn't set up yet — add your Cloudflare R2 keys in Settings." };
@@ -55,7 +58,7 @@ export async function attachUploadedVideo(
   key: string,
   publicUrl: string
 ): Promise<AttachResult> {
-  const user = await requireUser(STAFF_ROLES);
+  const user = await requireUser(VIDEO_UPLOAD_ROLES);
 
   const d = await queryOne<{
     id: number;

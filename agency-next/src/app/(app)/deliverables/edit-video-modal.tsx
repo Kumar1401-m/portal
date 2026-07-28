@@ -30,12 +30,14 @@ export function EditVideoModal({
   canSendToClient,
   canDelete = false,
   assignees = [],
+  canUploadVideo = true,
 }: {
   deliverable: DeliverableListRow;
   categories: CategoryOptions;
   canSendToClient: boolean;
   canDelete?: boolean;
   assignees?: { id: number; name: string; role: string }[];
+  canUploadVideo?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
@@ -206,6 +208,7 @@ export function EditVideoModal({
               <Textarea id={`wn-${d.id}`} name="writer_notes" rows={2} defaultValue={d.writer_notes ?? ""} />
             </div>
 
+            {canUploadVideo ? (
             <div className="space-y-2">
               <Label>Finished video</Label>
               <VideoUpload
@@ -214,6 +217,7 @@ export function EditVideoModal({
                 onUploaded={setEditedLink}
               />
             </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor={`el-${d.id}`}>

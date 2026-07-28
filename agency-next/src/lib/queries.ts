@@ -29,13 +29,6 @@ export type AdminDashboard = {
   };
   pending_approvals: number;
   changes_requested: number;
-  recent_activities: {
-    actor_name: string | null;
-    action: string;
-    entity_type: string | null;
-    description: string | null;
-    created_at: string;
-  }[];
   upcoming_tasks: {
     id: number;
     title: string;
@@ -57,7 +50,7 @@ export type AdminDashboard = {
 };
 
 export async function getAdminDashboard(): Promise<AdminDashboard> {
-  const [clients, deliverables, payments, approvals, activities, upcoming, progress] =
+  const [clients, deliverables, payments, approvals, upcoming, progress] =
     await Promise.all([
       queryOne<Record<string, unknown>>(
         `SELECT COUNT(*) AS total,
@@ -93,10 +86,6 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
           COALESCE(SUM(status IN ('content_review','review')),0) AS awaiting,
           COALESCE(SUM(status = 'changes_requested'),0) AS changes
          FROM deliverables`
-      ),
-      query<AdminDashboard["recent_activities"][number]>(
-        `SELECT actor_name, action, entity_type, entity_id, description, created_at
-         FROM activity_logs ORDER BY id DESC LIMIT 12`
       ),
       query<AdminDashboard["upcoming_tasks"][number]>(
         `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
@@ -139,7 +128,6 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
     },
     pending_approvals: n(approvals?.awaiting),
     changes_requested: n(approvals?.changes),
-    recent_activities: activities.map((a) => ({ ...a, action: String(a.action) })),
     upcoming_tasks: upcoming,
     client_progress: progress.map((p) => ({
       ...p,
