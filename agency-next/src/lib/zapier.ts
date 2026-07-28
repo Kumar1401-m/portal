@@ -119,6 +119,7 @@ export async function getReadyToPostToInstagram(
     title: string;
     caption: string | null;
     edited_link: string;
+    cloud_video_url: string | null;
     content_category: string | null;
     due_date: string | null;
     scheduled_at: string | null;
@@ -126,7 +127,7 @@ export async function getReadyToPostToInstagram(
     company_name: string;
     ig_user_id: string;
   }>(
-    `SELECT d.id, d.title, d.caption, d.edited_link, d.content_category, d.due_date, d.scheduled_at,
+    `SELECT d.id, d.title, d.caption, d.edited_link, d.cloud_video_url, d.content_category, d.due_date, d.scheduled_at,
             c.id AS client_id, c.company_name, c.ig_user_id
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id
@@ -147,8 +148,10 @@ export async function getReadyToPostToInstagram(
     id: r.id,
     title: r.title,
     caption: r.caption,
-    video_url: r.edited_link,
-    drive_file_id: extractDriveFileId(r.edited_link),
+    // A cloud-hosted file is directly fetchable, so prefer it over a Drive
+    // share link (which returns an HTML page, not video bytes).
+    video_url: r.cloud_video_url || r.edited_link,
+    drive_file_id: r.cloud_video_url ? null : extractDriveFileId(r.edited_link),
     category: r.content_category,
     due_date: r.due_date,
     scheduled_at: r.scheduled_at,

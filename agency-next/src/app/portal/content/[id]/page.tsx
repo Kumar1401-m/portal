@@ -54,20 +54,32 @@ export default async function PortalContentDetail({
             </div>
           ) : null}
 
-          {d.edited_link ? (
+          {d.cloud_video_url || d.edited_link ? (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Preview</CardTitle>
               </CardHeader>
-              <CardContent>
-                <a
-                  href={d.edited_link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={buttonClasses({ variant: "outline" })}
-                >
-                  <ExternalLink className="h-4 w-4" /> Open the design / video
-                </a>
+              <CardContent className="space-y-3">
+                {/* Hosted with us — play it right here rather than sending them away. */}
+                {d.cloud_video_url ? (
+                  <video
+                    controls
+                    playsInline
+                    preload="metadata"
+                    src={d.cloud_video_url}
+                    className="max-h-[70vh] w-full rounded-lg bg-black"
+                  />
+                ) : null}
+                {d.edited_link && d.edited_link !== d.cloud_video_url ? (
+                  <a
+                    href={d.edited_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={buttonClasses({ variant: "outline" })}
+                  >
+                    <ExternalLink className="h-4 w-4" /> Open the design / video
+                  </a>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}

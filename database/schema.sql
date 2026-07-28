@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS deliverables (
   client_notes    TEXT DEFAULT NULL,
   raw_drive_link  VARCHAR(700) DEFAULT NULL,
   reference_links TEXT DEFAULT NULL,                    -- alt. to raw footage: newline-separated reference/inspiration URLs (crm-provided)
+  cloud_video_url VARCHAR(600) DEFAULT NULL,            -- finished video on Cloudflare R2, streamed inline in the client portal
+  cloud_video_key VARCHAR(400) DEFAULT NULL,            -- object key in the bucket, so the file can be replaced/removed
   edited_link     VARCHAR(700) DEFAULT NULL,
   thumbnail_url   VARCHAR(700) DEFAULT NULL,
   subtitle_link   VARCHAR(700) DEFAULT NULL,

@@ -32,6 +32,7 @@ export type DeliverableListRow = {
   edited_link: string | null;
   promotion_type: string | null;
   raw_drive_link: string | null;
+  cloud_video_url: string | null;
   reject_reason: string | null;
 };
 
@@ -138,7 +139,7 @@ export async function getDeliverables(
             d.assigned_to, u.name AS assignee_name,
             d.content_hook, d.caption, d.description, d.writer_notes,
             d.videographer_notes, d.thumbnail_url, d.edited_link,
-            d.promotion_type, d.raw_drive_link, d.reject_reason
+            d.promotion_type, d.raw_drive_link, d.cloud_video_url, d.reject_reason
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id
      LEFT JOIN users u ON u.id = d.assigned_to
@@ -199,6 +200,7 @@ export type DeliverableDetail = CaptionSource & {
   caption: string | null;
   edited_link: string | null;
   raw_drive_link: string | null;
+  cloud_video_url: string | null;
   reject_reason: string | null;
   ai_score: number | null;
   service: string | null;
@@ -213,7 +215,7 @@ export async function getDeliverable(id: number): Promise<DeliverableDetail | nu
     `SELECT d.id, d.client_id, d.title, d.description, d.content_hook, d.platform,
             d.video_type, d.promotion_type, d.language, d.target_audience,
             d.custom_instructions, d.ai_prompt, d.month_key, d.status, d.priority,
-            d.due_date, d.caption, d.edited_link, d.raw_drive_link, d.reject_reason,
+            d.due_date, d.caption, d.edited_link, d.raw_drive_link, d.cloud_video_url, d.reject_reason,
             d.ai_score, d.service, d.content_category, d.assigned_to, d.created_at,
             c.company_name, c.business_type, c.contact_person, c.phone, c.email,
             c.website, c.company_logo_url, c.instagram_link, c.facebook_link,

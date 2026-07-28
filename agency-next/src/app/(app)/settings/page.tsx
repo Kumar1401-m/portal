@@ -1,4 +1,11 @@
-import { Settings as SettingsIcon, Building2, Receipt, Activity, Lock } from "lucide-react";
+import {
+  Settings as SettingsIcon,
+  Building2,
+  Receipt,
+  Activity,
+  Lock,
+  CloudUpload,
+} from "lucide-react";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPublicSettings } from "@/lib/settings";
 import { getCategoryMap } from "@/lib/categories";
@@ -12,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
-import { saveAgencyProfile, saveBillingSettings } from "./actions";
+import { saveAgencyProfile, saveBillingSettings, saveStorageSettings } from "./actions";
 
 export const metadata = { title: "Settings · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -212,6 +219,85 @@ export default async function SettingsPage() {
         </Card>
       </div>
 
+      {/* --------------------------- Video hosting --------------------------- */}
+      {isSuperAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CloudUpload className="h-5 w-5 text-muted-foreground" /> Video hosting (Cloudflare R2)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              Lets editors upload the finished video straight into a task, and clients watch it
+              inside the portal instead of being sent to Google Drive. R2&apos;s free tier gives 10 GB
+              with no charge for viewing. Create a bucket at{" "}
+              <span className="font-mono text-xs">dash.cloudflare.com → R2</span>, then paste its
+              details here.
+            </p>
+            <ActionForm
+              action={saveStorageSettings}
+              submitLabel="Save video hosting"
+              formClassName="grid gap-4 sm:grid-cols-2"
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="r2_account_id">Account ID</Label>
+                <Input
+                  id="r2_account_id"
+                  name="r2_account_id"
+                  placeholder="e.g. 8f1c2d3e4b5a6789"
+                  defaultValue={settings.r2_account_id}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="r2_bucket">Bucket name</Label>
+                <Input
+                  id="r2_bucket"
+                  name="r2_bucket"
+                  placeholder="e.g. nvk-videos"
+                  defaultValue={settings.r2_bucket}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="r2_access_key_id">Access key ID</Label>
+                <Input
+                  id="r2_access_key_id"
+                  name="r2_access_key_id"
+                  defaultValue={settings.r2_access_key_id}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="r2_secret_access_key">
+                  Secret access key{" "}
+                  <span className="text-xs text-muted-foreground">(blank = unchanged)</span>
+                </Label>
+                <Input
+                  id="r2_secret_access_key"
+                  name="r2_secret_access_key"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={settings.r2_secret_access_key_set ? "••••••••" : "Paste the secret"}
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="r2_public_base_url">Public bucket URL</Label>
+                <Input
+                  id="r2_public_base_url"
+                  name="r2_public_base_url"
+                  placeholder="https://pub-xxxx.r2.dev  or  https://videos.yourdomain.com"
+                  defaultValue={settings.r2_public_base_url}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Turn on public access for the bucket (R2 → Settings → Public development URL), and
+                  add this site to the bucket&apos;s CORS policy with <code>PUT</code> allowed, or
+                  uploads will be blocked by the browser.
+                </p>
+              </div>
+            </ActionForm>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* ------------------------- Task categories ------------------------- */}
       <CategoryManager categories={categories} />
 
@@ -256,6 +342,17 @@ export default async function SettingsPage() {
             label="Razorpay checkout"
             ok={Boolean(settings.razorpay_key_id && settings.razorpay_key_secret_set)}
             detail={settings.razorpay_key_id || "add your keys above"}
+          />
+          <Status
+            label="Video hosting (R2)"
+            ok={Boolean(
+              settings.r2_account_id &&
+                settings.r2_bucket &&
+                settings.r2_access_key_id &&
+                settings.r2_secret_access_key_set &&
+                settings.r2_public_base_url
+            )}
+            detail={settings.r2_bucket || "add your R2 details above"}
           />
         </CardContent>
       </Card>

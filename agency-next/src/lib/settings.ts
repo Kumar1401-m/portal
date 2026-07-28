@@ -20,13 +20,20 @@ export const SETTING_DEFAULTS = {
   invoice_prefix: "INV",
   processing_fee_percent: "2.60",
   tax_percent: "0",
+  // Cloudflare R2 — video hosting for finished deliverables.
+  r2_account_id: "",
+  r2_bucket: "",
+  r2_access_key_id: "",
+  r2_secret_access_key: "",
+  /** Public base URL of the bucket (r2.dev address or your custom domain). */
+  r2_public_base_url: "",
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 export type Settings = Record<SettingKey, string>;
 
 /** Keys that must never be rendered back to the browser. */
-export const SECRET_KEYS: SettingKey[] = ["razorpay_key_secret"];
+export const SECRET_KEYS: SettingKey[] = ["razorpay_key_secret", "r2_secret_access_key"];
 
 export const SETTING_KEYS = Object.keys(SETTING_DEFAULTS) as SettingKey[];
 
@@ -52,11 +59,18 @@ export async function getSettings(): Promise<Settings> {
 
 /** Settings safe to render: secrets collapse to a "<key>_set" boolean. */
 export async function getPublicSettings(): Promise<
-  Omit<Settings, "razorpay_key_secret"> & { razorpay_key_secret_set: boolean }
+  Omit<Settings, "razorpay_key_secret" | "r2_secret_access_key"> & {
+    razorpay_key_secret_set: boolean;
+    r2_secret_access_key_set: boolean;
+  }
 > {
   const all = await getSettings();
-  const { razorpay_key_secret, ...rest } = all;
-  return { ...rest, razorpay_key_secret_set: Boolean(razorpay_key_secret) };
+  const { razorpay_key_secret, r2_secret_access_key, ...rest } = all;
+  return {
+    ...rest,
+    razorpay_key_secret_set: Boolean(razorpay_key_secret),
+    r2_secret_access_key_set: Boolean(r2_secret_access_key),
+  };
 }
 
 /**

@@ -366,6 +366,17 @@ async function main() {
       CONSTRAINT fk_cca_crm_user FOREIGN KEY (crm_user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  /* ---------------------------------------------------------------------
+   * Cluster K — cloud video hosting (Cloudflare R2)
+   * The finished video is uploaded straight from the browser to R2, so the
+   * client streams it inline instead of being sent off to Google Drive.
+   * ------------------------------------------------------------------- */
+
+  // Public playable URL of the delivered video.
+  await addColumn('deliverables', 'cloud_video_url', 'cloud_video_url VARCHAR(600) DEFAULT NULL');
+  // Object key inside the bucket — kept so the file can be replaced/removed.
+  await addColumn('deliverables', 'cloud_video_key', 'cloud_video_key VARCHAR(400) DEFAULT NULL');
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

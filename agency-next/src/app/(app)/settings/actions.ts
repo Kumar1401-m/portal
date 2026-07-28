@@ -81,6 +81,32 @@ export async function saveBillingSettings(
   return OK("Billing settings saved.");
 }
 
+/* ---------------------------- Video hosting ---------------------------- */
+
+export async function saveStorageSettings(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+
+  const base = s(fd, "r2_public_base_url").replace(/\/+$/, "");
+  if (base && !/^https:\/\/.+/i.test(base)) {
+    return FAIL("The public bucket URL must start with https://");
+  }
+
+  await saveSettings({
+    r2_account_id: s(fd, "r2_account_id"),
+    r2_bucket: s(fd, "r2_bucket"),
+    r2_access_key_id: s(fd, "r2_access_key_id"),
+    // Blank leaves the stored secret untouched (see saveSettings).
+    r2_secret_access_key: s(fd, "r2_secret_access_key"),
+    r2_public_base_url: base,
+  });
+  revalidatePath("/settings");
+  revalidatePath("/deliverables");
+  return OK("Video hosting settings saved.");
+}
+
 /* --------------------------- Task categories --------------------------- */
 
 export async function addCategory(_prev: ActionState, fd: FormData): Promise<ActionState> {

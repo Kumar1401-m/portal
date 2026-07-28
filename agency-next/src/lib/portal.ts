@@ -100,6 +100,7 @@ export type PortalDeliverable = {
   description: string | null;
   caption: string | null;
   edited_link: string | null;
+  cloud_video_url: string | null;
   status: string;
   service: string | null;
   video_type: string | null;
@@ -114,7 +115,7 @@ export async function getPortalDeliverable(
   id: number
 ): Promise<PortalDeliverable | null> {
   return queryOne<PortalDeliverable>(
-    `SELECT id, client_id, title, description, caption, edited_link, status, service,
+    `SELECT id, client_id, title, description, caption, edited_link, cloud_video_url, status, service,
             video_type, content_category, platform, due_date, reject_reason
      FROM deliverables WHERE id = ? AND client_id = ?`,
     [id, clientId]

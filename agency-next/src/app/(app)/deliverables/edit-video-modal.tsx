@@ -12,6 +12,7 @@ import {
 import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
+import { VideoUpload } from "./video-upload";
 import {
   ServiceCategoryPicker,
   type CategoryOptions,
@@ -40,6 +41,7 @@ export function EditVideoModal({
   );
 
   const [caption, setCaption] = useState(d.caption ?? "");
+  const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
   const [genPending, startGen] = useTransition();
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -47,9 +49,10 @@ export function EditVideoModal({
   useEffect(() => {
     if (open) {
       setCaption(d.caption ?? "");
+      setEditedLink(d.edited_link ?? "");
       setGenError(null);
     }
-  }, [open, d.caption]);
+  }, [open, d.caption, d.edited_link]);
 
   // Close on a successful save.
   useEffect(() => {
@@ -171,6 +174,15 @@ export function EditVideoModal({
               <Textarea id={`wn-${d.id}`} name="writer_notes" rows={2} defaultValue={d.writer_notes ?? ""} />
             </div>
 
+            <div className="space-y-2">
+              <Label>Finished video</Label>
+              <VideoUpload
+                deliverableId={d.id}
+                currentUrl={d.cloud_video_url}
+                onUploaded={setEditedLink}
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor={`el-${d.id}`}>
                 Deliverable Link <span className="text-destructive">*</span>
@@ -178,8 +190,9 @@ export function EditVideoModal({
               <Input
                 id={`el-${d.id}`}
                 name="edited_link"
-                placeholder="Drive / YouTube / Canva / staging link"
-                defaultValue={d.edited_link ?? ""}
+                placeholder="Uploaded video fills this in, or paste a Drive / Canva link"
+                value={editedLink}
+                onChange={(e) => setEditedLink(e.target.value)}
               />
             </div>
 
