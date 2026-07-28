@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import type { SessionUser } from "@/lib/auth";
 import type { NotificationRow } from "@/lib/notifications";
@@ -20,6 +21,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
 
   return (
     <div className="min-h-screen">
@@ -67,7 +69,10 @@ export function AppShell({
           notifications={notifications}
           unread={unread}
         />
-        <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">{children}</main>
+        {/* Keyed on the route so each navigation replays the entrance animation. */}
+        <main key={pathname} className="animate-fade-up mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );

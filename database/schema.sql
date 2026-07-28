@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   name          VARCHAR(150) NOT NULL,
   email         VARCHAR(190) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role          ENUM('super_admin','admin','poster_designer','client') NOT NULL DEFAULT 'admin',
+  role          ENUM('super_admin','admin','poster_designer','crm','client') NOT NULL DEFAULT 'admin',
   phone         VARCHAR(30) DEFAULT NULL,
   avatar_url    VARCHAR(500) DEFAULT NULL,
   is_active     TINYINT(1) NOT NULL DEFAULT 1,
@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS clients (
   placeholder_values JSON DEFAULT NULL,                 -- {business_name, service, location, phone, whatsapp, website, offer, keywords}
   caption_template  TEXT DEFAULT NULL,                  -- per-client caption template (with {{placeholders}})
   services          JSON DEFAULT NULL,                   -- ["video_editing","poster_designing",...] — filtering/reporting only
+  is_personal       TINYINT(1) NOT NULL DEFAULT 0,        -- excluded from NEW crm assignment (not retroactive)
   created_by        BIGINT UNSIGNED DEFAULT NULL,
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -127,6 +128,7 @@ CREATE TABLE IF NOT EXISTS deliverables (
   editor_notes    TEXT DEFAULT NULL,
   client_notes    TEXT DEFAULT NULL,
   raw_drive_link  VARCHAR(700) DEFAULT NULL,
+  reference_links TEXT DEFAULT NULL,                    -- alt. to raw footage: newline-separated reference/inspiration URLs (crm-provided)
   edited_link     VARCHAR(700) DEFAULT NULL,
   thumbnail_url   VARCHAR(700) DEFAULT NULL,
   subtitle_link   VARCHAR(700) DEFAULT NULL,
@@ -246,7 +248,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   deliverable_id BIGINT UNSIGNED NOT NULL,
   author_id      BIGINT UNSIGNED DEFAULT NULL,
-  author_role    ENUM('super_admin','admin','poster_designer','client') DEFAULT NULL,
+  author_role    ENUM('super_admin','admin','poster_designer','crm','client') DEFAULT NULL,
   message        TEXT NOT NULL,
   is_resolved    TINYINT(1) NOT NULL DEFAULT 0,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -418,6 +420,21 @@ CREATE TABLE IF NOT EXISTS task_categories (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- CLIENT CRM ACCESS  (which crm-role users can access which clients)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS client_crm_access (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  client_id   BIGINT UNSIGNED NOT NULL,
+  crm_user_id BIGINT UNSIGNED NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_client_crm (client_id, crm_user_id),
+  KEY idx_cca_crm_user (crm_user_id),
+  CONSTRAINT fk_cca_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cca_crm_user FOREIGN KEY (crm_user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
 -- CLIENT FINGERPRINTS  (learned cues for AI auto client-detection)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS client_fingerprints (
@@ -483,7 +500,7 @@ CREATE TABLE IF NOT EXISTS task_comments (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   deliverable_id BIGINT UNSIGNED NOT NULL,
   author_id      BIGINT UNSIGNED DEFAULT NULL,
-  author_role    ENUM('super_admin','admin','poster_designer','client') DEFAULT NULL,
+  author_role    ENUM('super_admin','admin','poster_designer','crm','client') DEFAULT NULL,
   message        TEXT NOT NULL,
   mentions       JSON DEFAULT NULL,
   attachments    JSON DEFAULT NULL,

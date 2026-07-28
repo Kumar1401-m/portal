@@ -5,6 +5,8 @@ import { queryOne, execute } from "@/lib/db";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
+import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
+import { sendPaymentReceiptEmail } from "@/lib/email";
 
 export type PortalActionState = { ok: boolean; error?: string; message?: string };
 
@@ -157,4 +159,151 @@ export async function clientRequestChanges(
     "changes",
     String(formData.get("reason") || "").trim()
   );
+}
+
+/* ----------------------------- Razorpay checkout ----------------------------- */
+
+export type OrderState = {
+  ok: boolean;
+  error?: string;
+  order_id?: string;
+  amount?: number;
+  currency?: string;
+  key_id?: string;
+  invoice_no?: string;
+};
+
+/** Start an online payment for one of the client's own invoices. */
+export async function startInvoicePayment(invoiceId: number): Promise<OrderState> {
+  const user = await requireUser(["client"]);
+  if (!user.clientId) return { ok: false, error: "No client profile linked." };
+
+  const inv = await queryOne<{ id: number; client_id: number; total: string; status: string; invoice_no: string }>(
+    "SELECT id, client_id, total, status, invoice_no FROM invoices WHERE id = ? AND client_id = ?",
+    [invoiceId, user.clientId]
+  );
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status === "paid") return { ok: false, error: "This invoice is already paid." };
+
+  let result: Awaited<ReturnType<typeof createRazorpayOrder>>;
+  try {
+    result = await createRazorpayOrder(Number(inv.total), inv.invoice_no);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not start payment." };
+  }
+
+  await execute(
+    `UPDATE payments SET razorpay_order_id = ?
+     WHERE invoice_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+    [result.order.id, invoiceId]
+  );
+
+  return {
+    ok: true,
+    order_id: result.order.id,
+    amount: result.order.amount,
+    currency: result.order.currency,
+    key_id: result.keyId,
+    invoice_no: inv.invoice_no,
+  };
+}
+
+export type VerifyState = { ok: boolean; error?: string };
+
+/** Confirm a completed Razorpay checkout and mark the invoice paid. */
+export async function verifyInvoicePayment(
+  orderId: string,
+  paymentId: string,
+  signature: string
+): Promise<VerifyState> {
+  const user = await requireUser(["client"]);
+  const payment = await queryOne<{ id: number; invoice_id: number | null; client_id: number; amount: string }>(
+    "SELECT id, invoice_id, client_id, amount FROM payments WHERE razorpay_order_id = ?",
+    [orderId]
+  );
+  if (!payment) return { ok: false, error: "Payment record not found." };
+  if (payment.client_id !== user.clientId) return { ok: false, error: "Not authorized." };
+
+  const valid = await verifyRazorpaySignature(orderId, paymentId, signature);
+  if (!valid) {
+    await execute("UPDATE payments SET status = 'failed' WHERE id = ?", [payment.id]);
+    return { ok: false, error: "Payment verification failed." };
+  }
+
+  await execute(
+    `UPDATE payments SET status = 'paid', method = 'razorpay',
+       razorpay_payment_id = ?, razorpay_signature = ?, paid_at = NOW()
+     WHERE id = ?`,
+    [paymentId, signature, payment.id]
+  );
+  if (payment.invoice_id) {
+    await execute("UPDATE invoices SET status = 'paid' WHERE id = ?", [payment.invoice_id]);
+  }
+
+  const client = await queryOne<{ company_name: string; email: string | null }>(
+    "SELECT company_name, email FROM clients WHERE id = ?",
+    [payment.client_id]
+  );
+  await notifyAdmins(
+    "payment_received",
+    "Payment received",
+    `₹${Number(payment.amount).toLocaleString("en-IN")} received via Razorpay.`,
+    "/payments"
+  );
+  if (client) {
+    sendPaymentReceiptEmail(client, { amount: payment.amount, invoice_no: null, method: "razorpay" }).catch(() => {});
+  }
+
+  revalidatePath("/portal/invoices");
+  revalidatePath("/portal");
+  return { ok: true };
+}
+
+/* --------------------------- Raw footage submission --------------------------- */
+
+/**
+ * Client hands over raw footage for a task that's waiting on it. Sets
+ * raw_drive_link and advances the existing "waiting_for_raw" → "raw_uploaded"
+ * step of the pipeline — the admin side already treats raw_uploaded as the
+ * signal to start editing.
+ */
+export async function submitRawFootage(
+  _prev: PortalActionState,
+  formData: FormData
+): Promise<PortalActionState> {
+  const user = await requireUser(["client"]);
+  if (!user.clientId) return { ok: false, error: "No client profile linked." };
+
+  const id = Number(formData.get("deliverable_id"));
+  const link = String(formData.get("raw_drive_link") || "").trim();
+  if (!id) return { ok: false, error: "Missing item." };
+  if (!/^https?:\/\/.+/i.test(link)) return { ok: false, error: "Enter a valid link (https://…)." };
+
+  const d = await queryOne<{ id: number; client_id: number; status: string; title: string }>(
+    "SELECT id, client_id, status, title FROM deliverables WHERE id = ? AND client_id = ?",
+    [id, user.clientId]
+  );
+  if (!d) return { ok: false, error: "Not found." };
+  if (d.status !== "waiting_for_raw") {
+    return { ok: false, error: "This item isn't waiting for raw footage." };
+  }
+
+  await execute(
+    "UPDATE deliverables SET raw_drive_link = ?, status = 'raw_uploaded' WHERE id = ?",
+    [link, id]
+  );
+
+  await notifyAdmins(
+    "general",
+    "Raw footage received",
+    `${d.title}: the client uploaded their raw footage — ready to edit.`,
+    `/deliverables/${id}`
+  );
+
+  revalidatePath("/portal");
+  revalidatePath("/portal/content");
+  revalidatePath(`/portal/content/${id}`);
+  revalidatePath("/deliverables");
+  revalidatePath("/today");
+  return { ok: true, message: "Thanks! Your raw footage was submitted — we'll start editing." };
 }

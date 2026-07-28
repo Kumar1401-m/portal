@@ -3,9 +3,10 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { queryOne, execute } from "@/lib/db";
-import { requireUser, ADMIN_ROLES, type SessionUser } from "@/lib/auth";
+import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, type SessionUser } from "@/lib/auth";
 import { generateCaption, type ComposedCaption, type CaptionSource } from "@/lib/ai";
 import { getDeliverable } from "@/lib/deliverables";
+import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
 import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
@@ -102,12 +103,13 @@ export async function generateCaptionAction(
   _prev: CaptionState,
   formData: FormData
 ): Promise<CaptionState> {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const id = Number(formData.get("deliverable_id"));
   if (!id) return { ok: false, error: "Missing deliverable." };
 
   const d = await getDeliverable(id);
   if (!d) return { ok: false, error: "Deliverable not found." };
+  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
 
   const opts = {
     tone: String(formData.get("tone") || "") || undefined,
@@ -163,10 +165,13 @@ export async function saveCaptionAction(
   _prev: { ok: boolean; error?: string },
   formData: FormData
 ): Promise<{ ok: boolean; error?: string }> {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const id = Number(formData.get("deliverable_id"));
   const caption = String(formData.get("caption") || "");
   if (!id) return { ok: false, error: "Missing deliverable." };
+  const d = await queryOne<{ client_id: number }>("SELECT client_id FROM deliverables WHERE id = ?", [id]);
+  if (!d) return { ok: false, error: "Deliverable not found." };
+  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
   await execute("UPDATE deliverables SET caption = ? WHERE id = ?", [caption, id]);
   revalidatePath(`/deliverables/${id}`);
   return { ok: true };
@@ -181,21 +186,23 @@ export async function updateVideoDetails(
   _prev: VideoDetailsState,
   formData: FormData
 ): Promise<VideoDetailsState> {
-  const me = await requireUser(ADMIN_ROLES);
+  const me = await requireUser(ADMIN_OR_CRM_ROLES);
   const id = Number(formData.get("deliverable_id"));
   const mode = formData.get("mode") === "approval" ? "approval" : "draft";
   if (!id) return { ok: false, error: "Missing deliverable." };
-  // Saving a draft is open to any admin; actually sending it to the client
-  // for review is reserved for super_admin.
-  if (mode === "approval" && me.role !== "super_admin") {
-    return { ok: false, error: "Only a super admin can send content to the client for review.", mode };
-  }
 
   const d = await queryOne<{ id: number; client_id: number; title: string; video_type: string | null }>(
     "SELECT id, client_id, title, video_type FROM deliverables WHERE id = ?",
     [id]
   );
   if (!d) return { ok: false, error: "Deliverable not found." };
+  if (!(await canAccessClient(me, d.client_id))) return { ok: false, error: "Not authorized." };
+
+  // Saving a draft is open to any admin/crm; actually sending it to the
+  // client for review is reserved for super_admin and crm (their own clients).
+  if (mode === "approval" && me.role !== "super_admin" && me.role !== "crm") {
+    return { ok: false, error: "Only a super admin can send content to the client for review.", mode };
+  }
 
   const val = (k: string) => String(formData.get(k) || "").trim();
   const orNull = (v: string) => (v === "" ? null : v);
@@ -293,12 +300,18 @@ async function applyStatus(
     [id]
   );
   if (!d) return { ok: false, error: "Deliverable not found." };
+  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
   if (REASON_REQUIRED.includes(status) && !reason) {
     return { ok: false, error: `A reason is required to mark this as ${status.replace(/_/g, " ")}.` };
   }
   // Sending content to the client (either approval gate) is reserved for
-  // super_admin — everything else in the workflow stays open to any admin.
-  if (["content_review", "review"].includes(status) && user.role !== "super_admin") {
+  // super_admin and crm (their own clients) — everything else in the
+  // workflow stays open to any admin.
+  if (
+    ["content_review", "review"].includes(status) &&
+    user.role !== "super_admin" &&
+    user.role !== "crm"
+  ) {
     return { ok: false, error: "Only a super admin can send content to the client for review." };
   }
 
@@ -370,7 +383,7 @@ export async function changeStatusAction(
   _prev: StatusState,
   formData: FormData
 ): Promise<StatusState> {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   return applyStatus(
     user,
     Number(formData.get("deliverable_id")),
@@ -381,11 +394,68 @@ export async function changeStatusAction(
 
 /** For reason-free inline buttons on the Approvals worklist. */
 export async function quickStatus(formData: FormData): Promise<void> {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   await applyStatus(
     user,
     Number(formData.get("deliverable_id")),
     String(formData.get("status") || ""),
     undefined
   );
+}
+
+/* --------------------- Raw footage / reference links (staff-side) --------------------- */
+
+export type RawFootageState = { ok: boolean; error?: string; message?: string };
+
+/**
+ * Staff-side equivalent of the client portal's raw-footage form — for when
+ * the client sent footage outside the portal (WhatsApp, email) and staff/crm
+ * enter the link on their behalf. If there's no raw footage at all, reference
+ * links can be provided instead so editing can still start.
+ */
+export async function submitRawOrReference(
+  _prev: RawFootageState,
+  formData: FormData
+): Promise<RawFootageState> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing task." };
+
+  const d = await queryOne<{ id: number; client_id: number; status: string; title: string }>(
+    "SELECT id, client_id, status, title FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!d) return { ok: false, error: "Task not found." };
+  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
+  if (d.status !== "waiting_for_raw") {
+    return { ok: false, error: "This task isn't waiting for raw footage." };
+  }
+
+  const rawLink = String(formData.get("raw_drive_link") || "").trim();
+  const referenceLinks = String(formData.get("reference_links") || "").trim();
+  if (!rawLink && !referenceLinks) {
+    return { ok: false, error: "Add a raw footage link, or at least one reference link." };
+  }
+  if (rawLink && !/^https?:\/\/.+/i.test(rawLink)) {
+    return { ok: false, error: "Raw footage link must be a valid URL." };
+  }
+
+  const updates: Record<string, string | null> = { status: "raw_uploaded" };
+  if (rawLink) updates.raw_drive_link = rawLink;
+  if (referenceLinks) updates.reference_links = referenceLinks;
+
+  const keys = Object.keys(updates);
+  await execute(`UPDATE deliverables SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [
+    ...keys.map((k) => updates[k]),
+    id,
+  ]);
+
+  revalidatePath("/deliverables");
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/today");
+
+  return {
+    ok: true,
+    message: rawLink ? "Raw footage added — ready to edit." : "Reference links added — ready to edit.",
+  };
 }

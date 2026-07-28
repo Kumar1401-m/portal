@@ -167,7 +167,7 @@ export async function toggleCategory(_prev: ActionState, fd: FormData): Promise<
 
 /* ------------------------------- Team ------------------------------- */
 
-const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "super_admin"];
+const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "crm", "super_admin"];
 
 export async function addTeamMember(_prev: ActionState, fd: FormData): Promise<ActionState> {
   await requireUser(SUPER_ADMIN_ROLES);
@@ -229,6 +229,26 @@ export async function setTeamMemberActive(
   }
   revalidatePath("/settings");
   return OK(next ? `${u.name} reactivated.` : `${u.name} deactivated.`);
+}
+
+export async function renameTeamMember(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  const id = Number(fd.get("id"));
+  const name = s(fd, "name");
+  if (!id) return FAIL("Missing user.");
+  if (name.length < 2) return FAIL("Enter a name (min 2 characters).");
+  if (name.length > 120) return FAIL("That name is too long (max 120).");
+
+  const u = await queryOne<{ name: string }>("SELECT name FROM users WHERE id = ?", [id]);
+  if (!u) return FAIL("User not found.");
+  if (u.name === name) return OK("No change.");
+
+  await execute("UPDATE users SET name = ? WHERE id = ?", [name, id]);
+  revalidatePath("/settings");
+  return OK(`Renamed to ${name}.`);
 }
 
 export async function resetTeamPassword(

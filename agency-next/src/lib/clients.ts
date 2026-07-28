@@ -32,6 +32,7 @@ export type ClientFull = {
   services: unknown;
   /** Meta Graph IG business account id — enables Instagram auto-posting for this client. */
   ig_user_id: string | null;
+  is_personal: number;
   login_email: string | null;
   login_active: number | null;
 };

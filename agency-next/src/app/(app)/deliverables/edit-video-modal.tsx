@@ -1,11 +1,13 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { SquarePen, Loader2, Send, Wand2 } from "lucide-react";
+import { SquarePen, Loader2, Send, Wand2, UploadCloud } from "lucide-react";
 import {
   updateVideoDetails,
   generateCaptionAction,
+  submitRawOrReference,
   type VideoDetailsState,
+  type RawFootageState,
 } from "./actions";
 import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf } from "@/lib/services";
@@ -32,6 +34,10 @@ export function EditVideoModal({
   const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
     ok: false,
   });
+  const [rawState, rawAction, rawPending] = useActionState<RawFootageState, FormData>(
+    submitRawOrReference,
+    { ok: false }
+  );
 
   const [caption, setCaption] = useState(d.caption ?? "");
   const [genPending, startGen] = useTransition();
@@ -74,6 +80,43 @@ export function EditVideoModal({
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
+        {d.status === "waiting_for_raw" ? (
+          <form action={rawAction} className="shrink-0 space-y-3 border-b border-border bg-amber-500/5 p-6">
+            <input type="hidden" name="deliverable_id" value={d.id} />
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <UploadCloud className="h-4 w-4 text-amber-600" />
+              Waiting for raw footage
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Add the client&apos;s raw footage link, or — if none was provided — paste
+              reference / inspiration links so editing can start anyway.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor={`rf-${d.id}`}>Raw footage link (Drive, etc.)</Label>
+              <Input id={`rf-${d.id}`} name="raw_drive_link" placeholder="https://drive.google.com/…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`rl-${d.id}`}>Reference / inspiration links</Label>
+              <Textarea
+                id={`rl-${d.id}`}
+                name="reference_links"
+                rows={2}
+                placeholder="One or more links, if no raw footage was sent"
+              />
+            </div>
+            {rawState.error ? <p className="text-sm text-destructive">{rawState.error}</p> : null}
+            {rawState.ok && rawState.message ? (
+              <p className="text-sm text-emerald-600">{rawState.message}</p>
+            ) : null}
+            <div className="flex justify-end">
+              <button type="submit" disabled={rawPending} className={buttonClasses({ size: "sm" })}>
+                {rawPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                Submit &amp; move to editing
+              </button>
+            </div>
+          </form>
+        ) : null}
+
         <form action={action} className="flex min-h-0 flex-1 flex-col">
           <input type="hidden" name="deliverable_id" value={d.id} />
 

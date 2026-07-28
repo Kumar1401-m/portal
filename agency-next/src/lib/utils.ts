@@ -19,6 +19,7 @@ export function money(n: number | string | null | undefined): string {
 /** Title-case a snake_case / kebab-case machine label. */
 export function label(s: string | null | undefined): string {
   if (!s) return "";
+  if (s === "crm") return "CRM";
   return String(s)
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());

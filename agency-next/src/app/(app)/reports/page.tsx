@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { BarChart3, Filter } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getScorecard } from "@/lib/reports";
+import { crmClientIds } from "@/lib/crm";
 import { SERVICE_KEYS, SERVICES, isServiceKey } from "@/lib/services";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,11 +25,12 @@ export default async function ReportsPage({
 }: {
   searchParams: Promise<{ month?: string; service?: string }>;
 }) {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const sp = await searchParams;
   const month = /^\d{4}-\d{2}$/.test(sp.month || "") ? sp.month! : monthKey();
   const service = isServiceKey(sp.service) ? sp.service : undefined;
-  const rows = await getScorecard(month, service);
+  const scopeIds = await crmClientIds(user);
+  const rows = await getScorecard(month, service, scopeIds);
 
   const totals = rows.reduce(
     (a, r) => ({ total: a.total + r.total, approved: a.approved + r.approved }),

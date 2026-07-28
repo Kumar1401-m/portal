@@ -16,7 +16,7 @@ import { env } from "./env";
 
 export const COOKIE_NAME = "erp_session";
 
-export type Role = "super_admin" | "admin" | "poster_designer" | "client";
+export type Role = "super_admin" | "admin" | "poster_designer" | "crm" | "client";
 
 export type SessionUser = {
   id: number;
@@ -105,6 +105,7 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 export function homeForRole(role: Role): string {
   if (role === "client") return "/portal";
   if (role === "poster_designer") return "/poster";
+  if (role === "crm") return "/deliverables";
   return "/dashboard";
 }
 
@@ -121,8 +122,16 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
 }
 
 /** Staff = anyone who isn't a client. */
-export const STAFF_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
+export const STAFF_ROLES: Role[] = ["super_admin", "admin", "poster_designer", "crm"];
+/** Staff for the Posters module, which has no per-client scoping. */
+export const POSTER_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
 export const ADMIN_ROLES: Role[] = ["super_admin", "admin"];
+/**
+ * Modules a scoped "crm" user can also reach (Clients, Tasks, Today,
+ * Approvals, Reports) — everything they see within these is further
+ * filtered to their assigned clients via src/lib/crm.ts.
+ */
+export const ADMIN_OR_CRM_ROLES: Role[] = ["super_admin", "admin", "crm"];
 /** A narrow set of sensitive actions (team management, billing, client archive,
  *  invoicing) are reserved for super_admin even though a plain admin can see
  *  everything else. */

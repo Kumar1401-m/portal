@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { CheckCircle2, ArrowRight } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDeliverables, getApprovalCounts, getServiceCounts } from "@/lib/deliverables";
+import { crmClientIds } from "@/lib/crm";
 import { isServiceKey } from "@/lib/services";
 import { quickStatus } from "../deliverables/actions";
 import { Card } from "@/components/ui/card";
@@ -33,15 +34,16 @@ export default async function ApprovalsPage({
 }: {
   searchParams: Promise<{ tab?: string; service?: string }>;
 }) {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const sp = await searchParams;
   const active = (TABS.find((t) => t.key === sp.tab) ?? TABS[0]) as (typeof TABS)[number];
   const service = isServiceKey(sp.service) ? sp.service : null;
-  const filters = { status: active.status, service: service ?? undefined };
+  const scopeIds = await crmClientIds(user);
+  const filters = { status: active.status, service: service ?? undefined, crmClientIds: scopeIds };
 
   const [rows, counts, serviceCounts] = await Promise.all([
     getDeliverables(filters),
-    getApprovalCounts(),
+    getApprovalCounts(scopeIds),
     getServiceCounts(filters),
   ]);
 

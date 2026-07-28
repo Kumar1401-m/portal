@@ -31,7 +31,7 @@ export function StatCard({
 }) {
   const t = toneStyles[tone];
   return (
-    <Card className={cn("relative overflow-hidden", className)}>
+    <Card className={cn("interactive relative overflow-hidden", className)}>
       <div
         className={cn(
           "pointer-events-none absolute inset-0 bg-gradient-to-br",

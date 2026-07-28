@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Users, Plus } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClients } from "@/lib/queries";
+import { crmClientIds } from "@/lib/crm";
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -12,8 +13,9 @@ export const metadata = { title: "Clients · NVK Hub" };
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
-  await requireUser(ADMIN_ROLES);
-  const clients = await getClients();
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  const clientIds = await crmClientIds(user);
+  const clients = await getClients(clientIds);
   const active = clients.filter((c) => c.status === "active").length;
 
   return (
@@ -28,9 +30,11 @@ export default async function ClientsPage() {
             {clients.length} total · {active} active
           </p>
         </div>
-        <Link href="/clients/new" className={buttonClasses()}>
-          <Plus className="h-4 w-4" /> New client
-        </Link>
+        {user.role !== "crm" ? (
+          <Link href="/clients/new" className={buttonClasses()}>
+            <Plus className="h-4 w-4" /> New client
+          </Link>
+        ) : null}
       </div>
 
       <Card className="overflow-hidden">

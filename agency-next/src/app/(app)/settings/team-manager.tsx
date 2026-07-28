@@ -1,9 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { UserPlus, KeyRound, X } from "lucide-react";
+import { UserPlus, KeyRound, X, Pencil } from "lucide-react";
 import type { TeamMember } from "@/lib/team";
-import { addTeamMember, setTeamMemberActive, resetTeamPassword } from "./actions";
+import {
+  addTeamMember,
+  setTeamMemberActive,
+  resetTeamPassword,
+  renameTeamMember,
+} from "./actions";
 import { ActionForm } from "./action-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +23,7 @@ import { label } from "@/lib/utils";
  */
 export function TeamManager({ team, currentUserId }: { team: TeamMember[]; currentUserId: number }) {
   const [resetting, setResetting] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState<number | null>(null);
 
   return (
     <Card>
@@ -45,6 +51,15 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
                 </div>
 
                 <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRenaming(renaming === m.id ? null : m.id)}
+                    title="Rename"
+                    className={buttonClasses({ variant: "ghost", size: "sm" })}
+                  >
+                    {renaming === m.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                    Name
+                  </button>
                   <button
                     type="button"
                     onClick={() => setResetting(resetting === m.id ? null : m.id)}
@@ -75,6 +90,24 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
                   )}
                 </div>
               </div>
+
+              {renaming === m.id ? (
+                <ActionForm
+                  action={renameTeamMember}
+                  submitLabel="Save name"
+                  size="sm"
+                  variant="secondary"
+                  formClassName="flex flex-wrap items-center gap-2"
+                >
+                  <input type="hidden" name="id" value={m.id} />
+                  <Input
+                    name="name"
+                    defaultValue={m.name}
+                    placeholder="Full name"
+                    className="h-9 max-w-xs flex-1"
+                  />
+                </ActionForm>
+              ) : null}
 
               {resetting === m.id ? (
                 <ActionForm
@@ -121,6 +154,7 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
               <label className="text-xs font-medium text-muted-foreground">Role</label>
               <Select name="role" defaultValue="poster_designer">
                 <option value="poster_designer">Poster designer</option>
+                <option value="crm">CRM</option>
                 <option value="admin">Admin</option>
                 <option value="super_admin">Super admin</option>
               </Select>

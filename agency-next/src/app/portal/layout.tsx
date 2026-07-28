@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { getNotifications, getUnreadCount } from "@/lib/notifications";
+import { getPortalActionCounts } from "@/lib/portal";
 import { queryOne } from "@/lib/db";
 import { PortalHeader } from "./portal-header";
 
@@ -9,7 +10,7 @@ export default async function PortalLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser(["client"]);
-  const [notifications, unread, client] = await Promise.all([
+  const [notifications, unread, client, actionCounts] = await Promise.all([
     getNotifications(user.id),
     getUnreadCount(user.id),
     user.clientId
@@ -17,6 +18,7 @@ export default async function PortalLayout({
           user.clientId,
         ])
       : Promise.resolve(null),
+    user.clientId ? getPortalActionCounts(user.clientId) : Promise.resolve({ content: 0, invoices: 0 }),
   ]);
 
   return (
@@ -25,8 +27,9 @@ export default async function PortalLayout({
         companyName={client?.company_name || "Client Portal"}
         notifications={notifications}
         unread={unread}
+        actionCounts={actionCounts}
       />
-      <main className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">{children}</main>
+      <main className="animate-fade-up mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">{children}</main>
     </div>
   );
 }

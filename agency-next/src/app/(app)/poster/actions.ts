@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { queryOne, execute } from "@/lib/db";
-import { requireUser, STAFF_ROLES } from "@/lib/auth";
+import { requireUser, POSTER_ROLES } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
 
 export type PosterState = { ok: boolean; error?: string };
@@ -12,7 +12,7 @@ export async function submitPosterDesign(
   _prev: PosterState,
   formData: FormData
 ): Promise<PosterState> {
-  const user = await requireUser(STAFF_ROLES);
+  const user = await requireUser(POSTER_ROLES);
   const id = Number(formData.get("deliverable_id"));
   const link = String(formData.get("link") || "").trim();
   const note = String(formData.get("note") || "").trim();

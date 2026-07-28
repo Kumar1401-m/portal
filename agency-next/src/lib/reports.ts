@@ -31,11 +31,17 @@ const emptyTallies = (): Record<ServiceKey, ServiceTally> =>
     SERVICE_KEYS.map((k) => [k, { total: 0, approved: 0 }])
   ) as Record<ServiceKey, ServiceTally>;
 
-/** Per-client content scorecard for a month (YYYY-MM), optionally one service. */
+/**
+ * Per-client content scorecard for a month (YYYY-MM), optionally one service.
+ * `crmClientIds`: null/omitted = unrestricted, [] = no access to any client.
+ */
 export async function getScorecard(
   month: string,
-  service?: ServiceKey
+  service?: ServiceKey,
+  crmClientIds?: number[] | null
 ): Promise<ScorecardRow[]> {
+  if (crmClientIds && crmClientIds.length === 0) return [];
+
   const cols = SERVICE_KEYS.map(
     (k) => `COALESCE(SUM(${SERVICE_EXPR} = '${k}'),0) AS ${k}_total,
             COALESCE(SUM(${SERVICE_EXPR} = '${k}' AND d.status IN ${DONE}),0) AS ${k}_approved`
@@ -43,6 +49,11 @@ export async function getScorecard(
 
   const joinExtra = service ? ` AND ${SERVICE_EXPR} = ?` : "";
   const params: (string | number)[] = service ? [month, service] : [month];
+  const clientScope =
+    crmClientIds && crmClientIds.length
+      ? ` AND c.id IN (${crmClientIds.map(() => "?").join(",")})`
+      : "";
+  if (crmClientIds && crmClientIds.length) params.push(...crmClientIds);
 
   const rows = await query<Record<string, unknown>>(
     `SELECT c.id, c.company_name, c.monthly_deliverables,
@@ -51,7 +62,7 @@ export async function getScorecard(
        ${cols}
      FROM clients c
      LEFT JOIN deliverables d ON d.client_id = c.id AND d.month_key = ?${joinExtra}
-     WHERE c.status != 'churned'
+     WHERE c.status != 'churned'${clientScope}
      GROUP BY c.id ORDER BY c.company_name`,
     params
   );

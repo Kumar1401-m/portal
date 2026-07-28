@@ -29,7 +29,7 @@ export function TR({ className, ...props }: React.HTMLAttributes<HTMLTableRowEle
   return (
     <tr
       className={cn(
-        "border-b border-border transition-colors hover:bg-muted/50",
+        "animate-fade-in border-b border-border transition-colors duration-150 hover:bg-muted/60",
         className
       )}
       {...props}

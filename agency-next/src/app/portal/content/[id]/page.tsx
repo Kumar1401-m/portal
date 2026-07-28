@@ -9,6 +9,7 @@ import { ServiceBadge } from "@/components/ui/service-badge";
 import { buttonClasses } from "@/components/ui/button";
 import { label, fmtDate } from "@/lib/utils";
 import { PortalReview } from "./portal-review";
+import { RawFootageForm } from "./raw-footage-form";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Review · NVK Media" };
@@ -24,6 +25,7 @@ export default async function PortalContentDetail({
   if (!d) notFound();
 
   const needsReview = ["content_review", "review"].includes(d.status);
+  const needsRawFootage = d.status === "waiting_for_raw";
   const gate = d.status === "content_review" ? "content" : d.status === "review" ? "final" : null;
 
   return (
@@ -108,6 +110,8 @@ export default async function PortalContentDetail({
         <div className="lg:col-span-1">
           {needsReview ? (
             <PortalReview deliverableId={d.id} />
+          ) : needsRawFootage ? (
+            <RawFootageForm deliverableId={d.id} />
           ) : (
             <Card>
               <CardContent className="p-5 text-sm text-muted-foreground">

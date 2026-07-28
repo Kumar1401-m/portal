@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ClipboardList, Plus } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import {
   getDeliverables,
   getClientsMini,
   getServiceCounts,
   getAssignees,
 } from "@/lib/deliverables";
+import { crmClientIds } from "@/lib/crm";
 import { getCategoryMap, getUsedCategories } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
@@ -33,14 +34,16 @@ export default async function DeliverablesPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const sp = await searchParams;
-  const { params, service, filters, hasFilters } = parseTaskQuery(sp);
+  const { params, service, filters: parsedFilters, hasFilters } = parseTaskQuery(sp);
+  const scopeIds = await crmClientIds(user);
+  const filters = { ...parsedFilters, crmClientIds: scopeIds };
 
   const [rows, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
     getDeliverables(filters),
     getServiceCounts(filters),
-    getClientsMini(),
+    getClientsMini(scopeIds),
     getAssignees(),
     getCategoryMap(),
     getUsedCategories(),
@@ -68,9 +71,11 @@ export default async function DeliverablesPage({
             {hasFilters ? " (filtered)" : ""}
           </p>
         </div>
-        <Link href={newHref} className={buttonClasses()}>
-          <Plus className="h-4 w-4" /> New task
-        </Link>
+        {user.role !== "crm" ? (
+          <Link href={newHref} className={buttonClasses()}>
+            <Plus className="h-4 w-4" /> New task
+          </Link>
+        ) : null}
       </div>
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
@@ -155,7 +160,7 @@ export default async function DeliverablesPage({
                     <EditVideoModal
                       deliverable={d}
                       categories={categoryMap}
-                      canSendToClient={user.role === "super_admin"}
+                      canSendToClient={user.role === "super_admin" || user.role === "crm"}
                     />
                   </TD>
                 </TR>

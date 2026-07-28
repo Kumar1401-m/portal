@@ -10,8 +10,9 @@ import {
   Building2,
   IndianRupee,
 } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
+import { canAccessClient } from "@/lib/crm";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,8 +36,9 @@ export default async function ClientDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const { id } = await params;
+  if (!(await canAccessClient(user, Number(id)))) notFound();
   const c = await getClientDetail(Number(id));
   if (!c) notFound();
 
@@ -67,9 +69,11 @@ export default async function ClientDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
-          <Link href={`/clients/${c.id}/edit`} className={buttonClasses({ variant: "outline", size: "sm" })}>
-            <Pencil className="h-4 w-4" /> Edit
-          </Link>
+          {user.role !== "crm" ? (
+            <Link href={`/clients/${c.id}/edit`} className={buttonClasses({ variant: "outline", size: "sm" })}>
+              <Pencil className="h-4 w-4" /> Edit
+            </Link>
+          ) : null}
           {c.status !== "churned" && user.role === "super_admin" ? (
             <form action={archiveClient}>
               <input type="hidden" name="id" value={c.id} />

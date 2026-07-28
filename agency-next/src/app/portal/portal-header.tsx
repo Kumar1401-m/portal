@@ -10,22 +10,23 @@ import { NotificationBell } from "@/components/admin/notification-bell";
 import { ThemeToggle } from "@/components/admin/theme-toggle";
 import { Button } from "@/components/ui/button";
 
-const NAV = [
-  { label: "Dashboard", href: "/portal" },
-  { label: "Content", href: "/portal/content" },
-  { label: "Invoices", href: "/portal/invoices" },
-];
-
 export function PortalHeader({
   companyName,
   notifications,
   unread,
+  actionCounts,
 }: {
   companyName: string;
   notifications: NotificationRow[];
   unread: number;
+  actionCounts: { content: number; invoices: number };
 }) {
   const pathname = usePathname();
+  const NAV = [
+    { label: "Dashboard", href: "/portal", badge: 0 },
+    { label: "Content", href: "/portal/content", badge: actionCounts.content },
+    { label: "Invoices", href: "/portal/invoices", badge: actionCounts.invoices },
+  ];
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur">
@@ -46,11 +47,16 @@ export function PortalHeader({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                   active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {item.label}
+                {item.badge > 0 ? (
+                  <span className="grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
+                    {item.badge > 9 ? "9+" : item.badge}
+                  </span>
+                ) : null}
               </Link>
             );
           })}

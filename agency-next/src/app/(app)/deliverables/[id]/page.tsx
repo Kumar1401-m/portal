@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Building2, Calendar, Link2, MessageSquareWarning } from "lucide-react";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDeliverable } from "@/lib/deliverables";
+import { canAccessClient } from "@/lib/crm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge } from "@/components/ui/service-badge";
@@ -34,12 +35,14 @@ export default async function DeliverableDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const user = await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const { id } = await params;
   const d = await getDeliverable(Number(id));
   if (!d) notFound();
+  if (!(await canAccessClient(user, d.client_id))) notFound();
 
   const service = serviceOf(d);
+  const canSendToClient = user.role === "super_admin" || user.role === "crm";
   const isPoster = service === "poster_designing";
 
   return (
@@ -74,7 +77,7 @@ export default async function DeliverableDetailPage({
           <WorkflowControls
             deliverableId={d.id}
             status={d.status}
-            canSendToClient={user.role === "super_admin"}
+            canSendToClient={canSendToClient}
           />
 
           <Card>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getDesigners } from "@/lib/clients";
+import { getCrmUsers } from "@/lib/crm";
 import { createClient } from "../actions";
 import { ClientForm } from "../client-form";
 import { Button, buttonClasses } from "@/components/ui/button";
@@ -21,8 +22,13 @@ export default async function NewClientPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireUser(ADMIN_ROLES);
-  const [designers, sp] = await Promise.all([getDesigners(), searchParams]);
+  const user = await requireUser(ADMIN_ROLES);
+  const isSuperAdmin = user.role === "super_admin";
+  const [designers, crmUsers, sp] = await Promise.all([
+    getDesigners(),
+    isSuperAdmin ? getCrmUsers() : Promise.resolve([]),
+    searchParams,
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -44,6 +50,8 @@ export default async function NewClientPage({
         designers={designers}
         isCreate
         submitButton={<Button type="submit">Create client</Button>}
+        crmUsers={crmUsers}
+        canManageCrmAccess={isSuperAdmin}
       />
     </div>
   );

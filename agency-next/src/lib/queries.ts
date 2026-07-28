@@ -255,13 +255,17 @@ export type ClientRow = {
   created_at: string;
 };
 
-export async function getClients(): Promise<ClientRow[]> {
+/** `clientIds` scopes the list for a crm user; omit/null for unrestricted (admin). */
+export async function getClients(clientIds?: number[] | null): Promise<ClientRow[]> {
+  if (clientIds && clientIds.length === 0) return [];
+  const scope = clientIds && clientIds.length ? `AND id IN (${clientIds.map(() => "?").join(",")})` : "";
   const rows = await query<ClientRow>(
     `SELECT id, company_name, contact_person, email, phone, status,
        monthly_package, monthly_deliverables, renewal_date, created_at
      FROM clients
-     WHERE status != 'churned'
-     ORDER BY (status='active') DESC, company_name ASC`
+     WHERE status != 'churned' ${scope}
+     ORDER BY (status='active') DESC, company_name ASC`,
+    clientIds && clientIds.length ? clientIds : []
   );
   return rows.map((r) => ({
     ...r,

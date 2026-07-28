@@ -24,7 +24,7 @@ const sizes: Record<Size, string> = {
 };
 
 const BASE =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
+  "interactive inline-flex items-center justify-center gap-2 rounded-md font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:shadow-md";
 
 /** Build button classes — use on links styled as buttons: <Link className={buttonClasses()}> */
 export function buttonClasses(opts: { variant?: Variant; size?: Size; className?: string } = {}) {

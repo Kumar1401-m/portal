@@ -7,6 +7,7 @@ import {
   getClientsMini,
   getAssignees,
 } from "@/lib/deliverables";
+import { crmClientIds } from "@/lib/crm";
 import { getCategoryMap, getUsedCategories } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
@@ -36,18 +37,21 @@ export default async function TodayPage({
   const isDesigner = user.role === "poster_designer";
   const sp = await searchParams;
   const { params, service, filters, hasFilters } = parseTaskQuery(sp);
+  const scopeIds = await crmClientIds(user);
 
-  // Designers only ever see their own worklist; admins see everyone's.
+  // Designers only ever see their own worklist; crm only their assigned
+  // clients; admins/super_admins see everyone's.
   const scoped = {
     ...filters,
     today: true,
     assignedTo: isDesigner ? user.id : filters.assignedTo,
+    crmClientIds: scopeIds,
   };
 
   const [rows, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
     getDeliverables(scoped),
     getServiceCounts(scoped),
-    getClientsMini(),
+    getClientsMini(scopeIds),
     getAssignees(),
     getCategoryMap(),
     getUsedCategories(),
@@ -157,7 +161,7 @@ export default async function TodayPage({
                       <EditVideoModal
                         deliverable={d}
                         categories={categoryMap}
-                        canSendToClient={user.role === "super_admin"}
+                        canSendToClient={user.role === "super_admin" || user.role === "crm"}
                       />
                     </TD>
                   </TR>

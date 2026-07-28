@@ -36,13 +36,17 @@ export function Sidebar({
               href={item.href}
               onClick={onNavigate}
               className={cn(
-                "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium",
+                "transition-all duration-200 hover:translate-x-0.5",
                 active
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
               )}
             >
-              <item.icon className="h-[18px] w-[18px] shrink-0" />
+              {active ? (
+                <span className="animate-fade-in absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-current" />
+              ) : null}
+              <item.icon className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110" />
               <span className="flex-1">{item.label}</span>
               {!item.ready ? (
                 <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-label="Coming soon" />

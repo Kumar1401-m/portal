@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getClientDetail, getDesigners } from "@/lib/clients";
+import { getCrmUsers, getClientCrmUserIds } from "@/lib/crm";
 import { updateClient } from "../../actions";
 import { ClientForm, type ClientDefaults } from "../../client-form";
 import { parseClientServices } from "@/lib/services";
@@ -20,11 +21,14 @@ export default async function EditClientPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_ROLES);
+  const isSuperAdmin = user.role === "super_admin";
   const { id } = await params;
-  const [client, designers, sp] = await Promise.all([
+  const [client, designers, crmUsers, assignedCrmIds, sp] = await Promise.all([
     getClientDetail(Number(id)),
     getDesigners(),
+    isSuperAdmin ? getCrmUsers() : Promise.resolve([]),
+    isSuperAdmin ? getClientCrmUserIds(Number(id)) : Promise.resolve([]),
     searchParams,
   ]);
   if (!client) notFound();
@@ -63,6 +67,8 @@ export default async function EditClientPage({
     loc_whatsapp: str(ph.whatsapp),
     services: parseClientServices(client.services),
     ig_user_id: str(client.ig_user_id),
+    is_personal: Boolean(client.is_personal),
+    crm_user_ids: assignedCrmIds,
   };
 
   return (
@@ -86,6 +92,8 @@ export default async function EditClientPage({
         designers={designers}
         isCreate={false}
         submitButton={<Button type="submit">Save changes</Button>}
+        crmUsers={crmUsers}
+        canManageCrmAccess={isSuperAdmin}
       />
     </div>
   );

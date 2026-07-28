@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { Designer } from "@/lib/clients";
+import type { CrmUserOption } from "@/lib/crm";
 import { SERVICE_LIST, type ServiceKey } from "@/lib/services";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,8 @@ export type ClientDefaults = Partial<{
   loc_whatsapp: string;
   services: ServiceKey[];
   ig_user_id: string;
+  is_personal: boolean;
+  crm_user_ids: number[];
 }>;
 
 function Field({
@@ -59,12 +62,18 @@ export function ClientForm({
   designers,
   isCreate,
   submitButton,
+  crmUsers = [],
+  canManageCrmAccess = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   defaults?: ClientDefaults;
   designers: Designer[];
   isCreate: boolean;
   submitButton: React.ReactNode;
+  /** Active crm-role users, for the access checklist below. */
+  crmUsers?: CrmUserOption[];
+  /** Only super_admin may assign crm access or mark a client personal. */
+  canManageCrmAccess?: boolean;
 }) {
   const d = defaults;
   return (
@@ -179,6 +188,66 @@ export function ClientForm({
           </Field>
         </CardContent>
       </Card>
+
+      {canManageCrmAccess ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>CRM access</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <label
+              htmlFor="is_personal"
+              className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+            >
+              <input
+                id="is_personal"
+                type="checkbox"
+                name="is_personal"
+                value="1"
+                defaultChecked={d.is_personal}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+              />
+              <span className="text-sm">
+                <span className="font-medium">Personal client</span>
+                <br />
+                <span className="text-muted-foreground">
+                  Excludes this client from being newly assigned to a CRM user below.
+                  Doesn&apos;t remove access already granted.
+                </span>
+              </span>
+            </label>
+
+            <div>
+              <p className="mb-2 text-sm font-medium">CRM users who can access this client</p>
+              {crmUsers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No CRM team members yet — add one in Settings → Team.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {crmUsers.map((u) => (
+                    <label
+                      key={u.id}
+                      htmlFor={`crm-${u.id}`}
+                      className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border px-3 py-2 transition-colors hover:bg-muted/60"
+                    >
+                      <input
+                        id={`crm-${u.id}`}
+                        type="checkbox"
+                        name="crm_user_ids"
+                        value={u.id}
+                        defaultChecked={d.crm_user_ids?.includes(u.id)}
+                        className="h-4 w-4 shrink-0 accent-[var(--primary)]"
+                      />
+                      <span className="text-sm">{u.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

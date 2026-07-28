@@ -46,6 +46,8 @@ export type DeliverableFilters = {
   category?: string;
   dueFrom?: string; // YYYY-MM-DD
   dueTo?: string; // YYYY-MM-DD
+  /** crm role scoping: null/omitted = unrestricted, [] = no access to anything. */
+  crmClientIds?: number[] | null;
 };
 
 /**
@@ -111,6 +113,14 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
     const cond = serviceCond(f.service);
     conds.push(cond);
     if (cond.includes("?")) params.push(f.service);
+  }
+  if (f.crmClientIds !== undefined && f.crmClientIds !== null) {
+    if (f.crmClientIds.length === 0) {
+      conds.push("1=0");
+    } else {
+      conds.push(`d.client_id IN (${f.crmClientIds.map(() => "?").join(",")})`);
+      params.push(...f.crmClientIds);
+    }
   }
 
   return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
@@ -226,7 +236,14 @@ export type ApprovalCounts = {
 };
 
 /** Counts for the Approvals worklist tabs (churned clients excluded). */
-export async function getApprovalCounts(): Promise<ApprovalCounts> {
+export async function getApprovalCounts(crmClientIds?: number[] | null): Promise<ApprovalCounts> {
+  if (crmClientIds && crmClientIds.length === 0) {
+    return { content: 0, final: 0, changes: 0, approved: 0 };
+  }
+  const scope =
+    crmClientIds && crmClientIds.length
+      ? `AND d.client_id IN (${crmClientIds.map(() => "?").join(",")})`
+      : "";
   const row = await queryOne<Record<string, unknown>>(
     `SELECT
        COALESCE(SUM(d.status = 'content_review'),0)     AS content,
@@ -234,7 +251,8 @@ export async function getApprovalCounts(): Promise<ApprovalCounts> {
        COALESCE(SUM(d.status = 'changes_requested'),0)  AS changes,
        COALESCE(SUM(d.status = 'approved'),0)           AS approved
      FROM deliverables d JOIN clients c ON c.id = d.client_id
-     WHERE c.status != 'churned'`
+     WHERE c.status != 'churned' ${scope}`,
+    crmClientIds && crmClientIds.length ? crmClientIds : []
   );
   return {
     content: n(row?.content),
@@ -247,8 +265,12 @@ export async function getApprovalCounts(): Promise<ApprovalCounts> {
 export type ClientMini = { id: number; company_name: string };
 
 /** Active/non-churned clients for dropdowns. */
-export async function getClientsMini(): Promise<ClientMini[]> {
+export async function getClientsMini(crmClientIds?: number[] | null): Promise<ClientMini[]> {
+  if (crmClientIds && crmClientIds.length === 0) return [];
+  const scope =
+    crmClientIds && crmClientIds.length ? `AND id IN (${crmClientIds.map(() => "?").join(",")})` : "";
   return query<ClientMini>(
-    `SELECT id, company_name FROM clients WHERE status != 'churned' ORDER BY company_name`
+    `SELECT id, company_name FROM clients WHERE status != 'churned' ${scope} ORDER BY company_name`,
+    crmClientIds && crmClientIds.length ? crmClientIds : []
   );
 }

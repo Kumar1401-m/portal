@@ -9,6 +9,7 @@ import { requireUser, ADMIN_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
+import { setClientCrmAccess } from "@/lib/crm";
 
 const PAYMENT_PLANS = ["monthly", "quarterly", "half_yearly", "yearly", "one_time"];
 const STATUSES = ["active", "inactive", "paused", "churned"];
@@ -22,8 +23,11 @@ type ClientData = {
 const s = (fd: FormData, k: string) => String(fd.get(k) || "").trim();
 const orNull = (v: string) => (v === "" ? null : v);
 
-/** Extract scalar client columns + localization JSON from a form. */
-function parseClient(fd: FormData): ClientData {
+/** Extract scalar client columns + localization JSON from a form.
+ *  `is_personal` is only ever taken from the form for super_admin — a plain
+ *  admin's submission silently leaves it untouched, matching the UI (which
+ *  doesn't even render that field for them). */
+function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
   const payment_plan = s(fd, "payment_plan");
   const status = s(fd, "status");
   const designer = s(fd, "designer_id");
@@ -52,6 +56,9 @@ function parseClient(fd: FormData): ClientData {
     // Meta Graph IG business account id — enables Instagram auto-posting.
     ig_user_id: orNull(s(fd, "ig_user_id")),
   };
+  if (isSuperAdmin) {
+    columns.is_personal = fd.get("is_personal") ? 1 : 0;
+  }
 
   // Localization → these drive the AI caption brief (city/country/language/tone).
   const captionSettings: Record<string, string> = {};
@@ -70,7 +77,8 @@ function parseClient(fd: FormData): ClientData {
 
 export async function createClient(formData: FormData): Promise<void> {
   const user = await requireUser(ADMIN_ROLES);
-  const { columns, captionSettings, placeholderValues } = parseClient(formData);
+  const isSuperAdmin = user.role === "super_admin";
+  const { columns, captionSettings, placeholderValues } = parseClient(formData, isSuperAdmin);
   const portalPassword = s(formData, "portal_password");
 
   if (!columns.company_name || String(columns.company_name).length < 2) {
@@ -111,6 +119,14 @@ export async function createClient(formData: FormData): Promise<void> {
     redirect(`/clients/new?error=${msg}`);
   }
 
+  if (isSuperAdmin) {
+    const crmUserIds = formData
+      .getAll("crm_user_ids")
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0);
+    await setClientCrmAccess(clientId, crmUserIds);
+  }
+
   // Formal onboarding email (best-effort; includes creds when a login was made).
   if (columns.email) {
     sendOnboardingEmail(
@@ -130,7 +146,8 @@ export async function createClient(formData: FormData): Promise<void> {
 /* ------------------------------- Update ------------------------------- */
 
 export async function updateClient(formData: FormData): Promise<void> {
-  await requireUser(ADMIN_ROLES);
+  const user = await requireUser(ADMIN_ROLES);
+  const isSuperAdmin = user.role === "super_admin";
   const id = Number(formData.get("id"));
   if (!id) redirect("/clients");
 
@@ -142,7 +159,7 @@ export async function updateClient(formData: FormData): Promise<void> {
   }>("SELECT id, designer_id, caption_settings, placeholder_values FROM clients WHERE id = ?", [id]);
   if (!existing) redirect("/clients");
 
-  const { columns, captionSettings, placeholderValues } = parseClient(formData);
+  const { columns, captionSettings, placeholderValues } = parseClient(formData, isSuperAdmin);
   if (!columns.company_name || String(columns.company_name).length < 2) {
     redirect(`/clients/${id}/edit?error=name`);
   }
@@ -167,6 +184,14 @@ export async function updateClient(formData: FormData): Promise<void> {
        WHERE client_id = ? AND status NOT IN ('posted','completed','cancelled','rejected')`,
       [columns.designer_id, id]
     );
+  }
+
+  if (isSuperAdmin) {
+    const crmUserIds = formData
+      .getAll("crm_user_ids")
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0);
+    await setClientCrmAccess(id, crmUserIds);
   }
 
   revalidatePath(`/clients/${id}`);

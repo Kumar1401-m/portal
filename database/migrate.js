@@ -310,6 +310,62 @@ async function main() {
     console.log(`  + deliverables.service backfilled (${res.affectedRows} rows)`);
   }
 
+  /* ---- Cluster J: 'crm' team role — scoped, per-client staff access ---- */
+  {
+    const [col] = await query(
+      `SELECT COLUMN_TYPE AS t FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = 'users' AND column_name = 'role' LIMIT 1`,
+      [env.db.database]
+    );
+    if (col && !String(col.t).includes("'crm'")) {
+      await query(
+        `ALTER TABLE users MODIFY COLUMN role
+         ENUM('super_admin','admin','poster_designer','crm','client') NOT NULL DEFAULT 'admin'`
+      );
+      console.log('  + users.role ENUM now includes crm');
+    } else {
+      console.log('  = users.role already has crm');
+    }
+  }
+  for (const tbl of ['feedback', 'task_comments']) {
+    const [col] = await query(
+      `SELECT COLUMN_TYPE AS t FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = ? AND column_name = 'author_role' LIMIT 1`,
+      [env.db.database, tbl]
+    );
+    if (col && !String(col.t).includes("'crm'")) {
+      await query(
+        `ALTER TABLE ${tbl} MODIFY COLUMN author_role
+         ENUM('super_admin','admin','poster_designer','crm','client') DEFAULT NULL`
+      );
+      console.log(`  + ${tbl}.author_role ENUM now includes crm`);
+    } else {
+      console.log(`  = ${tbl}.author_role already has crm`);
+    }
+  }
+
+  // Personal clients: excluded from NEW crm assignment (not retroactive).
+  await addColumn('clients', 'is_personal', 'is_personal TINYINT(1) NOT NULL DEFAULT 0');
+
+  // Reference links: an alternative to raw footage when none exists — CRM
+  // pastes inspiration/reference URLs instead, so editing can still start.
+  await addColumn('deliverables', 'reference_links', 'reference_links TEXT DEFAULT NULL');
+
+  // Many-to-many: which CRM users can access which clients. Assigned from the
+  // client's own edit page, super_admin only.
+  await run('client_crm_access table', `
+    CREATE TABLE IF NOT EXISTS client_crm_access (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      crm_user_id BIGINT UNSIGNED NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_client_crm (client_id, crm_user_id),
+      KEY idx_cca_crm_user (crm_user_id),
+      CONSTRAINT fk_cca_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      CONSTRAINT fk_cca_crm_user FOREIGN KEY (crm_user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

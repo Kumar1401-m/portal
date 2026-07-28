@@ -8,3 +8,4 @@ uploads/
 coverage/
 dist/
 tmp/
+.next/

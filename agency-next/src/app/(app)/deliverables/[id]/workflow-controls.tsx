@@ -34,7 +34,7 @@ const NEXT: Record<string, Action[]> = {
   cancelled: [{ label: "Reopen", status: "content_review" }],
 };
 
-/** Sending content to the client (either gate) is restricted to super_admin. */
+/** Sending content to the client (either gate) is restricted to super_admin and crm. */
 const SEND_TO_CLIENT_STATUSES = ["content_review", "review"];
 
 function actionsFor(status: string, canSendToClient: boolean): Action[] {

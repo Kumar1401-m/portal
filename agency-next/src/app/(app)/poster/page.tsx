@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Image as ImageIcon, ExternalLink, MessageSquareWarning, ArrowRight } from "lucide-react";
-import { requireUser, STAFF_ROLES } from "@/lib/auth";
+import { requireUser, POSTER_ROLES } from "@/lib/auth";
 import { getPosters, posterDone, posterInReview } from "@/lib/posters";
 import { quickStatus } from "../deliverables/actions";
 import { PosterSubmitForm } from "./poster-submit";
@@ -16,7 +16,7 @@ export const metadata = { title: "Posters · NVK Hub" };
 export const dynamic = "force-dynamic";
 
 export default async function PosterPage() {
-  const user = await requireUser(STAFF_ROLES);
+  const user = await requireUser(POSTER_ROLES);
   const posters = await getPosters(user);
   const isDesigner = user.role === "poster_designer";
 

@@ -1,9 +1,11 @@
-import { FileText } from "lucide-react";
+import { FileText, CheckCircle2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { getPortalInvoices } from "@/lib/portal";
+import { getPortalInvoices, getPortalClientInfo } from "@/lib/portal";
+import { isRazorpayEnabled } from "@/lib/razorpay";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
+import { PayButton } from "./pay-button";
 import { money, label, fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Invoices · NVK Media" };
@@ -11,7 +13,11 @@ export const dynamic = "force-dynamic";
 
 export default async function PortalInvoicesPage() {
   const user = await requireUser(["client"]);
-  const invoices = user.clientId ? await getPortalInvoices(user.clientId) : [];
+  const [invoices, client, canPayOnline] = await Promise.all([
+    user.clientId ? getPortalInvoices(user.clientId) : Promise.resolve([]),
+    user.clientId ? getPortalClientInfo(user.clientId) : Promise.resolve(null),
+    isRazorpayEnabled(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -33,6 +39,7 @@ export default async function PortalInvoicesPage() {
                 <th>Due</th>
                 <th>Amount</th>
                 <th>Status</th>
+                <th className="text-right">Action</th>
               </tr>
             </THead>
             <TBody>
@@ -45,6 +52,22 @@ export default async function PortalInvoicesPage() {
                   <TD>
                     <Badge tone={statusTone(inv.status)}>{label(inv.status)}</Badge>
                   </TD>
+                  <TD className="text-right">
+                    {inv.status === "paid" ? (
+                      <span className="inline-flex items-center gap-1 text-sm text-success">
+                        <CheckCircle2 className="h-4 w-4" /> Paid
+                      </span>
+                    ) : canPayOnline && inv.pending_payment_id ? (
+                      <PayButton
+                        invoiceId={inv.id}
+                        invoiceNo={inv.invoice_no}
+                        companyName={client?.company_name || "Agency"}
+                        contactEmail={client?.email}
+                      />
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Pending</span>
+                    )}
+                  </TD>
                 </TR>
               ))}
             </TBody>
@@ -52,9 +75,11 @@ export default async function PortalInvoicesPage() {
         )}
       </Card>
 
-      <p className="text-center text-xs text-muted-foreground">
-        Online payment (Razorpay) is coming soon — for now, please settle via your usual method.
-      </p>
+      {!canPayOnline ? (
+        <p className="text-center text-xs text-muted-foreground">
+          Online payment is coming soon — for now, please settle via your usual method.
+        </p>
+      ) : null}
     </div>
   );
 }

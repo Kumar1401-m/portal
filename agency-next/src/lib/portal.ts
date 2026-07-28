@@ -16,6 +16,13 @@ export type PortalOverview = {
     video_type: string | null;
     content_category: string | null;
   }[];
+  raw_needed_items: {
+    id: number;
+    title: string;
+    service: string | null;
+    video_type: string | null;
+    content_category: string | null;
+  }[];
 };
 
 export async function getPortalOverview(clientId: number): Promise<PortalOverview | null> {
@@ -25,7 +32,7 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
   );
   if (!client) return null;
 
-  const [month, invoices, awaiting] = await Promise.all([
+  const [month, invoices, awaiting, rawNeeded] = await Promise.all([
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS total,
         SUM(status IN ('approved','scheduled','posted','completed')) AS approved,
@@ -45,6 +52,12 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
        ORDER BY id DESC`,
       [clientId]
     ),
+    query<PortalOverview["raw_needed_items"][number]>(
+      `SELECT id, title, service, video_type, content_category FROM deliverables
+       WHERE client_id = ? AND status = 'waiting_for_raw'
+       ORDER BY id DESC`,
+      [clientId]
+    ),
   ]);
 
   return {
@@ -55,6 +68,7 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
       pending_count: n(invoices?.pending_count),
     },
     awaiting_items: awaiting,
+    raw_needed_items: rawNeeded,
   };
 }
 
@@ -114,13 +128,43 @@ export type PortalInvoice = {
   status: string;
   issue_date: string | null;
   due_date: string | null;
+  pending_payment_id: number | null;
 };
 
 export async function getPortalInvoices(clientId: number): Promise<PortalInvoice[]> {
   const rows = await query<PortalInvoice>(
-    `SELECT id, invoice_no, total, status, issue_date, due_date
-     FROM invoices WHERE client_id = ? ORDER BY created_at DESC LIMIT 100`,
+    `SELECT i.id, i.invoice_no, i.total, i.status, i.issue_date, i.due_date,
+            (SELECT p.id FROM payments p WHERE p.invoice_id = i.id AND p.status = 'pending'
+              ORDER BY p.id DESC LIMIT 1) AS pending_payment_id
+     FROM invoices i WHERE i.client_id = ? ORDER BY i.created_at DESC LIMIT 100`,
     [clientId]
   );
-  return rows.map((r) => ({ ...r, total: n(r.total) }));
+  return rows.map((r) => ({
+    ...r,
+    total: n(r.total),
+    pending_payment_id: r.pending_payment_id == null ? null : n(r.pending_payment_id),
+  }));
+}
+
+export type PortalClientInfo = { company_name: string; email: string | null };
+
+export async function getPortalClientInfo(clientId: number): Promise<PortalClientInfo | null> {
+  return queryOne<PortalClientInfo>("SELECT company_name, email FROM clients WHERE id = ?", [clientId]);
+}
+
+export type PortalActionCounts = { content: number; invoices: number };
+
+/** Lightweight counts for nav badges — content needing review/footage, unpaid invoices. */
+export async function getPortalActionCounts(clientId: number): Promise<PortalActionCounts> {
+  const [content, invoices] = await Promise.all([
+    queryOne<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM deliverables
+       WHERE client_id = ? AND status IN ('content_review','review','waiting_for_raw')`,
+      [clientId]
+    ),
+    queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM invoices WHERE client_id = ? AND status != 'paid'", [
+      clientId,
+    ]),
+  ]);
+  return { content: n(content?.n), invoices: n(invoices?.n) };
 }
