@@ -6,7 +6,8 @@ import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
-import { sendPaymentReceiptEmail } from "@/lib/email";
+import { sendPaidInvoiceEmail } from "@/lib/email";
+import { getAgencyInbox } from "@/lib/settings";
 
 export type PortalActionState = { ok: boolean; error?: string; message?: string };
 
@@ -240,18 +241,52 @@ export async function verifyInvoicePayment(
     await execute("UPDATE invoices SET status = 'paid' WHERE id = ?", [payment.invoice_id]);
   }
 
-  const client = await queryOne<{ company_name: string; email: string | null }>(
-    "SELECT company_name, email FROM clients WHERE id = ?",
-    [payment.client_id]
-  );
+  const client = await queryOne<{
+    company_name: string;
+    contact_person: string | null;
+    email: string | null;
+  }>("SELECT company_name, contact_person, email FROM clients WHERE id = ?", [payment.client_id]);
+
+  const invoice = payment.invoice_id
+    ? await queryOne<{
+        invoice_no: string;
+        amount: string;
+        tax: string;
+        processing_fee: string;
+      }>(
+        "SELECT invoice_no, amount, tax, processing_fee FROM invoices WHERE id = ?",
+        [payment.invoice_id]
+      )
+    : null;
+
   await notifyAdmins(
     "payment_received",
     "Payment received",
     `₹${Number(payment.amount).toLocaleString("en-IN")} received via Razorpay.`,
     "/payments"
   );
+
+  // Receipt to the client, plus a copy to the agency's own inbox.
   if (client) {
-    sendPaymentReceiptEmail(client, { amount: payment.amount, invoice_no: null, method: "razorpay" }).catch(() => {});
+    const agencyInbox = await getAgencyInbox();
+    sendPaidInvoiceEmail(
+      client,
+      {
+        invoice_no: invoice?.invoice_no ?? null,
+        amount: invoice?.amount ?? null,
+        tax: invoice?.tax ?? null,
+        processing_fee: invoice?.processing_fee ?? null,
+        total: payment.amount,
+        method: "razorpay",
+        reference: paymentId,
+        paid_on: new Date().toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
+      },
+      agencyInbox
+    ).catch(() => {});
   }
 
   revalidatePath("/portal/invoices");

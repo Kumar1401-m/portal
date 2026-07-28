@@ -133,19 +133,73 @@ export async function sendApprovalRequestEmail(
   );
 }
 
-export async function sendPaymentReceiptEmail(
-  client: { company_name: string; email?: string | null },
-  payment: { amount: number | string; invoice_no?: string | null; method?: string | null }
-) {
-  return sendEmail(
+/**
+ * Paid invoice / receipt, sent once a payment succeeds. Goes to the client and
+ * to the agency's own inbox, so both sides keep a record. `agencyEmail` is the
+ * company address from Settings, falling back to the super admin's login.
+ */
+export async function sendPaidInvoiceEmail(
+  client: { company_name: string; contact_person?: string | null; email?: string | null },
+  invoice: {
+    invoice_no?: string | null;
+    amount?: number | string | null;
+    tax?: number | string | null;
+    processing_fee?: number | string | null;
+    total: number | string;
+    method?: string | null;
+    reference?: string | null;
+    paid_on?: string | null;
+  },
+  agencyEmail?: string | null
+): Promise<{ client: boolean; agency: boolean }> {
+  const row = (l: string, v: string, strong = false) =>
+    `<tr>
+       <td style="padding:6px 0;color:#6b7280">${esc(l)}</td>
+       <td style="padding:6px 0;text-align:right;${strong ? "font-weight:700;font-size:16px" : ""}">${v}</td>
+     </tr>`;
+
+  const lines = [
+    invoice.invoice_no ? row("Invoice", esc(invoice.invoice_no)) : "",
+    invoice.amount != null && Number(invoice.amount) > 0 ? row("Amount", money(invoice.amount)) : "",
+    invoice.tax != null && Number(invoice.tax) > 0 ? row("Tax", money(invoice.tax)) : "",
+    invoice.processing_fee != null && Number(invoice.processing_fee) > 0
+      ? row("Processing fee", money(invoice.processing_fee))
+      : "",
+    row("Total paid", money(invoice.total), true),
+    invoice.method ? row("Method", esc(invoice.method.toUpperCase())) : "",
+    invoice.reference ? row("Reference", esc(invoice.reference)) : "",
+    invoice.paid_on ? row("Paid on", esc(invoice.paid_on)) : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  const table = `<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">${lines}</table>`;
+  const label = invoice.invoice_no ? `Invoice ${invoice.invoice_no}` : "Payment";
+
+  const toClient = await sendEmail(
     client.email,
-    "Payment received",
+    `${label} — paid`,
     "Payment received ✓",
-    `<p>Hi ${esc(client.company_name)},</p>
-     <p>We've received your payment of <b>${money(payment.amount)}</b>${
-       payment.invoice_no ? ` for ${esc(payment.invoice_no)}` : ""
-     }. Thank you!</p>`
+    `<p>Hi ${esc(client.contact_person || client.company_name)},</p>
+     <p>Thank you — we've received your payment. Here's your receipt:</p>
+     ${table}
+     <p>Keep this email for your records. You can also see it any time in your portal.</p>
+     ${button("/portal/invoices", "View invoices")}`
   );
+
+  // Agency copy — same figures, framed as an internal record.
+  const toAgency = agencyEmail
+    ? await sendEmail(
+        agencyEmail,
+        `${label} paid — ${client.company_name}`,
+        "Payment received ✓",
+        `<p><b>${esc(client.company_name)}</b> has paid.</p>
+         ${table}
+         ${button("/payments", "Open payments")}`
+      )
+    : false;
+
+  return { client: toClient, agency: toAgency };
 }
 
 export async function sendNotificationEmail(

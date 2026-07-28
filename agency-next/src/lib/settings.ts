@@ -59,6 +59,24 @@ export async function getPublicSettings(): Promise<
   return { ...rest, razorpay_key_secret_set: Boolean(razorpay_key_secret) };
 }
 
+/**
+ * Where the agency's own copy of client-facing mail should land: the company
+ * address from Settings, falling back to an active super admin's login.
+ */
+export async function getAgencyInbox(): Promise<string | null> {
+  try {
+    const { company_email } = await getSettings();
+    if (company_email) return company_email;
+    const rows = await query<{ email: string | null }>(
+      "SELECT email FROM users WHERE role = 'super_admin' AND is_active = 1 AND email IS NOT NULL ORDER BY id LIMIT 1"
+    );
+    return rows[0]?.email ?? null;
+  } catch (err) {
+    console.warn("getAgencyInbox failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 /** Upsert a batch of settings. Unknown keys and blank secrets are ignored. */
 export async function saveSettings(values: Partial<Settings>): Promise<void> {
   for (const [k, v] of Object.entries(values)) {

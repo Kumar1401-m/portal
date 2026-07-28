@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { queryOne, execute, transaction, type ResultSetHeader } from "@/lib/db";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { notifyClientById } from "@/lib/notify";
-import { sendInvoiceEmail, sendPaymentReceiptEmail } from "@/lib/email";
+import { sendInvoiceEmail, sendPaidInvoiceEmail } from "@/lib/email";
+import { getAgencyInbox } from "@/lib/settings";
 import { money } from "@/lib/utils";
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -111,11 +112,16 @@ export async function markPaid(formData: FormData): Promise<void> {
     client_id: number;
     amount: string;
     invoice_no: string | null;
+    inv_amount: string | null;
+    inv_tax: string | null;
+    inv_fee: string | null;
     company_name: string;
+    contact_person: string | null;
     email: string | null;
   }>(
     `SELECT p.id, p.invoice_id, p.client_id, p.amount, i.invoice_no,
-            c.company_name, c.email
+            i.amount AS inv_amount, i.tax AS inv_tax, i.processing_fee AS inv_fee,
+            c.company_name, c.contact_person, c.email
      FROM payments p
      LEFT JOIN invoices i ON i.id = p.invoice_id
      JOIN clients c ON c.id = p.client_id
@@ -142,9 +148,28 @@ export async function markPaid(formData: FormData): Promise<void> {
     "/portal/invoices",
     false
   );
-  sendPaymentReceiptEmail(
-    { company_name: payment!.company_name, email: payment!.email },
-    { amount: payment!.amount, invoice_no: payment!.invoice_no, method }
+  // Receipt to the client, plus a copy to the agency's own inbox.
+  const agencyInbox = await getAgencyInbox();
+  sendPaidInvoiceEmail(
+    {
+      company_name: payment!.company_name,
+      contact_person: payment!.contact_person,
+      email: payment!.email,
+    },
+    {
+      invoice_no: payment!.invoice_no,
+      amount: payment!.inv_amount,
+      tax: payment!.inv_tax,
+      processing_fee: payment!.inv_fee,
+      total: payment!.amount,
+      method,
+      paid_on: new Date().toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }),
+    },
+    agencyInbox
   ).catch(() => {});
 
   revalidatePath("/payments");
