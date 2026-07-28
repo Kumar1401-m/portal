@@ -290,7 +290,6 @@ export type CrmDashboard = {
     overdue: number;
   };
   pending_approvals: number;
-  recent_activities: AdminDashboard["recent_activities"];
   upcoming_tasks: AdminDashboard["upcoming_tasks"];
 };
 
@@ -306,7 +305,6 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
     clients: { total: 0, active: 0 },
     deliverables: { month_total: 0, month_completed: 0, today: 0, upcoming: 0, overdue: 0 },
     pending_approvals: 0,
-    recent_activities: [],
     upcoming_tasks: [],
   };
   if (clientIds && clientIds.length === 0) return empty;
@@ -317,7 +315,7 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
   const dScope = ids ? `AND client_id IN (${ids.join(",")})` : "";
   const jScope = ids ? `AND d.client_id IN (${ids.join(",")})` : "";
 
-  const [clients, deliverables, approvals, activities, upcoming] = await Promise.all([
+  const [clients, deliverables, approvals, upcoming] = await Promise.all([
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS total, SUM(status='active') AS active
          FROM clients WHERE status != 'churned' ${cScope}`
@@ -335,19 +333,6 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS awaiting FROM deliverables
         WHERE status IN ('content_review','review') ${dScope}`
-    ),
-    query<AdminDashboard["recent_activities"][number]>(
-      // Activity is agency-wide, so narrow it to this crm's own clients by
-      // matching the deliverables they can see.
-      ids
-        ? `SELECT a.actor_name, a.action, a.entity_type, a.entity_id, a.description, a.created_at
-             FROM activity_logs a
-             LEFT JOIN deliverables d ON a.entity_type = 'deliverable' AND d.id = a.entity_id
-            WHERE (a.entity_type = 'deliverable' AND d.client_id IN (${ids.join(",")}))
-               OR (a.entity_type = 'client' AND a.entity_id IN (${ids.join(",")}))
-            ORDER BY a.id DESC LIMIT 12`
-        : `SELECT actor_name, action, entity_type, entity_id, description, created_at
-             FROM activity_logs ORDER BY id DESC LIMIT 12`
     ),
     query<AdminDashboard["upcoming_tasks"][number]>(
       `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
@@ -369,7 +354,6 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
       overdue: n(deliverables?.overdue),
     },
     pending_approvals: n(approvals?.awaiting),
-    recent_activities: activities,
     upcoming_tasks: upcoming,
   };
 }

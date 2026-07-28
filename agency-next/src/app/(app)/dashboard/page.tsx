@@ -108,9 +108,9 @@ export default async function DashboardPage() {
       {/* Per-client production summary (reference image 4) */}
       <ProductionSummary rows={production} />
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className={admin ? "grid gap-6 lg:grid-cols-3" : "grid gap-6"}>
         {/* Upcoming tasks */}
-        <Card className="lg:col-span-2">
+        <Card className={admin ? "lg:col-span-2" : undefined}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-muted-foreground" />
@@ -145,7 +145,8 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent activity */}
+        {/* Recent activity — agency-wide, so admins only. */}
+        {admin ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -154,13 +155,13 @@ export default async function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {d.recent_activities.length === 0 ? (
+            {admin.recent_activities.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
                 No activity yet.
               </p>
             ) : (
               <ul className="space-y-3">
-                {d.recent_activities.slice(0, 8).map((a, i) => (
+                {admin.recent_activities.slice(0, 8).map((a, i) => (
                   <li key={i} className="flex gap-3 text-sm">
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary/60" />
                     <div className="min-w-0">
@@ -180,6 +181,7 @@ export default async function DashboardPage() {
             )}
           </CardContent>
         </Card>
+        ) : null}
       </div>
 
       {/* Client progress — the production summary above already covers this
