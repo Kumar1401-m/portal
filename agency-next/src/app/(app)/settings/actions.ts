@@ -6,6 +6,7 @@ import { queryOne, execute } from "@/lib/db";
 import { requireUser, ADMIN_ROLES, SUPER_ADMIN_ROLES, type Role } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { saveSettings, type Settings } from "@/lib/settings";
+import { sendStaffWelcomeEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
 
 export type ActionState = { ok: boolean; error?: string; message?: string };
@@ -165,62 +166,6 @@ export async function toggleCategory(_prev: ActionState, fd: FormData): Promise<
   return OK(next ? `"${cat.name}" enabled.` : `"${cat.name}" hidden from new tasks.`);
 }
 
-/* ----------------------------- Danger zone ----------------------------- */
-
-/**
- * Wipe every task so the portal can be started fresh. Clients, team and
- * settings are untouched; feedback/comments cascade with their deliverable.
- * Guarded by a typed confirmation so it can't fire on a stray click.
- */
-export async function clearAllTasks(_prev: ActionState, fd: FormData): Promise<ActionState> {
-  await requireUser(SUPER_ADMIN_ROLES);
-  if (s(fd, "confirm").toUpperCase() !== "DELETE") {
-    return FAIL('Type DELETE to confirm — nothing was removed.');
-  }
-
-  const before = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM deliverables");
-  const total = Number(before?.n ?? 0);
-  if (total === 0) return OK("There were no tasks to clear.");
-
-  await execute("DELETE FROM deliverables");
-
-  for (const p of ["/deliverables", "/today", "/approvals", "/dashboard", "/reports", "/poster", "/portal"]) {
-    revalidatePath(p);
-  }
-  return OK(`Cleared ${total} task${total === 1 ? "" : "s"}. Clients and team were kept.`);
-}
-
-/**
- * Wipe invoices and payments so revenue reporting starts from zero. Clients
- * and their tasks are untouched. Razorpay itself is not affected — this only
- * clears what this portal has recorded.
- */
-export async function clearAllRevenue(_prev: ActionState, fd: FormData): Promise<ActionState> {
-  await requireUser(SUPER_ADMIN_ROLES);
-  if (s(fd, "confirm").toUpperCase() !== "DELETE") {
-    return FAIL("Type DELETE to confirm — nothing was removed.");
-  }
-
-  const inv = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM invoices");
-  const pay = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM payments");
-  const invoices = Number(inv?.n ?? 0);
-  const payments = Number(pay?.n ?? 0);
-  if (invoices === 0 && payments === 0) return OK("There was no revenue data to clear.");
-
-  // Payments first — they reference invoices.
-  await execute("DELETE FROM payments");
-  await execute("DELETE FROM invoices");
-
-  for (const p of ["/payments", "/dashboard", "/portal", "/portal/invoices", "/clients"]) {
-    revalidatePath(p);
-  }
-  return OK(
-    `Cleared ${invoices} invoice${invoices === 1 ? "" : "s"} and ${payments} payment${
-      payments === 1 ? "" : "s"
-    }. Revenue is back to zero.`
-  );
-}
-
 /* ------------------------------- Team ------------------------------- */
 
 const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "crm", "super_admin"];
@@ -249,8 +194,17 @@ export async function addTeamMember(_prev: ActionState, fd: FormData): Promise<A
     hash,
     role,
   ]);
+
+  // Send them their sign-in details. Don't fail the whole action if mail is
+  // down — the account exists either way, so just report it.
+  const mailed = await sendStaffWelcomeEmail({ name, email, role }, password).catch(() => false);
+
   revalidatePath("/settings");
-  return OK(`${name} added to the team.`);
+  return OK(
+    mailed
+      ? `${name} added to the team — sign-in details emailed to ${email}.`
+      : `${name} added to the team. Email couldn't be sent, so share the password directly.`
+  );
 }
 
 export async function setTeamMemberActive(
@@ -356,8 +310,8 @@ export async function resetTeamPassword(
   if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
     return FAIL("Password must be at least 8 characters with letters and numbers.");
   }
-  const u = await queryOne<{ name: string; role: string }>(
-    "SELECT name, role FROM users WHERE id = ?",
+  const u = await queryOne<{ name: string; email: string; role: string }>(
+    "SELECT name, email, role FROM users WHERE id = ?",
     [id]
   );
   if (!u) return FAIL("User not found.");
@@ -365,6 +319,17 @@ export async function resetTeamPassword(
   const hash = await bcrypt.hash(password, env.bcryptRounds);
   await execute("UPDATE users SET password_hash = ? WHERE id = ?", [hash, id]);
   await execute("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?", [id]);
+
+  // Mail them the new password, otherwise they're locked out with no way to know it.
+  const mailed = await sendStaffWelcomeEmail(
+    { name: u.name, email: u.email, role: u.role },
+    password
+  ).catch(() => false);
+
   revalidatePath("/settings");
-  return OK(`Password reset for ${u.name}. They'll need to sign in again.`);
+  return OK(
+    mailed
+      ? `Password reset for ${u.name} and emailed to them. They'll need to sign in again.`
+      : `Password reset for ${u.name}. Email couldn't be sent, so share it directly.`
+  );
 }

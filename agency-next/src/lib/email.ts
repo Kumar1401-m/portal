@@ -90,6 +90,28 @@ export async function sendOnboardingEmail(
   );
 }
 
+/** Welcome + first-time credentials for a new staff member. */
+export async function sendStaffWelcomeEmail(
+  member: { name: string; email: string; role: string },
+  password: string,
+  loginUrl = "/login"
+) {
+  const roleLabel =
+    member.role === "crm"
+      ? "CRM"
+      : member.role.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return sendEmail(
+    member.email,
+    "Your account is ready",
+    `Welcome to the team, ${esc(member.name)}! 🎉`,
+    `<p>An account has been created for you on <b>${esc(env.appName)}</b> as <b>${esc(roleLabel)}</b>.</p>
+     <p>Here are your sign-in details:</p>
+     <p><b>Email:</b> ${esc(member.email)}<br/><b>Password:</b> ${esc(password)}</p>
+     ${button(loginUrl, "Sign in")}
+     <p style="color:#6b7280;font-size:13px">For your security, please change this password after your first sign-in. If you weren't expecting this email, you can ignore it.</p>`
+  );
+}
+
 export async function sendInvoiceEmail(
   client: { company_name: string; email?: string | null },
   invoice: { invoice_no: string; total: number | string; due_date?: string | null }

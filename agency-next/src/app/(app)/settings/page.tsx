@@ -1,11 +1,4 @@
-import {
-  Settings as SettingsIcon,
-  Building2,
-  Receipt,
-  Activity,
-  Lock,
-  TriangleAlert,
-} from "lucide-react";
+import { Settings as SettingsIcon, Building2, Receipt, Activity, Lock } from "lucide-react";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPublicSettings } from "@/lib/settings";
 import { getCategoryMap } from "@/lib/categories";
@@ -19,12 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
-import {
-  saveAgencyProfile,
-  saveBillingSettings,
-  clearAllTasks,
-  clearAllRevenue,
-} from "./actions";
+import { saveAgencyProfile, saveBillingSettings } from "./actions";
 
 export const metadata = { title: "Settings · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -272,75 +260,6 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* ---------------------------- Danger zone ---------------------------- */}
-      {isSuperAdmin ? (
-        <Card className="border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <TriangleAlert className="h-5 w-5" /> Danger zone
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <p className="mb-1 text-sm font-medium">Clear all tasks</p>
-              <p className="mb-3 text-sm text-muted-foreground">
-                Permanently deletes every task, along with its comments and feedback, so you
-                can start fresh. Clients, team members and settings are kept. This cannot be
-                undone.
-              </p>
-              <ActionForm
-                action={clearAllTasks}
-                submitLabel="Clear all tasks"
-                variant="destructive"
-                size="sm"
-                resetOnSuccess
-                confirm="This permanently deletes EVERY task in the portal. There is no undo. Continue?"
-                formClassName="flex flex-wrap items-end gap-2"
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="confirm-clear">Type DELETE to confirm</Label>
-                  <Input
-                    id="confirm-clear"
-                    name="confirm"
-                    autoComplete="off"
-                    placeholder="DELETE"
-                    className="h-9 max-w-[12rem]"
-                  />
-                </div>
-              </ActionForm>
-            </div>
-
-            <div className="border-t border-border pt-6">
-              <p className="mb-1 text-sm font-medium">Reset revenue</p>
-              <p className="mb-3 text-sm text-muted-foreground">
-                Permanently deletes every invoice and payment, putting revenue back to zero.
-                Clients and tasks are kept. This only clears what the portal recorded — it
-                does not touch Razorpay. This cannot be undone.
-              </p>
-              <ActionForm
-                action={clearAllRevenue}
-                submitLabel="Reset revenue"
-                variant="destructive"
-                size="sm"
-                resetOnSuccess
-                confirm="This permanently deletes EVERY invoice and payment record. There is no undo. Continue?"
-                formClassName="flex flex-wrap items-end gap-2"
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="confirm-revenue">Type DELETE to confirm</Label>
-                  <Input
-                    id="confirm-revenue"
-                    name="confirm"
-                    autoComplete="off"
-                    placeholder="DELETE"
-                    className="h-9 max-w-[12rem]"
-                  />
-                </div>
-              </ActionForm>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }
