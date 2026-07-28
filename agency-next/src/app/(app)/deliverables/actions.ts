@@ -240,6 +240,7 @@ export async function updateVideoDetails(
 
   const updates: Record<string, string | null> = {
     content_hook: orNull(val("content_hook")),
+    description: orNull(val("description")),
     caption: orNull(val("caption")),
     writer_notes: orNull(val("writer_notes")),
     edited_link: orNull(editedLink),

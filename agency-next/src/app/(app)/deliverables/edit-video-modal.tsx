@@ -166,6 +166,17 @@ export function EditVideoModal({
             </div>
 
             <div className="space-y-1.5">
+              <Label htmlFor={`de-${d.id}`}>Content / script</Label>
+              <Textarea
+                id={`de-${d.id}`}
+                name="description"
+                rows={5}
+                defaultValue={d.description ?? ""}
+                placeholder="The script or brief the video is built from — the client sees this at the content approval stage."
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor={`cap-${d.id}`}>Caption / Description</Label>
                 <button
