@@ -280,7 +280,10 @@ export default async function SettingsPage() {
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="r2_public_base_url">Public bucket URL</Label>
+                <Label htmlFor="r2_public_base_url">
+                  Public bucket URL{" "}
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </Label>
                 <Input
                   id="r2_public_base_url"
                   name="r2_public_base_url"
@@ -288,9 +291,10 @@ export default async function SettingsPage() {
                   defaultValue={settings.r2_public_base_url}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Turn on public access for the bucket (R2 → Settings → Public development URL), and
-                  add this site to the bucket&apos;s CORS policy with <code>PUT</code> allowed, or
-                  uploads will be blocked by the browser.
+                  Leave this blank to keep the bucket private — videos are then served through
+                  short-lived signed links, which is the safer default. You do still need to add
+                  this site to the bucket&apos;s CORS policy with <code>PUT</code> allowed, or the
+                  browser will block uploads.
                 </p>
               </div>
             </ActionForm>
@@ -349,10 +353,15 @@ export default async function SettingsPage() {
               settings.r2_account_id &&
                 settings.r2_bucket &&
                 settings.r2_access_key_id &&
-                settings.r2_secret_access_key_set &&
-                settings.r2_public_base_url
+                settings.r2_secret_access_key_set
             )}
-            detail={settings.r2_bucket || "add your R2 details above"}
+            detail={
+              settings.r2_bucket
+                ? `${settings.r2_bucket} · ${
+                    settings.r2_public_base_url ? "public URL" : "private, signed links"
+                  }`
+                : "add your R2 details above"
+            }
           />
         </CardContent>
       </Card>
