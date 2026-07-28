@@ -190,6 +190,37 @@ export async function clearAllTasks(_prev: ActionState, fd: FormData): Promise<A
   return OK(`Cleared ${total} task${total === 1 ? "" : "s"}. Clients and team were kept.`);
 }
 
+/**
+ * Wipe invoices and payments so revenue reporting starts from zero. Clients
+ * and their tasks are untouched. Razorpay itself is not affected — this only
+ * clears what this portal has recorded.
+ */
+export async function clearAllRevenue(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  if (s(fd, "confirm").toUpperCase() !== "DELETE") {
+    return FAIL("Type DELETE to confirm — nothing was removed.");
+  }
+
+  const inv = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM invoices");
+  const pay = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM payments");
+  const invoices = Number(inv?.n ?? 0);
+  const payments = Number(pay?.n ?? 0);
+  if (invoices === 0 && payments === 0) return OK("There was no revenue data to clear.");
+
+  // Payments first — they reference invoices.
+  await execute("DELETE FROM payments");
+  await execute("DELETE FROM invoices");
+
+  for (const p of ["/payments", "/dashboard", "/portal", "/portal/invoices", "/clients"]) {
+    revalidatePath(p);
+  }
+  return OK(
+    `Cleared ${invoices} invoice${invoices === 1 ? "" : "s"} and ${payments} payment${
+      payments === 1 ? "" : "s"
+    }. Revenue is back to zero.`
+  );
+}
+
 /* ------------------------------- Team ------------------------------- */
 
 const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "crm", "super_admin"];
