@@ -271,7 +271,7 @@ export function EditVideoModal({
               <Label>Finished video</Label>
               <VideoUpload
                 deliverableId={d.id}
-                currentUrl={d.cloud_video_url}
+                currentUrl={d.cloud_video_link}
                 onUploaded={setEditedLink}
               />
             </div>

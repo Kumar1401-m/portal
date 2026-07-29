@@ -1,6 +1,7 @@
 /** Read/write queries for the deliverables (content) module. */
 import "server-only";
 import { query, queryOne, hasColumn } from "./db";
+import { buildVideoPermalink } from "./video-link";
 import type { CaptionSource } from "./ai";
 import { SERVICE_KEYS, serviceOf, type ServiceKey } from "./services";
 
@@ -33,6 +34,12 @@ export type DeliverableListRow = {
   promotion_type: string | null;
   raw_drive_link: string | null;
   cloud_video_url: string | null;
+  /**
+   * Permanent link to the uploaded video, or null if there isn't one. Not a
+   * column — derived from the object key, since a private bucket only ever
+   * yields URLs that expire.
+   */
+  cloud_video_link: string | null;
   scheduled_at: string | null;
   reject_reason: string | null;
 };
@@ -134,9 +141,9 @@ export async function getDeliverables(
 ): Promise<DeliverableListRow[]> {
   const { where, params } = buildWhere(f);
   const cloud = (await hasColumn("deliverables", "cloud_video_url"))
-    ? "d.cloud_video_url"
-    : "NULL AS cloud_video_url";
-  const rows = await query<DeliverableListRow>(
+    ? "d.cloud_video_url, d.cloud_video_key"
+    : "NULL AS cloud_video_url, NULL AS cloud_video_key";
+  const rows = await query<DeliverableListRow & { cloud_video_key: string | null }>(
     `SELECT d.id, d.client_id, d.title, d.platform, d.video_type, d.service,
             d.content_category, d.status, d.priority,
             d.due_date, d.month_key, d.ai_score, c.company_name,
@@ -153,7 +160,15 @@ export async function getDeliverables(
      LIMIT 200`,
     params
   );
-  return rows.map((r) => ({ ...r, ai_score: r.ai_score == null ? null : n(r.ai_score) }));
+  return rows.map((r) => ({
+    ...r,
+    ai_score: r.ai_score == null ? null : n(r.ai_score),
+    // A public bucket has a real URL; a private one gets the portal's own
+    // permanent address for the same object.
+    cloud_video_link:
+      r.cloud_video_url ||
+      (r.cloud_video_key ? buildVideoPermalink(r.id, r.cloud_video_key) : null),
+  }));
 }
 
 export type ServiceCounts = Record<ServiceKey | "all", number>;

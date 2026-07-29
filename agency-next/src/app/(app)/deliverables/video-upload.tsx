@@ -87,11 +87,19 @@ export function VideoUpload({
     if (shown) onUploaded?.(shown);
   }
 
+  /**
+   * Copy also fills the deliverable link in. Pressing copy means "I want this
+   * URL over there" — the paste was always the next step, so it may as well
+   * happen. Handy for videos uploaded before the field was filled in
+   * automatically.
+   */
   function copy() {
     if (!url) return;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+    onUploaded?.(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    navigator.clipboard?.writeText(url).catch(() => {
+      // Clipboard access can be refused; the field is filled either way.
     });
   }
 
@@ -165,17 +173,19 @@ export function VideoUpload({
             <button
               type="button"
               onClick={copy}
-              title="Copy link"
+              title="Copy the link and put it in the deliverable link below"
               className={buttonClasses({ variant: "ghost", size: "icon" })}
             >
               {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
             </button>
           </div>
-          {phase === "done" ? (
-            <p className="text-xs text-muted-foreground">
-              Added to the deliverable link below — save to keep it.
-            </p>
-          ) : null}
+          <p className="text-xs text-muted-foreground">
+            {copied
+              ? "Copied, and put in the deliverable link below."
+              : phase === "done"
+                ? "Added to the deliverable link below — save to keep it."
+                : "Copy also puts this in the deliverable link below."}
+          </p>
         </div>
       ) : null}
 
