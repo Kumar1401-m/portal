@@ -13,7 +13,6 @@ import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload } from "./video-upload";
-import { ClientBoard } from "./client-board";
 import { deleteDeliverable } from "./upload-actions";
 import {
   ServiceCategoryPicker,
@@ -61,7 +60,6 @@ export function EditVideoModal({
   // service picker live rather than the value the task was saved with.
   const [service, setService] = useState<ServiceKey>(serviceOf(d));
   const isPoster = service === "poster_designing";
-  const [tab, setTab] = useState<"task" | "client">("task");
   const [genPending, startGen] = useTransition();
   const [delPending, startDel] = useTransition();
   const [genError, setGenError] = useState<string | null>(null);
@@ -72,7 +70,6 @@ export function EditVideoModal({
       setCaption(d.caption ?? "");
       setEditedLink(d.edited_link ?? "");
       setService(serviceOf(d));
-      setTab("task");
       setGenError(null);
     }
   }, [open, d]);
@@ -105,42 +102,7 @@ export function EditVideoModal({
         <SquarePen className="h-4 w-4" />
       </button>
 
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Update Task Details"
-        size={tab === "client" ? "wide" : "normal"}
-      >
-        {/* Two views on the same editor: the task itself, and where it sits in
-            the client's month. */}
-        <div className="flex shrink-0 gap-1 border-b border-border px-4 pt-3">
-          {(
-            [
-              ["task", "This task"],
-              ["client", `${d.company_name} · all tasks`],
-            ] as const
-          ).map(([key, text]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
-                tab === key
-                  ? "border-b-2 border-primary text-foreground"
-                  : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {text}
-            </button>
-          ))}
-        </div>
-
-        {tab === "client" ? (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6">
-            <ClientBoard clientId={d.client_id} />
-          </div>
-        ) : (
-          <>
+      <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
         {d.status === "waiting_for_raw" ? (
           <form action={rawAction} className="shrink-0 space-y-3 border-b border-border bg-amber-500/5 p-6">
             <input type="hidden" name="deliverable_id" value={d.id} />
@@ -378,8 +340,6 @@ export function EditVideoModal({
             ) : null}
           </div>
         </form>
-          </>
-        )}
       </Modal>
     </>
   );

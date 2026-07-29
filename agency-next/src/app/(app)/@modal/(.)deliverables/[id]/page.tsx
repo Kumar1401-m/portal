@@ -14,6 +14,8 @@ export default async function DeliverableModal({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // Anything that isn't a task id belongs to a sibling route, not to a popup.
+  if (!/^\d+$/.test(id)) return null;
   return (
     <RouteModal>
       <TaskDetail id={Number(id)} inModal />

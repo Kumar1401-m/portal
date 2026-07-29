@@ -27,14 +27,24 @@ function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
  * navigation from inside the portal, by the intercepted popup — same markup
  * either way, so the two can't drift apart.
  *
- * `inModal` only drops the chrome the popup already provides (the back arrow,
- * which would be a dead end inside a dialog).
+ * `inModal` drops the chrome the popup already provides (the back arrow, which
+ * would be a dead end inside a dialog) — and, importantly, turns a missing
+ * task into a message inside the popup. `notFound()` raised from a parallel
+ * slot takes down the whole screen, so the page you were reading would vanish
+ * behind a 404 because a popup couldn't open.
  */
 export async function TaskDetail({ id, inModal = false }: { id: number; inModal?: boolean }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
-  const d = await getDeliverable(id);
-  if (!d) notFound();
-  if (!(await canAccessClient(user, d.client_id))) notFound();
+  const d = Number.isInteger(id) && id > 0 ? await getDeliverable(id) : null;
+  const allowed = d ? await canAccessClient(user, d.client_id) : false;
+  if (!d || !allowed) {
+    if (!inModal) notFound();
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        That task isn&apos;t available any more.
+      </p>
+    );
+  }
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
