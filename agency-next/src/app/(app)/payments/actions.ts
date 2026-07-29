@@ -182,3 +182,76 @@ export async function markPaid(formData: FormData): Promise<void> {
 
   revalidatePath("/payments");
 }
+
+/* --------------------------- Delete a payment --------------------------- */
+
+export type DeletePaymentState = { ok: boolean; error?: string };
+
+/**
+ * Remove one payment record. Super admin only — this is the money history, and
+ * deleting a settled payment moves the reported revenue.
+ *
+ * If the payment was the settlement of an invoice, that invoice goes back to
+ * unpaid rather than being left marked paid with nothing behind it.
+ */
+export async function deletePayment(paymentId: number): Promise<DeletePaymentState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  const id = Math.trunc(Number(paymentId));
+  if (!id) return { ok: false, error: "Missing payment." };
+
+  const p = await queryOne<{ id: number; invoice_id: number | null; status: string }>(
+    "SELECT id, invoice_id, status FROM payments WHERE id = ?",
+    [id]
+  );
+  if (!p) return { ok: false, error: "That payment no longer exists." };
+
+  try {
+    await transaction(async (conn) => {
+      await conn.execute("DELETE FROM payments WHERE id = ?", [id]);
+      if (p.invoice_id) {
+        // Any other payment still standing against the invoice keeps it paid.
+        const [rest] = await conn.execute(
+          "SELECT COUNT(*) AS n FROM payments WHERE invoice_id = ? AND status = 'paid'",
+          [p.invoice_id]
+        );
+        const stillPaid = Number((rest as unknown as { n: number }[])[0]?.n || 0) > 0;
+        if (!stillPaid) {
+          await conn.execute("UPDATE invoices SET status = 'sent' WHERE id = ?", [p.invoice_id]);
+        }
+      }
+    });
+  } catch {
+    return { ok: false, error: "Could not delete that payment." };
+  }
+
+  for (const path of ["/payments", "/dashboard", "/reports"]) revalidatePath(path);
+  return { ok: true };
+}
+
+/* --------------------------- Delete an invoice --------------------------- */
+
+/**
+ * Remove an invoice and every payment recorded against it. Super admin only.
+ * Raised by mistake, duplicated, or a client that never went ahead — those are
+ * the cases; a settled invoice should normally be credited, not erased.
+ */
+export async function deleteInvoice(invoiceId: number): Promise<DeletePaymentState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  const id = Math.trunc(Number(invoiceId));
+  if (!id) return { ok: false, error: "Missing invoice." };
+
+  const inv = await queryOne<{ id: number }>("SELECT id FROM invoices WHERE id = ?", [id]);
+  if (!inv) return { ok: false, error: "That invoice no longer exists." };
+
+  try {
+    await transaction(async (conn) => {
+      await conn.execute("DELETE FROM payments WHERE invoice_id = ?", [id]);
+      await conn.execute("DELETE FROM invoices WHERE id = ?", [id]);
+    });
+  } catch {
+    return { ok: false, error: "Could not delete that invoice." };
+  }
+
+  for (const path of ["/payments", "/dashboard", "/reports"]) revalidatePath(path);
+  return { ok: true };
+}

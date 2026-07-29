@@ -23,6 +23,7 @@ export type ClientFull = {
   renewal_date: string | null;
   monthly_deliverables: number;
   monthly_posters: number;
+  category: string;
   payment_plan: string;
   notes: string | null;
   status: string;
@@ -91,6 +92,7 @@ export async function getClientDetail(id: number): Promise<ClientDetail | null> 
     package_amount: n(client.package_amount),
     monthly_deliverables: n(client.monthly_deliverables),
     monthly_posters: n(client.monthly_posters),
+    category: String(client.category ?? ""),
     progress: {
       total: n(progress?.total),
       completed: n(progress?.completed),

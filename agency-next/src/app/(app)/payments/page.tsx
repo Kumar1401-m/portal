@@ -3,6 +3,7 @@ import { CreditCard, Plus, IndianRupee, Clock, CheckCircle2, Wallet } from "luci
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPaymentsSummary, getInvoices, getPayments } from "@/lib/payments";
 import { markPaid } from "./actions";
+import { DeleteRecordButton } from "./delete-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
@@ -121,6 +122,14 @@ export default async function PaymentsPage() {
                             <CheckCircle2 className="h-4 w-4" /> Paid
                           </span>
                         )}
+                        {canManage ? (
+                          <DeleteRecordButton
+                            kind="invoice"
+                            id={inv.id}
+                            label={inv.invoice_no}
+                            amount={money(inv.total)}
+                          />
+                        ) : null}
                       </div>
                     </TD>
                   </TR>
@@ -149,6 +158,7 @@ export default async function PaymentsPage() {
                   <th>Amount</th>
                   <th>Method</th>
                   <th>Status</th>
+                  {canManage ? <th className="text-right">Delete</th> : null}
                 </tr>
               </THead>
               <TBody>
@@ -162,6 +172,16 @@ export default async function PaymentsPage() {
                     <TD>
                       <Badge tone={statusTone(p.status)}>{label(p.status)}</Badge>
                     </TD>
+                    {canManage ? (
+                      <TD className="text-right">
+                        <DeleteRecordButton
+                          kind="payment"
+                          id={p.id}
+                          label={p.invoice_no || p.company_name}
+                          amount={money(p.amount)}
+                        />
+                      </TD>
+                    ) : null}
                   </TR>
                 ))}
               </TBody>

@@ -24,6 +24,7 @@ export type ClientDefaults = Partial<{
   package_amount: string;
   monthly_deliverables: string;
   monthly_posters: string;
+  category: string;
   payment_plan: string;
   joining_date: string;
   renewal_date: string;
@@ -266,6 +267,16 @@ export function ClientForm({
           </Field>
           <Field label="Monthly posters" name="monthly_posters">
             <Input id="monthly_posters" name="monthly_posters" type="number" min="0" defaultValue={d.monthly_posters} />
+          </Field>
+          {/* The tier shown in the Category column of the monthly report. */}
+          <Field label="Category (report tier)" name="category">
+            <Input
+              id="category"
+              name="category"
+              maxLength={10}
+              placeholder="A, B or C"
+              defaultValue={d.category}
+            />
           </Field>
           <Field label="Payment plan" name="payment_plan">
             <Select id="payment_plan" name="payment_plan" defaultValue={d.payment_plan || "monthly"}>

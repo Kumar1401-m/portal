@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS clients (
   renewal_date      DATE DEFAULT NULL,
   monthly_deliverables INT UNSIGNED NOT NULL DEFAULT 0,  -- monthly video target
   monthly_posters   INT UNSIGNED NOT NULL DEFAULT 0,     -- monthly poster target
+  category          VARCHAR(10) NOT NULL DEFAULT '',      -- client tier shown on the monthly report (A / B / C)
   payment_plan      ENUM('monthly','quarterly','half_yearly','yearly','one_time') NOT NULL DEFAULT 'monthly',
   notes             TEXT DEFAULT NULL,
   status            ENUM('active','inactive','paused','churned') NOT NULL DEFAULT 'active',

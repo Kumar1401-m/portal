@@ -56,6 +56,7 @@ export default async function EditClientPage({
     package_amount: str(client.package_amount),
     monthly_deliverables: str(client.monthly_deliverables),
     monthly_posters: str(client.monthly_posters),
+    category: client.category ?? "",
     payment_plan: str(client.payment_plan),
     joining_date: str(client.joining_date).slice(0, 10),
     renewal_date: str(client.renewal_date).slice(0, 10),

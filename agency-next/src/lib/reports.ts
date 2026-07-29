@@ -1,6 +1,6 @@
 /** Reporting queries — monthly client scorecard, split by service. */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 import { SERVICE_KEYS, type ServiceKey } from "./services";
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -91,6 +91,8 @@ export type CategoryScorecardRow = {
   id: number;
   company_name: string;
   monthly_deliverables: number;
+  /** The agency's own A / B / C tier; blank until it's set on the client. */
+  tier: string;
   total: number;
   approved: number;
   /** Keyed by content category name, e.g. "Educational Reels". */
@@ -128,8 +130,12 @@ export async function getCategoryScorecard(
       : "";
   if (crmClientIds && crmClientIds.length) params.push(...crmClientIds);
 
+  // The tier column arrived later than the rest; a database that hasn't run
+  // the migration still gets the report, just with the column blank.
+  const tierCol = (await hasColumn("clients", "category")) ? "c.category" : "''";
+
   const raw = await query<Record<string, unknown>>(
-    `SELECT c.id, c.company_name, c.monthly_deliverables,
+    `SELECT c.id, c.company_name, c.monthly_deliverables, ${tierCol} AS tier,
             ${CAT_EXPR} AS cat,
             COUNT(d.id) AS total,
             COALESCE(SUM(d.status IN ${DONE}),0) AS approved
@@ -154,6 +160,7 @@ export async function getCategoryScorecard(
         id,
         company_name: String(r.company_name),
         monthly_deliverables: n(r.monthly_deliverables),
+        tier: String(r.tier ?? ""),
         total: 0,
         approved: 0,
         categories: {},

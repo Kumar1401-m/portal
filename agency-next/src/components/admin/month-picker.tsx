@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
 
 /** "2026-07" -> "2026-06" / "2026-08". */
@@ -26,33 +26,45 @@ export function MonthPicker({
   month,
   basePath,
   extra = {},
+  label = "Month and Year",
 }: {
   month: string;
   basePath: string;
   extra?: Record<string, string | undefined>;
+  label?: string;
 }) {
   const href = (m: string) => {
     const q = new URLSearchParams({ month: m });
     for (const [k, v] of Object.entries(extra)) if (v) q.set(k, v);
     return `${basePath}?${q.toString()}`;
   };
+  const [y, m] = month.split("-");
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+    // An outlined field with the label notched into its border — the shape the
+    // old report used, so it reads as one control rather than three buttons.
+    <div className="relative inline-flex items-center gap-1 rounded border border-border px-2 py-1.5">
+      <span className="absolute -top-2 left-2 bg-card px-1 text-[11px] text-muted-foreground">
+        {label}
+      </span>
       <Link
         href={href(shift(month, -1))}
         aria-label="Previous month"
-        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-8 w-8" })}
+        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-7 w-7" })}
       >
         <ChevronLeft className="h-4 w-4" />
       </Link>
-      <span className="min-w-40 px-2 text-center text-sm font-medium tabular-nums">
-        {LONG(month)}
+      <span
+        className="min-w-28 px-2 text-center text-sm tabular-nums"
+        title={LONG(month)}
+      >
+        {m}/{y}
       </span>
+      <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
       <Link
         href={href(shift(month, 1))}
         aria-label="Next month"
-        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-8 w-8" })}
+        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-7 w-7" })}
       >
         <ChevronRight className="h-4 w-4" />
       </Link>

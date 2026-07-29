@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomInt } from "crypto";
 import bcrypt from "bcryptjs";
-import { queryOne, execute, transaction, type ResultSetHeader } from "@/lib/db";
+import { queryOne, execute, transaction, hasColumn, type ResultSetHeader } from "@/lib/db";
 import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
@@ -27,7 +27,7 @@ const orNull = (v: string) => (v === "" ? null : v);
  *  `is_personal` is only ever taken from the form for super_admin — a plain
  *  admin's submission silently leaves it untouched, matching the UI (which
  *  doesn't even render that field for them). */
-function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
+async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientData> {
   const payment_plan = s(fd, "payment_plan");
   const status = s(fd, "status");
   const designer = s(fd, "designer_id");
@@ -60,6 +60,11 @@ function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
   if (isSuperAdmin) {
     columns.is_personal = fd.get("is_personal") ? 1 : 0;
   }
+  // The A / B / C tier on the monthly report. Guarded because the column
+  // arrived later — an un-migrated database still saves everything else.
+  if (await hasColumn("clients", "category")) {
+    columns.category = s(fd, "category").toUpperCase().slice(0, 10);
+  }
 
   // Localization → these drive the AI caption brief (city/country/language/tone).
   const captionSettings: Record<string, string> = {};
@@ -79,7 +84,7 @@ function parseClient(fd: FormData, isSuperAdmin: boolean): ClientData {
 export async function createClient(formData: FormData): Promise<void> {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const isSuperAdmin = user.role === "super_admin";
-  const { columns, captionSettings, placeholderValues } = parseClient(formData, isSuperAdmin);
+  const { columns, captionSettings, placeholderValues } = await parseClient(formData, isSuperAdmin);
   const portalPassword = s(formData, "portal_password");
 
   if (!columns.company_name || String(columns.company_name).length < 2) {
@@ -164,7 +169,7 @@ export async function updateClient(formData: FormData): Promise<void> {
   }>("SELECT id, designer_id, caption_settings, placeholder_values FROM clients WHERE id = ?", [id]);
   if (!existing) redirect("/clients");
 
-  const { columns, captionSettings, placeholderValues } = parseClient(formData, isSuperAdmin);
+  const { columns, captionSettings, placeholderValues } = await parseClient(formData, isSuperAdmin);
   if (!columns.company_name || String(columns.company_name).length < 2) {
     redirect(`/clients/${id}/edit?error=name`);
   }

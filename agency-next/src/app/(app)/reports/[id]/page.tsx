@@ -1,17 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil, Layers } from "lucide-react";
+import { ArrowLeft, Pencil, Video, GraduationCap, Layers } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { getClientMonth } from "@/lib/reports";
 import { queryOne } from "@/lib/db";
 import { Card } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
-import { buttonClasses } from "@/components/ui/button";
 import { MonthPicker } from "@/components/admin/month-picker";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
-import { contentStatusLabel, editorStatusLabel, editorStatusTone } from "@/lib/constants";
-import { monthKey, fmtDate } from "@/lib/utils";
+import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
+import { monthKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -24,25 +22,52 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: c ? `${c.company_name} · Reports` : "Reports" };
 }
 
-/** Coloured count chip, one per category, plus the month's total. */
-function Chip({ label, n, className }: { label: string; n: number; className: string }) {
+/** dd-mm-yyyy, the way the old report wrote dates. */
+function shortDate(v: string | null): string {
+  if (!v) return "—";
+  const d = new Date(v.length <= 10 ? `${v}T00:00:00` : v);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+const CHIPS = [
+  { className: "bg-orange-500", Icon: Video },
+  { className: "bg-purple-600", Icon: GraduationCap },
+  { className: "bg-emerald-600", Icon: Layers },
+  { className: "bg-pink-600", Icon: Layers },
+  { className: "bg-teal-600", Icon: Layers },
+];
+
+/** Promotion type pills, coloured consistently by name. */
+const PROMO_COLOURS = [
+  "bg-blue-600",
+  "bg-purple-600",
+  "bg-emerald-600",
+  "bg-orange-500",
+  "bg-pink-600",
+  "bg-teal-600",
+];
+function promoColour(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PROMO_COLOURS[h % PROMO_COLOURS.length];
+}
+
+/** Green when the stage is done, amber while it's in flight. */
+function StatusPill({ text, done }: { text: string; done: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium text-white ${className}`}
+      className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium text-white ${
+        done ? "bg-green-600" : "bg-amber-500"
+      }`}
     >
-      {label}: {n}
+      {text}
     </span>
   );
 }
 
-const CHIP_COLOURS = [
-  "bg-orange-500",
-  "bg-purple-600",
-  "bg-emerald-600",
-  "bg-pink-600",
-  "bg-teal-600",
-  "bg-indigo-600",
-];
+const DONE_STATUSES = ["approved", "scheduled", "posted", "completed"];
 
 export default async function ClientReportPage({
   params,
@@ -75,54 +100,78 @@ export default async function ClientReportPage({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href={`/reports?month=${month}${service ? `&service=${service}` : ""}`}
-          className={buttonClasses({ variant: "ghost", size: "icon" })}
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{client.company_name}</h1>
+    <div className="space-y-4">
+      <Card className="overflow-hidden p-0">
+        <div className="flex items-center gap-3 bg-indigo-700 px-4 py-3">
+          <Link
+            href={`/reports?month=${month}${service ? `&service=${service}` : ""}`}
+            aria-label="Back to the clients list"
+            className="rounded-md p-1 text-white transition-colors hover:bg-white/15"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate font-semibold text-white">
+            {client.company_name}
+          </h1>
           {service ? (
-            <p className="text-sm text-muted-foreground">{SERVICES[service].label} only</p>
+            <span className="shrink-0 text-xs text-white/80">{SERVICES[service].label} only</span>
           ) : null}
         </div>
-        <MonthPicker month={month} basePath={`/reports/${client.id}`} extra={{ service }} />
-      </div>
 
-      <div>
-        <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-          <Layers className="h-4 w-4 text-muted-foreground" />
-          Monthly deliverables
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {[...counts.entries()].map(([name, n], i) => (
-            <Chip key={name} label={name} n={n} className={CHIP_COLOURS[i % CHIP_COLOURS.length]} />
-          ))}
-          <Chip label="Total" n={tasks.length} className="bg-blue-600" />
+        <div className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-4">
+          <div className="relative rounded border border-border px-3 py-2 text-sm">
+            <span className="absolute -top-2 left-2 bg-card px-1 text-[11px] text-muted-foreground">
+              Client
+            </span>
+            <span className="block max-w-56 truncate">{client.company_name}</span>
+          </div>
+          <MonthPicker
+            month={month}
+            basePath={`/reports/${client.id}`}
+            extra={{ service }}
+            label="Select Month and Year"
+          />
         </div>
-      </div>
 
-      <Card className="overflow-hidden p-0">
+        <div className="px-4 py-4">
+          <h2 className="mb-2 text-sm font-semibold">Monthly Deliverables</h2>
+          <div className="flex flex-wrap gap-2">
+            {[...counts.entries()].map(([name, n], i) => {
+              const { className, Icon } = CHIPS[i % CHIPS.length];
+              return (
+                <span
+                  key={name}
+                  className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium text-white ${className}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {name}: {n}
+                </span>
+              );
+            })}
+            <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">
+              <Layers className="h-4 w-4" />
+              Total Videos: {tasks.length}
+            </span>
+          </div>
+        </div>
+
         <div className="w-full overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="border-b border-border bg-muted/50">
-              <tr className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_th]:py-3 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:text-primary">
-                <th>S.No</th>
-                <th>Creative type</th>
-                <th>Post schedule date</th>
-                <th>Promotion type</th>
-                <th>Shoot link</th>
-                <th>Editor link</th>
-                <th>Thumbnail</th>
-                <th>Title</th>
-                <th>Description</th>
-                <th>Content status</th>
-                <th>Editor status</th>
-                <th>Remarks</th>
-                <th className="text-right">Actions</th>
+            <thead className="border-y border-border bg-muted/40">
+              <tr className="[&_th]:px-3 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
+                <th className="w-12">S.No</th>
+                <th className="min-w-24">Creative Type</th>
+                <th className="min-w-20">Post schedule date</th>
+                <th className="min-w-24">Promotion Type</th>
+                <th className="w-16">Shoot Link</th>
+                <th className="w-16">Editor Link</th>
+                <th className="w-20">Thumbnail</th>
+                <th className="min-w-56">Title</th>
+                <th className="min-w-24">Description</th>
+                <th className="min-w-24">Content Status</th>
+                <th className="min-w-24">Editor Status</th>
+                <th className="min-w-24">Remarks</th>
+                <th className="w-16 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -136,44 +185,56 @@ export default async function ClientReportPage({
               ) : (
                 tasks.map((t, i) => {
                   const svc = SERVICES[serviceOf(t)];
+                  const done = DONE_STATUSES.includes(t.status);
                   return (
-                    <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/50">
-                      <td className="px-3 py-3 text-muted-foreground">{i + 1}</td>
-                      <td className="px-3 py-3">
-                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          <span className={`h-2 w-2 rounded-full ${svc.dot}`} />
-                          {t.content_category || svc.short}
-                        </span>
+                    <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/40">
+                      <td className="px-3 py-3 align-top text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-3 align-top">{t.content_category || svc.short}</td>
+                      <td className="whitespace-nowrap px-3 py-3 align-top">
+                        {shortDate(t.scheduled_at || t.due_date)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
-                        {t.scheduled_at ? fmtDate(t.scheduled_at) : fmtDate(t.due_date)}
-                      </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         {t.promotion_type ? (
-                          <Badge tone="info">{t.promotion_type}</Badge>
+                          <span
+                            className={`inline-block whitespace-nowrap rounded px-2.5 py-1 text-xs font-medium text-white ${promoColour(
+                              t.promotion_type
+                            )}`}
+                          >
+                            {t.promotion_type}
+                          </span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         {t.raw_drive_link ? (
-                          <a href={t.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          <a
+                            href={t.raw_drive_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 underline"
+                          >
                             View
                           </a>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         {t.edited_link ? (
-                          <a href={t.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          <a
+                            href={t.edited_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 underline"
+                          >
                             View
                           </a>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 align-top">
                         {t.thumbnail_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={t.thumbnail_url} alt="" className="h-8 w-12 rounded object-cover" />
@@ -181,29 +242,38 @@ export default async function ClientReportPage({
                           <span className="text-xs text-muted-foreground">N/A</span>
                         )}
                       </td>
-                      <td className="max-w-[20rem] px-3 py-3">
-                        <Link href={`/deliverables/${t.id}`} className="font-medium hover:text-primary hover:underline">
+                      <td className="px-3 py-3 align-top">
+                        <Link
+                          href={`/deliverables/${t.id}`}
+                          className="hover:text-primary hover:underline"
+                        >
                           {t.title}
                         </Link>
                       </td>
-                      <td className="max-w-[14rem] truncate px-3 py-3 text-muted-foreground" title={t.description ?? ""}>
+                      <td
+                        className="max-w-[10rem] truncate px-3 py-3 align-top text-muted-foreground"
+                        title={t.description ?? ""}
+                      >
                         {t.description || "—"}
                       </td>
-                      <td className="px-3 py-3">
-                        <Badge tone={statusTone(t.status)}>{contentStatusLabel(t.status)}</Badge>
+                      <td className="px-3 py-3 align-top">
+                        <StatusPill text={contentStatusLabel(t.status)} done={done} />
                       </td>
-                      <td className="px-3 py-3">
-                        <Badge tone={editorStatusTone(t.status)}>{editorStatusLabel(t.status)}</Badge>
+                      <td className="px-3 py-3 align-top">
+                        <StatusPill text={editorStatusLabel(t.status)} done={done} />
                       </td>
-                      <td className="max-w-[12rem] truncate px-3 py-3 text-muted-foreground" title={t.reject_reason ?? ""}>
+                      <td
+                        className="max-w-[10rem] truncate px-3 py-3 align-top text-muted-foreground"
+                        title={t.reject_reason ?? ""}
+                      >
                         {t.reject_reason || "—"}
                       </td>
-                      <td className="px-3 py-3 text-right">
+                      <td className="px-3 py-3 text-right align-top">
                         <Link
                           href={`/deliverables/${t.id}`}
                           aria-label={`Open ${t.title}`}
                           title={`Open ${t.title}`}
-                          className={buttonClasses({ variant: "ghost", size: "icon" })}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         >
                           <Pencil className="h-4 w-4" />
                         </Link>

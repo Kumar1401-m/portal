@@ -388,6 +388,17 @@ async function main() {
     'monthly_posters INT UNSIGNED NOT NULL DEFAULT 0'
   );
 
+  /* ---------------------------------------------------------------------
+   * Cluster M — client tier
+   * The monthly report groups clients by an A / B / C tier. Free text
+   * rather than an enum: it's the agency's own label and they rename it.
+   * ------------------------------------------------------------------- */
+  await addColumn(
+    'clients',
+    'category',
+    "category VARCHAR(10) NOT NULL DEFAULT ''"
+  );
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }
