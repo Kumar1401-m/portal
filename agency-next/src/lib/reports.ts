@@ -82,3 +82,128 @@ export async function getScorecard(
     };
   });
 }
+
+/* ------------------- Clients list, split by category ------------------- */
+
+export type CategoryTally = { total: number; approved: number };
+
+export type CategoryScorecardRow = {
+  id: number;
+  company_name: string;
+  monthly_deliverables: number;
+  total: number;
+  approved: number;
+  /** Keyed by content category name, e.g. "Educational Reels". */
+  categories: Record<string, CategoryTally>;
+};
+
+const UNCATEGORISED = "Uncategorised";
+const CAT_EXPR = `COALESCE(NULLIF(d.content_category,''),'${UNCATEGORISED}')`;
+
+/**
+ * The monthly clients list: one row per client, and for every content category
+ * that saw work this month, how many were produced and how many the client has
+ * approved.
+ *
+ * Categories are admin-managed (Settings -> Task categories), so the columns
+ * are derived from the month's data rather than hardcoded — rename or add one
+ * and the report follows.
+ */
+export async function getCategoryScorecard(
+  month: string,
+  crmClientIds?: number[] | null
+): Promise<{ rows: CategoryScorecardRow[]; categories: string[] }> {
+  if (crmClientIds && crmClientIds.length === 0) return { rows: [], categories: [] };
+
+  const params: (string | number)[] = [month];
+  const clientScope =
+    crmClientIds && crmClientIds.length
+      ? ` AND c.id IN (${crmClientIds.map(() => "?").join(",")})`
+      : "";
+  if (crmClientIds && crmClientIds.length) params.push(...crmClientIds);
+
+  const raw = await query<Record<string, unknown>>(
+    `SELECT c.id, c.company_name, c.monthly_deliverables,
+            ${CAT_EXPR} AS cat,
+            COUNT(d.id) AS total,
+            COALESCE(SUM(d.status IN ${DONE}),0) AS approved
+       FROM clients c
+       LEFT JOIN deliverables d
+         ON d.client_id = c.id AND d.month_key = ?
+        AND d.status NOT IN ('cancelled','rejected')
+      WHERE c.status != 'churned'${clientScope}
+      GROUP BY c.id, cat
+      ORDER BY c.company_name`,
+    params
+  );
+
+  const byClient = new Map<number, CategoryScorecardRow>();
+  const seen = new Set<string>();
+
+  for (const r of raw) {
+    const id = n(r.id);
+    let row = byClient.get(id);
+    if (!row) {
+      row = {
+        id,
+        company_name: String(r.company_name),
+        monthly_deliverables: n(r.monthly_deliverables),
+        total: 0,
+        approved: 0,
+        categories: {},
+      };
+      byClient.set(id, row);
+    }
+    // The LEFT JOIN yields one empty row per client with no work at all; it
+    // carries the fallback category name and a count of zero.
+    const total = n(r.total);
+    if (total === 0) continue;
+    const cat = String(r.cat);
+    seen.add(cat);
+    row.categories[cat] = { total, approved: n(r.approved) };
+    row.total += total;
+    row.approved += n(r.approved);
+  }
+
+  // Uncategorised sorts last; the rest alphabetically.
+  const categories = [...seen].sort((a, b) =>
+    a === UNCATEGORISED ? 1 : b === UNCATEGORISED ? -1 : a.localeCompare(b)
+  );
+  return { rows: [...byClient.values()], categories };
+}
+
+/* --------------------- One client's month of work --------------------- */
+
+export type ClientMonthTask = {
+  id: number;
+  title: string;
+  description: string | null;
+  content_category: string | null;
+  video_type: string | null;
+  service: string | null;
+  promotion_type: string | null;
+  scheduled_at: string | null;
+  due_date: string | null;
+  raw_drive_link: string | null;
+  edited_link: string | null;
+  thumbnail_url: string | null;
+  status: string;
+  reject_reason: string | null;
+};
+
+/** Every task a client has in one month, in the order they're due to go out. */
+export async function getClientMonth(
+  clientId: number,
+  month: string
+): Promise<ClientMonthTask[]> {
+  return query<ClientMonthTask>(
+    `SELECT d.id, d.title, d.description, d.content_category, d.video_type, d.service,
+            d.promotion_type, d.scheduled_at, d.due_date, d.raw_drive_link, d.edited_link,
+            d.thumbnail_url, d.status, d.reject_reason
+       FROM deliverables d
+      WHERE d.client_id = ? AND d.month_key = ?
+      ORDER BY (COALESCE(d.scheduled_at, d.due_date) IS NULL),
+               COALESCE(d.scheduled_at, d.due_date) ASC, d.id ASC`,
+    [clientId, month]
+  );
+}
