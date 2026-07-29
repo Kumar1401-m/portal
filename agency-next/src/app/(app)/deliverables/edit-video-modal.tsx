@@ -31,6 +31,9 @@ export function EditVideoModal({
   canDelete = false,
   assignees = [],
   canUploadVideo = true,
+  postCountries = [],
+  scheduledAtLocal = "",
+  postCountry = "india",
 }: {
   deliverable: DeliverableListRow;
   categories: CategoryOptions;
@@ -38,6 +41,9 @@ export function EditVideoModal({
   canDelete?: boolean;
   assignees?: { id: number; name: string; role: string }[];
   canUploadVideo?: boolean;
+  postCountries?: { key: string; label: string }[];
+  scheduledAtLocal?: string;
+  postCountry?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
@@ -207,6 +213,31 @@ export function EditVideoModal({
               <Label htmlFor={`wn-${d.id}`}>Content Writer Inputs</Label>
               <Textarea id={`wn-${d.id}`} name="writer_notes" rows={2} defaultValue={d.writer_notes ?? ""} />
             </div>
+
+            {postCountries.length ? (
+              <div className="space-y-1.5 rounded-lg border border-border p-3">
+                <Label htmlFor={`pc-${d.id}`}>Posting time</Label>
+                <p className="text-xs text-muted-foreground">
+                  Leave blank to post at that country&apos;s best engagement time once the client
+                  approves. Set a time to override it.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Select id={`pc-${d.id}`} name="post_country" defaultValue={postCountry}>
+                    {postCountries.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    type="datetime-local"
+                    name="post_at"
+                    defaultValue={scheduledAtLocal}
+                    aria-label="Scheduled posting time"
+                  />
+                </div>
+              </div>
+            ) : null}
 
             {canUploadVideo ? (
             <div className="space-y-2">

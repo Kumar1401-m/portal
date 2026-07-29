@@ -102,6 +102,42 @@ export function nextBestPostTime(country: string | null | undefined): string {
   return target.toISOString().slice(0, 19).replace("T", " ");
 }
 
+/** Countries offered when scheduling by hand, with their best-time default. */
+export const POST_COUNTRIES: { key: string; label: string; offsetMinutes: number; hour: number }[] =
+  [
+    { key: "india", label: "India (IST)", offsetMinutes: 330, hour: 18 },
+    { key: "usa", label: "United States (ET)", offsetMinutes: -300, hour: 19 },
+    { key: "uk", label: "United Kingdom (GMT)", offsetMinutes: 0, hour: 19 },
+    { key: "uae", label: "UAE / Dubai (GST)", offsetMinutes: 240, hour: 20 },
+    { key: "singapore", label: "Singapore (SGT)", offsetMinutes: 480, hour: 19 },
+    { key: "australia", label: "Australia (AEST)", offsetMinutes: 600, hour: 19 },
+  ];
+
+const offsetForCountry = (country: string | null | undefined) =>
+  bestPostingTimeFor(country).utcOffsetMinutes;
+
+/**
+ * Turn a wall-clock time the user typed ("2026-08-02T18:00") into the UTC
+ * DATETIME the scheduler compares against, reading it as local time in the
+ * chosen country rather than the browser's own zone.
+ */
+export function localTimeToUtc(localValue: string, country: string | null | undefined): string | null {
+  const m = localValue.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[];
+  const utcMs = Date.UTC(y, mo - 1, d, h, mi) - offsetForCountry(country) * 60000;
+  return new Date(utcMs).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** The reverse, for showing a stored UTC time back in the country's clock. */
+export function utcToLocalInput(utc: string | null, country: string | null | undefined): string {
+  if (!utc) return "";
+  const iso = utc.includes("T") ? utc : utc.replace(" ", "T");
+  const ms = Date.parse(iso.endsWith("Z") ? iso : `${iso}Z`);
+  if (Number.isNaN(ms)) return "";
+  return new Date(ms + offsetForCountry(country) * 60000).toISOString().slice(0, 16);
+}
+
 /** Categories treated as "post to Instagram automatically once approved". */
 export const AUTO_SCHEDULE_CATEGORIES = ["Instagram Reel"];
 

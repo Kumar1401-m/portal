@@ -25,6 +25,7 @@ import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
 import { TaskQuickView } from "../deliverables/task-quick-view";
 import { fmtDate } from "@/lib/utils";
+import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -164,6 +165,9 @@ export default async function TodayPage({
                         canDelete={user.role === "super_admin"}
                         assignees={assignees}
                         canUploadVideo={user.role !== "crm"}
+                        postCountries={POST_COUNTRIES}
+                        postCountry={POST_COUNTRIES[0].key}
+                        scheduledAtLocal={utcToLocalInput(d.scheduled_at, POST_COUNTRIES[0].key)}
                       />
                     </TD>
                   </TR>

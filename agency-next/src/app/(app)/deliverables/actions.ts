@@ -12,6 +12,7 @@ import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey } from "@/lib/utils";
+import { localTimeToUtc } from "@/lib/zapier";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
 
@@ -247,6 +248,14 @@ export async function updateVideoDetails(
   };
   const title = val("title");
   if (title) updates.title = title; // title is required — don't null it out
+
+  // Manual posting time: an explicit slot overrides the automatic best-time
+  // calculation done at client approval. Blank clears it and hands control back.
+  if (formData.has("post_at")) {
+    const localValue = val("post_at");
+    const country = val("post_country") || null;
+    updates.scheduled_at = localValue ? localTimeToUtc(localValue, country) : null;
+  }
 
   // Reassignment, including clearing it: the field is only present when the
   // caller may change it, so an absent value leaves the assignee alone.

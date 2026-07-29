@@ -33,6 +33,7 @@ export type DeliverableListRow = {
   promotion_type: string | null;
   raw_drive_link: string | null;
   cloud_video_url: string | null;
+  scheduled_at: string | null;
   reject_reason: string | null;
 };
 
@@ -142,7 +143,7 @@ export async function getDeliverables(
             d.assigned_to, u.name AS assignee_name,
             d.content_hook, d.caption, d.description, d.writer_notes,
             d.videographer_notes, d.thumbnail_url, d.edited_link,
-            d.promotion_type, d.raw_drive_link, ${cloud}, d.reject_reason
+            d.promotion_type, d.raw_drive_link, ${cloud}, d.scheduled_at, d.reject_reason
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id
      LEFT JOIN users u ON u.id = d.assigned_to

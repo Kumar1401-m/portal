@@ -21,6 +21,7 @@ type Row = {
   content_category: string | null;
   edited_link: string | null;
   cloud_video_key: string | null;
+  scheduled_at: string | null;
   ig_user_id: string | null;
   placeholder_values: unknown;
 };
@@ -42,7 +43,7 @@ async function clientTransition(
     : "NULL AS cloud_video_key";
   const d = await queryOne<Row>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.title, d.service, d.content_category,
-            d.edited_link, ${cloudCol}, c.ig_user_id, c.placeholder_values
+            d.edited_link, ${cloudCol}, d.scheduled_at, c.ig_user_id, c.placeholder_values
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE d.id = ? AND d.client_id = ?`,
     [id, user.clientId]
@@ -90,7 +91,11 @@ async function clientTransition(
         ? d.placeholder_values
         : {}) as Record<string, unknown>;
       const country = typeof ph.country === "string" ? ph.country : null;
-      scheduledFor = nextBestPostTime(country);
+      // A time set by hand wins — only fall back to the automatic best slot
+      // when nobody has chosen one.
+      scheduledFor = d.scheduled_at
+        ? String(d.scheduled_at).slice(0, 19).replace("T", " ")
+        : nextBestPostTime(country);
       updates.status = "scheduled";
       updates.posting_status = "scheduled";
       updates.scheduled_at = scheduledFor;
