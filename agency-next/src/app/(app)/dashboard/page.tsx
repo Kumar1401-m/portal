@@ -19,6 +19,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceDot } from "@/components/ui/service-badge";
+import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ProductionSummary } from "@/components/admin/production-summary";
 import { ServiceMix } from "@/components/admin/service-mix";
 import Link from "next/link";
@@ -107,7 +108,7 @@ export default async function DashboardPage() {
       </div>
 
       {missed.length ? (
-        <Card className="border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">
+        <Card className="overflow-hidden border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
@@ -119,28 +120,45 @@ export default async function DashboardPage() {
               These were scheduled to go live and the time has passed, but they still
               haven&apos;t posted. Usually the Zap is off, or Instagram rejected the video.
             </p>
-            <ul className="divide-y divide-border">
-              {missed.map((m) => (
-                <li key={m.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <div className="min-w-0 flex-1">
-                    <Link href={`/deliverables/${m.id}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
-                      {m.title}
-                    </Link>
-                    <p className="truncate text-xs text-muted-foreground">{m.company_name}</p>
-                  </div>
-                  <Badge tone="danger">
-                    {m.late_minutes >= 1440
-                      ? `${Math.floor(m.late_minutes / 1440)}d late`
-                      : m.late_minutes >= 60
-                        ? `${Math.floor(m.late_minutes / 60)}h late`
-                        : `${m.late_minutes}m late`}
-                  </Badge>
-                  <span className="w-40 shrink-0 text-right text-xs text-muted-foreground">
-                    due {fmtDate(m.scheduled_at)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <Table>
+              <THead>
+                <tr>
+                  <th>Task</th>
+                  <th>Client</th>
+                  <th>Scheduled for</th>
+                  <th className="text-center">How late</th>
+                  <th>Instagram</th>
+                </tr>
+              </THead>
+              <TBody>
+                {missed.map((m) => (
+                  <TR key={m.id}>
+                    <TD className="max-w-[18rem]">
+                      <Link
+                        href={`/deliverables/${m.id}`}
+                        className="font-medium text-foreground hover:text-primary hover:underline"
+                      >
+                        {m.title}
+                      </Link>
+                    </TD>
+                    <TD className="text-muted-foreground">{m.company_name}</TD>
+                    <TD className="whitespace-nowrap text-muted-foreground">
+                      {fmtDate(m.scheduled_at)}
+                    </TD>
+                    <TD className="text-center">
+                      <Badge tone="danger">
+                        {m.late_minutes >= 1440
+                          ? `${Math.floor(m.late_minutes / 1440)}d`
+                          : m.late_minutes >= 60
+                            ? `${Math.floor(m.late_minutes / 60)}h`
+                            : `${m.late_minutes}m`}
+                      </Badge>
+                    </TD>
+                    <TD className="text-muted-foreground">{label(m.instagram_status)}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
           </CardContent>
         </Card>
       ) : null}
