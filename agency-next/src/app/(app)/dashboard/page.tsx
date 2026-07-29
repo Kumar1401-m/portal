@@ -10,6 +10,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { crmClientIds } from "@/lib/crm";
 import {
   getAdminDashboard,
+  getMissedPosts,
   getCrmDashboard,
   getProductionSummary,
   getServiceMix,
@@ -20,6 +21,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceDot } from "@/components/ui/service-badge";
 import { ProductionSummary } from "@/components/admin/production-summary";
 import { ServiceMix } from "@/components/admin/service-mix";
+import Link from "next/link";
 import { money, label, fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Dashboard · NVK Hub" };
@@ -36,6 +38,9 @@ export default async function DashboardPage() {
     getProductionSummary(scopeIds),
     isCrm ? Promise.resolve([]) : getServiceMix(),
   ]);
+
+  // Slots that came and went without the post going out.
+  const missed = await getMissedPosts(scopeIds);
 
   const admin = isCrm ? null : (d as Awaited<ReturnType<typeof getAdminDashboard>>);
 
@@ -100,6 +105,45 @@ export default async function DashboardPage() {
         <StatCard title="Upcoming" value={d.deliverables.upcoming} icon={CalendarClock} tone="indigo" />
         <StatCard title="Overdue" value={d.deliverables.overdue} icon={AlertTriangle} tone="rose" />
       </div>
+
+      {missed.length ? (
+        <Card className="border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Not posted ({missed.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              These were scheduled to go live and the time has passed, but they still
+              haven&apos;t posted. Usually the Zap is off, or Instagram rejected the video.
+            </p>
+            <ul className="divide-y divide-border">
+              {missed.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/deliverables/${m.id}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
+                      {m.title}
+                    </Link>
+                    <p className="truncate text-xs text-muted-foreground">{m.company_name}</p>
+                  </div>
+                  <Badge tone="danger">
+                    {m.late_minutes >= 1440
+                      ? `${Math.floor(m.late_minutes / 1440)}d late`
+                      : m.late_minutes >= 60
+                        ? `${Math.floor(m.late_minutes / 60)}h late`
+                        : `${m.late_minutes}m late`}
+                  </Badge>
+                  <span className="w-40 shrink-0 text-right text-xs text-muted-foreground">
+                    due {fmtDate(m.scheduled_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Workload split by service — colour-coded shortcuts into the task tabs */}
       {!isCrm ? <ServiceMix rows={serviceMix} /> : null}

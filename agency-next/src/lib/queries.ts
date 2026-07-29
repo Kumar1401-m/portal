@@ -345,3 +345,48 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
     upcoming_tasks: upcoming,
   };
 }
+
+/* --------------------------- Missed posts --------------------------- */
+
+export type MissedPost = {
+  id: number;
+  title: string;
+  company_name: string;
+  scheduled_at: string;
+  late_minutes: number;
+  instagram_status: string;
+};
+
+/**
+ * Videos whose posting slot has come and gone while they're still sitting in
+ * `scheduled` — i.e. the automation didn't pick them up, or Instagram rejected
+ * them. A 30-minute grace keeps a row from being flagged while Zapier's ~15
+ * minute poll is still due to run.
+ */
+export async function getMissedPosts(clientIds: number[] | null): Promise<MissedPost[]> {
+  if (clientIds && clientIds.length === 0) return [];
+  const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
+  const scope = ids && ids.length ? `AND d.client_id IN (${ids.join(",")})` : "";
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT d.id, d.title, c.company_name, d.scheduled_at, d.instagram_status,
+            TIMESTAMPDIFF(MINUTE, d.scheduled_at, NOW()) AS late_minutes
+       FROM deliverables d
+       JOIN clients c ON c.id = d.client_id
+      WHERE d.status = 'scheduled'
+        AND d.scheduled_at IS NOT NULL
+        AND d.scheduled_at < NOW() - INTERVAL 30 MINUTE
+        AND d.instagram_status <> 'posted'
+        ${scope}
+      ORDER BY d.scheduled_at ASC
+      LIMIT 20`
+  );
+  return rows.map((r) => ({
+    id: n(r.id),
+    title: String(r.title),
+    company_name: String(r.company_name),
+    scheduled_at: String(r.scheduled_at),
+    late_minutes: n(r.late_minutes),
+    instagram_status: String(r.instagram_status ?? "not_posted"),
+  }));
+}
