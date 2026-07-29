@@ -165,7 +165,7 @@ export default async function TodayPage({
                         canDelete={user.role === "super_admin"}
                         assignees={assignees}
                         canUploadVideo={user.role !== "crm"}
-                        postCountries={POST_COUNTRIES}
+                        postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
                         postCountry={POST_COUNTRIES[0].key}
                         scheduledAtLocal={utcToLocalInput(d.scheduled_at, POST_COUNTRIES[0].key)}
                       />

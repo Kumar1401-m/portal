@@ -251,7 +251,7 @@ export async function updateVideoDetails(
 
   // Manual posting time: an explicit slot overrides the automatic best-time
   // calculation done at client approval. Blank clears it and hands control back.
-  if (formData.has("post_at")) {
+  if (formData.has("post_at") && me.role === "super_admin") {
     const localValue = val("post_at");
     const country = val("post_country") || null;
     updates.scheduled_at = localValue ? localTimeToUtc(localValue, country) : null;
