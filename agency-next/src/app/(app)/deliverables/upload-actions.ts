@@ -12,8 +12,8 @@ import {
   buildVideoKey,
   deleteObject,
   isStorageConfigured,
-  resolveVideoUrl,
 } from "@/lib/storage";
+import { buildVideoPermalink } from "@/lib/video-link";
 
 export type PresignResult =
   | { ok: true; uploadUrl: string; publicUrl: string; key: string }
@@ -47,7 +47,13 @@ export async function getVideoUploadUrl(
   return { ok: true, uploadUrl: signed.uploadUrl, publicUrl: signed.publicUrl, key };
 }
 
-export type AttachResult = { ok: boolean; error?: string; message?: string; previewUrl?: string };
+export type AttachResult = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  /** Permanent link to the video — safe to store and to share. */
+  link?: string;
+};
 
 /**
  * Record the uploaded video against the task. Deliberately does NOT send it to
@@ -82,10 +88,12 @@ export async function attachUploadedVideo(
   const statusSql = advance ? ", status = 'caption_ready'" : "";
 
   // A private bucket has no stable public URL, so `publicUrl` is empty. Store
-  // the key regardless — that's what a signed link is derived from — and only
-  // touch the shareable link fields when there genuinely is one, rather than
-  // blanking out whatever link was already there.
+  // the key regardless — that's what a signed link is derived from — and give
+  // the deliverable link the portal's own permanent address for the video, so
+  // it no longer has to be copied out of the uploader by hand. The raw signed
+  // URL must never be written here: it expires within hours.
   const hasCloudCols = await hasColumn("deliverables", "cloud_video_url");
+  const permalink = buildVideoPermalink(deliverableId, key);
 
   if (hasCloudCols && publicUrl) {
     await execute(
@@ -96,8 +104,10 @@ export async function attachUploadedVideo(
     );
   } else if (hasCloudCols) {
     await execute(
-      `UPDATE deliverables SET cloud_video_url = NULL, cloud_video_key = ?${statusSql} WHERE id = ?`,
-      [key, deliverableId]
+      `UPDATE deliverables
+          SET cloud_video_url = NULL, cloud_video_key = ?, edited_link = ?${statusSql}
+        WHERE id = ?`,
+      [key, permalink, deliverableId]
     );
   } else if (publicUrl) {
     await execute(`UPDATE deliverables SET edited_link = ?${statusSql} WHERE id = ?`, [
@@ -119,7 +129,7 @@ export async function attachUploadedVideo(
 
   return {
     ok: true,
-    previewUrl: (await resolveVideoUrl(key, publicUrl || null)) ?? undefined,
+    link: publicUrl || permalink,
     message: advance
       ? "Video uploaded — the task is ready to send to the client."
       : "Video uploaded.",

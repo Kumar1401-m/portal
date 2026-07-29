@@ -78,11 +78,13 @@ export function VideoUpload({
       return;
     }
 
-    // A private bucket returns a signed preview link rather than a public URL.
-    const shown = saved.previewUrl || signed.publicUrl;
+    // `link` is the portal's permanent address for the video, so it can go
+    // straight into the deliverable link field — no copy and paste, and
+    // nothing that expires.
+    const shown = saved.link || signed.publicUrl;
     setUrl(shown);
     setPhase("done");
-    if (signed.publicUrl) onUploaded?.(signed.publicUrl);
+    if (shown) onUploaded?.(shown);
   }
 
   function copy() {
@@ -154,19 +156,26 @@ export function VideoUpload({
       ) : null}
 
       {url ? (
-        <div className="flex items-center gap-1.5">
-          <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs">
-            <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span className="truncate font-mono">{url}</span>
-          </span>
-          <button
-            type="button"
-            onClick={copy}
-            title="Copy link"
-            className={buttonClasses({ variant: "ghost", size: "icon" })}
-          >
-            {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-          </button>
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs">
+              <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              <span className="truncate font-mono">{url}</span>
+            </span>
+            <button
+              type="button"
+              onClick={copy}
+              title="Copy link"
+              className={buttonClasses({ variant: "ghost", size: "icon" })}
+            >
+              {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+            </button>
+          </div>
+          {phase === "done" ? (
+            <p className="text-xs text-muted-foreground">
+              Added to the deliverable link below — save to keep it.
+            </p>
+          ) : null}
         </div>
       ) : null}
 
