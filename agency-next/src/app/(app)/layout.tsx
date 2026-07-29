@@ -6,8 +6,11 @@ import { suggestionsFor } from "@/lib/assistant";
 
 export default async function AppLayout({
   children,
+  modal,
 }: {
   children: React.ReactNode;
+  /** Intercepted routes that render as a popup over the current page. */
+  modal: React.ReactNode;
 }) {
   const user = await requireUser(STAFF_ROLES);
   const [notifications, unread] = await Promise.all([
@@ -26,6 +29,7 @@ export default async function AppLayout({
   return (
     <AppShell user={user} notifications={notifications} unread={unread}>
       {children}
+      {modal}
       <AiAssistant
         name={user.name.split(" ")[0]}
         roleLabel={scopeLabel}

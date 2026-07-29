@@ -8,12 +8,13 @@ import { isServiceKey } from "@/lib/services";
 import { PLATFORMS, PRIORITIES } from "@/lib/constants";
 import { createDeliverable } from "../actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button, buttonClasses } from "@/components/ui/button";
+import { buttonClasses } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ServiceCategoryPicker } from "@/components/admin/service-category-picker";
+import { BriefFields } from "./brief-fields";
 import { label } from "@/lib/utils";
 
 export const metadata = { title: "New task · NVK Hub" };
@@ -61,62 +62,46 @@ export default async function NewDeliverablePage({
             <CardTitle>Content brief</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Every task belongs to a service and a category. */}
-            <div className="grid gap-5 sm:grid-cols-2">
-              <ServiceCategoryPicker categories={categories} defaultService={defaultService} />
-            </div>
+            {/* Every task belongs to a service and a category — and the brief
+                fields below the picker follow whichever one is chosen. */}
+            <BriefFields categories={categories} defaultService={defaultService}>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="client_id">Client *</Label>
+                  <Select id="client_id" name="client_id" required defaultValue="">
+                    <option value="" disabled>
+                      Select a client…
+                    </option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.company_name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="due_date">Due date</Label>
+                  <Input id="due_date" name="due_date" type="date" />
+                </div>
+              </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="client_id">Client *</Label>
-                <Select id="client_id" name="client_id" required defaultValue="">
-                  <option value="" disabled>
-                    Select a client…
-                  </option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.company_name}
+                <Label htmlFor="title">Title *</Label>
+                <Input id="title" name="title" required placeholder="e.g. Diwali offer reel" />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="assigned_to">Assign to</Label>
+                <Select id="assigned_to" name="assigned_to" defaultValue="">
+                  <option value="">Use the client&apos;s default designer</option>
+                  {assignees.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
                     </option>
                   ))}
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="due_date">Due date</Label>
-                <Input id="due_date" name="due_date" type="date" />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="title">Title *</Label>
-              <Input id="title" name="title" required placeholder="e.g. Diwali offer reel" />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="assigned_to">Assign to</Label>
-              <Select id="assigned_to" name="assigned_to" defaultValue="">
-                <option value="">Use the client&apos;s default designer</option>
-                {assignees.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="description">Description / script</Label>
-              <Textarea
-                id="description"
-                name="description"
-                rows={4}
-                placeholder="What is this content about? The AI uses this to write the caption."
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="content_hook">Content hook</Label>
-              <Input id="content_hook" name="content_hook" placeholder="The opening line / angle" />
-            </div>
+            </BriefFields>
 
             <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -173,7 +158,7 @@ export default async function NewDeliverablePage({
           <Link href="/deliverables" className={buttonClasses({ variant: "outline" })}>
             Cancel
           </Link>
-          <Button type="submit">Create deliverable</Button>
+          <SubmitButton pendingLabel="Creating…">Create deliverable</SubmitButton>
         </div>
       </form>
     </div>

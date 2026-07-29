@@ -10,9 +10,10 @@ import {
   type RawFootageState,
 } from "./actions";
 import type { DeliverableListRow } from "@/lib/deliverables";
-import { serviceOf } from "@/lib/services";
+import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload } from "./video-upload";
+import { ClientBoard } from "./client-board";
 import { deleteDeliverable } from "./upload-actions";
 import {
   ServiceCategoryPicker,
@@ -56,6 +57,11 @@ export function EditVideoModal({
 
   const [caption, setCaption] = useState(d.caption ?? "");
   const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
+  // A poster brief is written as one block of copy, so the fields follow the
+  // service picker live rather than the value the task was saved with.
+  const [service, setService] = useState<ServiceKey>(serviceOf(d));
+  const isPoster = service === "poster_designing";
+  const [tab, setTab] = useState<"task" | "client">("task");
   const [genPending, startGen] = useTransition();
   const [delPending, startDel] = useTransition();
   const [genError, setGenError] = useState<string | null>(null);
@@ -65,9 +71,11 @@ export function EditVideoModal({
     if (open) {
       setCaption(d.caption ?? "");
       setEditedLink(d.edited_link ?? "");
+      setService(serviceOf(d));
+      setTab("task");
       setGenError(null);
     }
-  }, [open, d.caption, d.edited_link]);
+  }, [open, d]);
 
   // Close on a successful save.
   useEffect(() => {
@@ -97,7 +105,42 @@ export function EditVideoModal({
         <SquarePen className="h-4 w-4" />
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Update Task Details"
+        size={tab === "client" ? "wide" : "normal"}
+      >
+        {/* Two views on the same editor: the task itself, and where it sits in
+            the client's month. */}
+        <div className="flex shrink-0 gap-1 border-b border-border px-4 pt-3">
+          {(
+            [
+              ["task", "This task"],
+              ["client", `${d.company_name} · all tasks`],
+            ] as const
+          ).map(([key, text]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
+                tab === key
+                  ? "border-b-2 border-primary text-foreground"
+                  : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+
+        {tab === "client" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <ClientBoard clientId={d.client_id} />
+          </div>
+        ) : (
+          <>
         {d.status === "waiting_for_raw" ? (
           <form action={rawAction} className="shrink-0 space-y-3 border-b border-border bg-amber-500/5 p-6">
             <input type="hidden" name="deliverable_id" value={d.id} />
@@ -146,6 +189,7 @@ export function EditVideoModal({
                 defaultService={serviceOf(d)}
                 defaultCategory={d.content_category ?? ""}
                 idPrefix={`d${d.id}-`}
+                onServiceChange={setService}
               />
             </div>
 
@@ -168,21 +212,42 @@ export function EditVideoModal({
               </div>
             ) : null}
 
-            <div className="space-y-1.5">
-              <Label htmlFor={`ch-${d.id}`}>Content in Video</Label>
-              <Textarea id={`ch-${d.id}`} name="content_hook" rows={2} defaultValue={d.content_hook ?? ""} />
-            </div>
+            {/* A poster has no hook and no script — it has the copy that goes
+                on it. One field, and the hook is carried through untouched so
+                re-tagging a video as a poster doesn't erase what was written. */}
+            {isPoster ? (
+              <>
+                <input type="hidden" name="content_hook" value={d.content_hook ?? ""} />
+                <div className="space-y-1.5">
+                  <Label htmlFor={`de-${d.id}`}>Content in this poster</Label>
+                  <Textarea
+                    id={`de-${d.id}`}
+                    name="description"
+                    rows={5}
+                    defaultValue={d.description ?? ""}
+                    placeholder="The text that goes on the poster — offer, dates, contact details. The client sees this at the content approval stage."
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`ch-${d.id}`}>Content in Video</Label>
+                  <Textarea id={`ch-${d.id}`} name="content_hook" rows={2} defaultValue={d.content_hook ?? ""} />
+                </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor={`de-${d.id}`}>Content / script</Label>
-              <Textarea
-                id={`de-${d.id}`}
-                name="description"
-                rows={5}
-                defaultValue={d.description ?? ""}
-                placeholder="The script or brief the video is built from — the client sees this at the content approval stage."
-              />
-            </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`de-${d.id}`}>Content / script</Label>
+                  <Textarea
+                    id={`de-${d.id}`}
+                    name="description"
+                    rows={5}
+                    defaultValue={d.description ?? ""}
+                    placeholder="The script or brief the video is built from — the client sees this at the content approval stage."
+                  />
+                </div>
+              </>
+            )}
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -313,6 +378,8 @@ export function EditVideoModal({
             ) : null}
           </div>
         </form>
+          </>
+        )}
       </Modal>
     </>
   );

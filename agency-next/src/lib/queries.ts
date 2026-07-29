@@ -4,7 +4,7 @@
  * components (no HTTP round-trip).
  */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -190,6 +190,9 @@ export type ProductionRow = {
   awaiting: number;
   changes: number;
   pending: number;
+  /** Poster work is tracked against its own monthly target. */
+  posters_required: number;
+  posters_designed: number;
 };
 
 /**
@@ -197,14 +200,31 @@ export type ProductionRow = {
  * old app's "Graphic Videos" board:
  *   Required (monthly target) · Designed (produced) · Approved ·
  *   Pending Approvals (on client's desk) · Changes Recommended · Pending (target − designed).
+ *
+ * Posters are counted separately. They have their own monthly target
+ * (`clients.monthly_posters`), so folding them into "Designed" made the video
+ * numbers read high and "Pending" read low for any client buying both.
  */
 export async function getProductionSummary(clientIds?: number[] | null): Promise<ProductionRow[]> {
   if (clientIds && clientIds.length === 0) return [];
   const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
   const scope = ids ? `AND c.id IN (${ids.join(",")})` : "";
+  // Both columns arrived in later migrations, so a database that hasn't caught
+  // up still renders the rest of the table instead of erroring.
+  const hasService = await hasColumn("deliverables", "service");
+  const hasPosterTarget = await hasColumn("clients", "monthly_posters");
+  // `service` is the modern field; `video_type = 'Poster'` is what older rows
+  // carry, and `serviceOf()` reads them the same way.
+  const isPoster = hasService
+    ? `(d.service = 'poster_designing' OR (d.service IS NULL AND LOWER(d.video_type) = 'poster'))`
+    : `(LOWER(d.video_type) = 'poster')`;
+  const posterTarget = hasPosterTarget ? "c.monthly_posters" : "0";
+
   const rows = await query<Record<string, unknown>>(
     `SELECT c.id, c.company_name, c.monthly_deliverables AS required,
-       COALESCE(COUNT(d.id),0) AS designed,
+       ${posterTarget} AS posters_required,
+       COALESCE(SUM(d.id IS NOT NULL AND NOT ${isPoster}),0) AS designed,
+       COALESCE(SUM(${isPoster}),0) AS posters_designed,
        COALESCE(SUM(d.status IN ('approved','scheduled','posted','completed')),0) AS approved,
        COALESCE(SUM(d.status IN ('content_review','review')),0) AS awaiting,
        COALESCE(SUM(d.status = 'changes_requested'),0) AS changes
@@ -227,6 +247,8 @@ export async function getProductionSummary(clientIds?: number[] | null): Promise
       awaiting: n(r.awaiting),
       changes: n(r.changes),
       pending: Math.max(0, required - designed),
+      posters_required: n(r.posters_required),
+      posters_designed: n(r.posters_designed),
     };
   });
 }

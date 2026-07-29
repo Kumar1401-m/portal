@@ -17,11 +17,14 @@ export function Modal({
   onClose,
   title,
   children,
+  size = "normal",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  /** "wide" for panels holding a table. */
+  size?: "normal" | "wide";
 }) {
   // document.body only exists once mounted on the client.
   const [mounted, setMounted] = useState(false);
@@ -48,7 +51,11 @@ export function Modal({
         className="animate-fade-in absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="animate-pop-in relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl">
+      <div
+        className={`animate-pop-in relative z-10 flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl bg-card shadow-2xl transition-[max-width] duration-200 ${
+          size === "wide" ? "max-w-5xl" : "max-w-2xl"
+        }`}
+      >
         <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4 text-white">
           <h2 className="min-w-0 flex-1 truncate pr-3 text-lg font-semibold" title={title}>
             {title}

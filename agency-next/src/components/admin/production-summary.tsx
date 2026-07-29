@@ -6,6 +6,7 @@ import {
   Hourglass,
   PencilLine,
   CircleDashed,
+  Image as ImageIcon,
 } from "lucide-react";
 import type { ProductionRow } from "@/lib/queries";
 import { Card } from "@/components/ui/card";
@@ -27,9 +28,19 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
       awaiting: a.awaiting + r.awaiting,
       changes: a.changes + r.changes,
       pending: a.pending + r.pending,
+      posters_required: a.posters_required + r.posters_required,
+      posters_designed: a.posters_designed + r.posters_designed,
     }),
-    { required: 0, designed: 0, approved: 0, awaiting: 0, changes: 0, pending: 0 }
+    {
+      required: 0, designed: 0, approved: 0, awaiting: 0, changes: 0, pending: 0,
+      posters_required: 0, posters_designed: 0,
+    }
   );
+
+  // Only agencies doing poster work need the column — otherwise it's a row of
+  // zeroes taking up space on every dashboard.
+  const showPosters = totals.posters_required > 0 || totals.posters_designed > 0;
+  const cols = showPosters ? 9 : 8;
 
   return (
     <Card className="overflow-hidden">
@@ -49,6 +60,11 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
               <Th>
                 <span className="inline-flex items-center gap-1"><PenTool className="h-3.5 w-3.5" /> Designed</span>
               </Th>
+              {showPosters ? (
+                <Th>
+                  <span className="inline-flex items-center gap-1"><ImageIcon className="h-3.5 w-3.5" /> Posters</span>
+                </Th>
+              ) : null}
               <Th>
                 <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> Approved</span>
               </Th>
@@ -66,7 +82,7 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={cols} className="px-3 py-8 text-center text-muted-foreground">
                   No active clients.
                 </td>
               </tr>
@@ -81,6 +97,14 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
                   </td>
                   <td className="px-3 py-2.5 text-center tabular-nums">{r.required || "—"}</td>
                   <td className="px-3 py-2.5 text-center tabular-nums">{r.designed}</td>
+                  {showPosters ? (
+                    <td className="px-3 py-2.5 text-center tabular-nums text-orange-600 dark:text-orange-400">
+                      {r.posters_designed}
+                      {r.posters_required ? (
+                        <span className="text-muted-foreground">/{r.posters_required}</span>
+                      ) : null}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2.5 text-center tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {r.approved}
                   </td>
@@ -102,6 +126,14 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
                 <td className="px-3 py-3">Totals</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.required}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.designed}</td>
+                {showPosters ? (
+                  <td className="px-3 py-3 text-center tabular-nums">
+                    {totals.posters_designed}
+                    {totals.posters_required ? (
+                      <span className="text-muted-foreground">/{totals.posters_required}</span>
+                    ) : null}
+                  </td>
+                ) : null}
                 <td className="px-3 py-3 text-center tabular-nums">{totals.approved}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.awaiting}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.changes}</td>

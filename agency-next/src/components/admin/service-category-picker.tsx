@@ -19,12 +19,15 @@ export function ServiceCategoryPicker({
   defaultCategory = "",
   idPrefix = "",
   required = true,
+  onServiceChange,
 }: {
   categories: CategoryOptions;
   defaultService?: ServiceKey;
   defaultCategory?: string;
   idPrefix?: string;
   required?: boolean;
+  /** Lets the surrounding form adapt — poster briefs ask for different fields. */
+  onServiceChange?: (service: ServiceKey) => void;
 }) {
   const [service, setService] = useState<ServiceKey>(defaultService);
   const [category, setCategory] = useState(defaultCategory);
@@ -51,6 +54,7 @@ export function ServiceCategoryPicker({
             if (isServiceKey(next)) {
               setService(next);
               setCategory(""); // categories are service-specific
+              onServiceChange?.(next);
             }
           }}
         >

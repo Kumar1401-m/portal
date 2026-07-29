@@ -95,6 +95,20 @@ export default async function PaymentsPage() {
                                 <option value="cash">Cash</option>
                                 <option value="other">Other</option>
                               </Select>
+                              {/* Untick to record the payment without emailing
+                                  a receipt to the client. */}
+                              <label
+                                className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
+                                title="Email the receipt to the client and copy the agency inbox"
+                              >
+                                <input
+                                  type="checkbox"
+                                  name="send_email"
+                                  defaultChecked
+                                  className="h-4 w-4 rounded border-input accent-[var(--primary)]"
+                                />
+                                Email receipt
+                              </label>
                               <Button type="submit" size="sm" variant="secondary">
                                 Mark paid
                               </Button>

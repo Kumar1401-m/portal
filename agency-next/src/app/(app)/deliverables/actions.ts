@@ -70,7 +70,20 @@ export async function createDeliverable(formData: FormData): Promise<void> {
 
   const mk = dueDate ? dueDate.slice(0, 7) : monthKey();
 
-  const result = await execute(
+  // Guard against the same task landing twice. A double-click on the submit
+  // button (or a request the browser retries) fires this action twice, and
+  // both runs used to insert. The disabled button covers the common case;
+  // this covers what it can't — a click before hydration, or a retry.
+  const dupe = await queryOne<{ id: number }>(
+    `SELECT id FROM deliverables
+      WHERE client_id = ? AND title = ? AND created_by = ?
+        AND created_at > (NOW() - INTERVAL 20 SECOND)
+      ORDER BY id DESC LIMIT 1`,
+    [clientId, title, user.id]
+  );
+  if (dupe) redirect("/deliverables");
+
+  await execute(
     `INSERT INTO deliverables
       (client_id, title, description, platform, content_hook, service, content_category,
        video_type, language, target_audience, promotion_type, custom_instructions,
@@ -98,7 +111,9 @@ export async function createDeliverable(formData: FormData): Promise<void> {
   );
 
   revalidatePath("/deliverables");
-  redirect(`/deliverables/${result.insertId}`);
+  // Back to the list rather than the task page: from here that navigation
+  // would open the task popup over the form you just submitted.
+  redirect("/deliverables");
 }
 
 /* --------------------------- Generate caption --------------------------- */

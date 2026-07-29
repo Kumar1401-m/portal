@@ -82,7 +82,8 @@ export async function createInvoice(formData: FormData): Promise<void> {
     redirect("/payments/new?error=failed");
   }
 
-  // Notify the client + formal invoice email (best-effort).
+  // The portal notification always goes out — it's the client's record of the
+  // invoice. The email is opt-out, ticked by default on the form.
   await notifyClientById(
     clientId,
     "payment_pending",
@@ -91,7 +92,9 @@ export async function createInvoice(formData: FormData): Promise<void> {
     "/portal/invoices",
     false
   );
-  sendInvoiceEmail(client!, { invoice_no: invoiceNo, total, due_date: dueDate }).catch(() => {});
+  if (formData.get("send_email") !== null) {
+    sendInvoiceEmail(client!, { invoice_no: invoiceNo, total, due_date: dueDate }).catch(() => {});
+  }
 
   revalidatePath("/payments");
   redirect("/payments");
@@ -148,7 +151,12 @@ export async function markPaid(formData: FormData): Promise<void> {
     "/portal/invoices",
     false
   );
-  // Receipt to the client, plus a copy to the agency's own inbox.
+  // Receipt to the client, plus a copy to the agency's own inbox — unless the
+  // "Email receipt" box was unticked (paid in cash, receipt handed over, etc).
+  if (formData.get("send_email") === null) {
+    revalidatePath("/payments");
+    return;
+  }
   const agencyInbox = await getAgencyInbox();
   sendPaidInvoiceEmail(
     {
