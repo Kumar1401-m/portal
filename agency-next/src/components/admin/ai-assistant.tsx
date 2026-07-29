@@ -6,6 +6,100 @@ import { askAssistant } from "@/app/(app)/assistant-actions";
 import { buttonClasses } from "@/components/ui/button";
 
 type Msg = { role: "you" | "ai"; text: string };
+type Pos = { x: number; y: number };
+
+const POS_KEY = "nvk-assistant-pos";
+
+/** Keep the widget on screen — after a resize, or a window it no longer fits. */
+const clamp = (p: Pos, w: number, h: number): Pos => ({
+  x: Math.min(Math.max(8, p.x), Math.max(8, window.innerWidth - w - 8)),
+  y: Math.min(Math.max(8, p.y), Math.max(8, window.innerHeight - h - 8)),
+});
+
+/**
+ * Drag-to-move, shared by the bubble and the open panel's header.
+ *
+ * A drag and a click start identically, so movement is measured: anything
+ * under a few pixels stays a click (opening the chat), beyond that the click
+ * is swallowed so dragging never opens the panel by accident.
+ */
+function useDraggable(ref: React.RefObject<HTMLElement | null>) {
+  const [pos, setPos] = useState<Pos | null>(null);
+  const drag = useRef<{ dx: number; dy: number; startX: number; startY: number; moved: boolean } | null>(
+    null
+  );
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (raw) setPos(JSON.parse(raw) as Pos);
+    } catch {
+      /* first run, or storage unavailable — fall back to the default corner */
+    }
+  }, []);
+
+  // A saved spot can fall off screen when the window shrinks.
+  useEffect(() => {
+    const onResize = () => {
+      const el = ref.current;
+      if (!el || !pos) return;
+      setPos((p) => (p ? clamp(p, el.offsetWidth, el.offsetHeight) : p));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [pos, ref]);
+
+  function onPointerDown(e: React.PointerEvent) {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    drag.current = {
+      dx: e.clientX - r.left,
+      dy: e.clientY - r.top,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+    };
+    setDragging(true);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const d = drag.current;
+      const node = ref.current;
+      if (!d || !node) return;
+      // Past this many pixels it's a drag, not a click on the bubble.
+      if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) > 4) d.moved = true;
+      setPos(
+        clamp({ x: ev.clientX - d.dx, y: ev.clientY - d.dy }, node.offsetWidth, node.offsetHeight)
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDragging(false);
+      setPos((p) => {
+        if (p) {
+          try {
+            localStorage.setItem(POS_KEY, JSON.stringify(p));
+          } catch {
+            /* storage full or blocked — position just won't persist */
+          }
+        }
+        return p;
+      });
+      setTimeout(() => (drag.current = null), 0);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  const style: React.CSSProperties = pos
+    ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" }
+    : { right: 20, bottom: 20 };
+
+  return { style, onPointerDown, dragging, didDrag: () => Boolean(drag.current?.moved) };
+}
 
 /** **bold** and line breaks — the only formatting the answers use. */
 function Rich({ text }: { text: string }) {
@@ -42,6 +136,10 @@ export function AiAssistant({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const panelDrag = useDraggable(boxRef);
+  const bubbleDrag = useDraggable(bubbleRef);
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,21 +158,43 @@ export function AiAssistant({
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Open the assistant"
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
+      <div
+        ref={bubbleRef}
+        style={bubbleDrag.style}
+        onPointerDown={bubbleDrag.onPointerDown}
+        className={`fixed z-40 touch-none select-none ${bubbleDrag.dragging ? "cursor-grabbing" : "cursor-grab"}`}
       >
-        <Sparkles className="h-5 w-5" />
-        AI
-      </button>
+        <button
+          type="button"
+          onClick={() => {
+            // Swallow the click that ends a drag, so moving it doesn't open it.
+            if (bubbleDrag.didDrag()) return;
+            setOpen(true);
+          }}
+          aria-label="Open the assistant — drag to move"
+          title="Drag me anywhere"
+          className="flex items-center gap-2 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
+        >
+          <Sparkles className="h-5 w-5" />
+          AI
+        </button>
+      </div>
     );
   }
 
   return (
-    <div className="animate-pop-in fixed bottom-5 right-5 z-40 flex h-[min(34rem,80vh)] w-[min(24rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-      <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3 text-white">
+    <div
+      ref={boxRef}
+      style={panelDrag.style}
+      className="animate-pop-in fixed z-40 flex h-[min(34rem,80vh)] w-[min(24rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+    >
+      <div
+        onPointerDown={panelDrag.onPointerDown}
+        className={`flex shrink-0 touch-none select-none items-center justify-between bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3 text-white ${
+          panelDrag.dragging ? "cursor-grabbing" : "cursor-grab"
+        }`}
+        title="Drag to move"
+      >
         <span className="flex items-center gap-2 font-semibold">
           <Sparkles className="h-5 w-5" /> NVK Assistant
         </span>
@@ -82,6 +202,7 @@ export function AiAssistant({
           {msgs.length ? (
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => setMsgs([])}
               aria-label="Clear the conversation"
               className="rounded-md p-1 transition-colors hover:bg-white/15"
@@ -91,6 +212,7 @@ export function AiAssistant({
           ) : null}
           <button
             type="button"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={() => setOpen(false)}
             aria-label="Close the assistant"
             className="rounded-md p-1 transition-colors hover:bg-white/15"
