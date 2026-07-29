@@ -306,3 +306,154 @@ export function suggestionsFor(role: SessionUser["role"]): string[] {
     "Anything not posted?",
   ];
 }
+
+/* ------------------------------- Charts ------------------------------- */
+
+export type ChartSlice = { label: string; value: number };
+export type AssistantChart =
+  | { kind: "pie"; title: string; slices: ChartSlice[] }
+  | { kind: "bar"; title: string; slices: ChartSlice[] };
+
+/** Where the month's work currently sits — the pipeline at a glance. */
+export function pipelineChart(s: Snapshot): AssistantChart {
+  const c = s.content;
+  return {
+    kind: "pie",
+    title: "Where this month's work sits",
+    slices: [
+      { label: "Waiting for raw", value: c.waiting_for_raw },
+      { label: "In editing", value: c.in_editing },
+      { label: "With client", value: c.awaiting_client },
+      { label: "Changes asked", value: c.changes_requested },
+      { label: "Scheduled", value: c.scheduled },
+      { label: "Posted", value: c.posted_this_month },
+    ].filter((x) => x.value > 0),
+  };
+}
+
+/** Planned vs approved per client — only meaningful when there's more than one. */
+export function clientChart(s: Snapshot): AssistantChart | null {
+  if (!s.by_client?.length) return null;
+  return {
+    kind: "bar",
+    title: "Approved of planned, by client",
+    slices: s.by_client.slice(0, 8).map((b) => ({
+      label: `${b.client} (${b.approved}/${b.planned})`,
+      value: b.planned ? Math.round((b.approved / b.planned) * 100) : 0,
+    })),
+  };
+}
+
+export function chartsFor(question: string, s: Snapshot): AssistantChart[] {
+  const t = question.toLowerCase();
+  if (!/chart|graph|pie|breakdown|split|visual|progress/.test(t)) return [];
+  const out: AssistantChart[] = [];
+  const pipe = pipelineChart(s);
+  if (pipe.slices.length) out.push(pipe);
+  const byClient = clientChart(s);
+  if (byClient && byClient.slices.length) out.push(byClient);
+  return out;
+}
+
+/* ------------------------------- Actions ------------------------------- */
+
+export type ActionKind = "request_approval" | "payment_reminder" | "assign" | "message_client";
+
+export type ActionOffer = {
+  kind: ActionKind;
+  label: string;
+  /** Free-text prompt shown when the action needs something typed. */
+  needsText?: string;
+  targets: { id: number; label: string; sub?: string }[];
+};
+
+const CAN: Record<ActionKind, SessionUser["role"][]> = {
+  // Sending work to the client stays where it already sits in the portal.
+  request_approval: ["super_admin", "crm"],
+  payment_reminder: ["super_admin", "admin"],
+  assign: ["super_admin", "admin", "crm"],
+  message_client: ["super_admin", "admin", "crm"],
+};
+
+export const canRun = (role: SessionUser["role"], kind: ActionKind) => CAN[kind].includes(role);
+
+/**
+ * What this user could usefully do right now, given their role and their data.
+ * These are only ever *offers* — each one still has to be confirmed before
+ * anything is sent, because most of them reach a client.
+ */
+export async function actionOffers(user: SessionUser, question: string): Promise<ActionOffer[]> {
+  const t = question.toLowerCase();
+  const { where } = await scopeFor(user);
+  const offers: ActionOffer[] = [];
+
+  const wants = (re: RegExp) => re.test(t);
+
+  if (canRun(user.role, "request_approval") && wants(/approv|review|send.*client|ready/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT d.id, d.title, c.company_name FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status <> 'churned' AND ${where}
+          AND d.status IN ('caption_ready','editing','raw_uploaded')
+        ORDER BY d.due_date IS NULL, d.due_date ASC LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "request_approval",
+        label: "Send to the client for approval",
+        targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
+      });
+  }
+
+  if (canRun(user.role, "assign") && wants(/assign|who.*work|unassigned|team/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT d.id, d.title, c.company_name FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status <> 'churned' AND ${where} AND d.assigned_to IS NULL
+          AND d.status NOT IN ('posted','completed','cancelled','rejected')
+        ORDER BY d.due_date IS NULL, d.due_date ASC LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "assign",
+        label: "Assign to a team member",
+        targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
+      });
+  }
+
+  if (canRun(user.role, "payment_reminder") && wants(/payment|invoice|unpaid|due|remind|money/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT i.id, i.invoice_no, i.total, c.company_name
+         FROM invoices i JOIN clients c ON c.id = i.client_id
+        WHERE i.status <> 'paid' AND c.status <> 'churned'
+        ORDER BY i.due_date IS NULL, i.due_date ASC LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "payment_reminder",
+        label: "Send a payment reminder",
+        targets: rows.map((r) => ({
+          id: n(r.id),
+          label: `${r.invoice_no} — ${money(n(r.total))}`,
+          sub: String(r.company_name),
+        })),
+      });
+  }
+
+  if (canRun(user.role, "message_client") && wants(/message|tell|email|contact|talk|inform|update/)) {
+    const ids = user.role === "crm" ? await crmClientIds(user) : null;
+    const scope = ids && ids.length ? `AND id IN (${ids.map((v) => Math.trunc(Number(v))).join(",")})` : ids ? "AND 1=0" : "";
+    const rows = await query<Record<string, unknown>>(
+      `SELECT id, company_name, email FROM clients
+        WHERE status <> 'churned' AND email IS NOT NULL AND email <> '' ${scope}
+        ORDER BY company_name LIMIT 10`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "message_client",
+        label: "Send the client a message",
+        needsText: "What should I say?",
+        targets: rows.map((r) => ({ id: n(r.id), label: String(r.company_name), sub: String(r.email) })),
+      });
+  }
+
+  return offers;
+}

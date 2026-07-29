@@ -2,10 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, Send, Trash2, Loader2 } from "lucide-react";
-import { askAssistant } from "@/app/(app)/assistant-actions";
+import {
+  askAssistant,
+  runAssistantAction,
+  assignableTeam,
+} from "@/app/(app)/assistant-actions";
+import type { AssistantChart, ActionOffer, ActionKind } from "@/lib/assistant";
+import { Chart } from "./assistant-chart";
 import { buttonClasses } from "@/components/ui/button";
 
-type Msg = { role: "you" | "ai"; text: string };
+type Msg = {
+  role: "you" | "ai";
+  text: string;
+  charts?: AssistantChart[];
+  offers?: ActionOffer[];
+};
+type Team = { id: number; name: string; role: string };
 type Pos = { x: number; y: number };
 
 const POS_KEY = "nvk-assistant-pos";
@@ -135,6 +147,13 @@ export function AiAssistant({
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // The action awaiting confirmation. Nothing is sent while this is set —
+  // it only becomes a real request once the user presses Confirm.
+  const [pending, setPending] = useState<
+    { offer: ActionOffer; target: { id: number; label: string; sub?: string } } | null
+  >(null);
+  const [team, setTeam] = useState<Team[]>([]);
+  const [note, setNote] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -152,6 +171,15 @@ export function AiAssistant({
     setMsgs((m) => [...m, { role: "you", text: q }]);
     setBusy(true);
     const res = await askAssistant(q);
+    setMsgs((m) => [...m, { role: "ai", text: res.text, charts: res.charts, offers: res.offers }]);
+    setBusy(false);
+  }
+
+  /** Run a confirmed action and report the outcome back into the thread. */
+  async function run(kind: ActionKind, targetId: number, extra?: { assigneeId?: number; message?: string }) {
+    setBusy(true);
+    setPending(null);
+    const res = await runAssistantAction(kind, targetId, extra);
     setMsgs((m) => [...m, { role: "ai", text: res.text }]);
     setBusy(false);
   }
@@ -241,8 +269,110 @@ export function AiAssistant({
             }
           >
             {m.role === "ai" ? <Rich text={m.text} /> : m.text}
+
+            {m.charts?.length ? (
+              <div className="mt-3 space-y-2">
+                {m.charts.map((ch, k) => (
+                  <Chart key={k} chart={ch} />
+                ))}
+              </div>
+            ) : null}
+
+            {m.offers?.length ? (
+              <div className="mt-3 space-y-2">
+                {m.offers.map((o) => (
+                  <div key={o.kind} className="rounded-md border border-border bg-card p-2">
+                    <p className="mb-1.5 text-xs font-medium">{o.label}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {o.targets.map((tg) => (
+                        <button
+                          key={tg.id}
+                          type="button"
+                          onClick={() => {
+                            setNote("");
+                            setPending({ offer: o, target: tg });
+                            if (o.kind === "assign" && !team.length) assignableTeam().then(setTeam);
+                          }}
+                          className="max-w-full truncate rounded-full border border-border px-2 py-1 text-xs transition-colors hover:border-primary hover:text-primary"
+                          title={tg.sub}
+                        >
+                          {tg.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
+
+        {pending ? (
+          <div className="rounded-lg border-2 border-primary/50 bg-primary/5 p-3">
+            <p className="text-xs font-medium">{pending.offer.label}</p>
+            <p className="mt-0.5 truncate text-sm font-semibold">{pending.target.label}</p>
+            {pending.target.sub ? (
+              <p className="truncate text-xs text-muted-foreground">{pending.target.sub}</p>
+            ) : null}
+
+            {pending.offer.kind === "assign" ? (
+              <select
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="mt-2 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">Choose a team member…</option>
+                {team.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+
+            {pending.offer.needsText ? (
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={3}
+                placeholder={pending.offer.needsText}
+                className="mt-2 w-full rounded-md border border-input bg-background p-2 text-sm"
+              />
+            ) : null}
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              {pending.offer.kind === "assign"
+                ? "This only changes who owns the task."
+                : "This sends an email to the client. Nothing goes out until you confirm."}
+            </p>
+
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className={buttonClasses({ variant: "secondary", size: "sm" })}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  (pending.offer.kind === "assign" && !note) ||
+                  (Boolean(pending.offer.needsText) && note.trim().length < 3)
+                }
+                onClick={() =>
+                  run(pending.offer.kind, pending.target.id, {
+                    assigneeId: pending.offer.kind === "assign" ? Number(note) : undefined,
+                    message: pending.offer.needsText ? note : undefined,
+                  })
+                }
+                className={buttonClasses({ size: "sm" })}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {busy ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
