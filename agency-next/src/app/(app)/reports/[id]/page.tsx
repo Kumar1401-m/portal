@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, SquarePen, Layers } from "lucide-react";
+import { ArrowLeft, Pencil, Layers } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { getClientMonth } from "@/lib/reports";
@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { MonthPicker } from "@/components/admin/month-picker";
-import { SERVICES, serviceOf } from "@/lib/services";
+import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel, editorStatusTone } from "@/lib/constants";
 import { monthKey, fmtDate } from "@/lib/utils";
 
@@ -49,12 +49,14 @@ export default async function ClientReportPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; service?: string }>;
 }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const clientId = Number(id);
   const month = /^\d{4}-\d{2}$/.test(sp.month || "") ? sp.month! : monthKey();
+  // Arriving from the Posters or Videos tab keeps that report's scope.
+  const service = isServiceKey(sp.service) ? sp.service : undefined;
 
   const client = await queryOne<{ id: number; company_name: string }>(
     "SELECT id, company_name FROM clients WHERE id = ?",
@@ -63,7 +65,7 @@ export default async function ClientReportPage({
   if (!client) notFound();
   if (!(await canAccessClient(user, client.id))) notFound();
 
-  const tasks = await getClientMonth(client.id, month);
+  const tasks = await getClientMonth(client.id, month, service);
 
   // Counts per category, in the order they first appear.
   const counts = new Map<string, number>();
@@ -75,11 +77,19 @@ export default async function ClientReportPage({
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3">
-        <Link href={`/reports?month=${month}`} className={buttonClasses({ variant: "ghost", size: "icon" })}>
+        <Link
+          href={`/reports?month=${month}${service ? `&service=${service}` : ""}`}
+          className={buttonClasses({ variant: "ghost", size: "icon" })}
+        >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <h1 className="flex-1 text-2xl font-semibold tracking-tight">{client.company_name}</h1>
-        <MonthPicker month={month} basePath={`/reports/${client.id}`} />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight">{client.company_name}</h1>
+          {service ? (
+            <p className="text-sm text-muted-foreground">{SERVICES[service].label} only</p>
+          ) : null}
+        </div>
+        <MonthPicker month={month} basePath={`/reports/${client.id}`} extra={{ service }} />
       </div>
 
       <div>
@@ -195,7 +205,7 @@ export default async function ClientReportPage({
                           title={`Open ${t.title}`}
                           className={buttonClasses({ variant: "ghost", size: "icon" })}
                         >
-                          <SquarePen className="h-4 w-4 text-primary" />
+                          <Pencil className="h-4 w-4" />
                         </Link>
                       </td>
                     </tr>

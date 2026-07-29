@@ -1,6 +1,6 @@
 /** Reporting queries — monthly client scorecard, split by service. */
 import "server-only";
-import { query } from "./db";
+import { query, queryOne } from "./db";
 import { SERVICE_KEYS, type ServiceKey } from "./services";
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -111,11 +111,17 @@ const CAT_EXPR = `COALESCE(NULLIF(d.content_category,''),'${UNCATEGORISED}')`;
  */
 export async function getCategoryScorecard(
   month: string,
-  crmClientIds?: number[] | null
+  crmClientIds?: number[] | null,
+  service?: ServiceKey
 ): Promise<{ rows: CategoryScorecardRow[]; categories: string[] }> {
   if (crmClientIds && crmClientIds.length === 0) return { rows: [], categories: [] };
 
+  // The service filter belongs on the JOIN, not the WHERE: on a LEFT JOIN a
+  // WHERE clause would drop clients with no work in that service, and showing
+  // that they have none is the point of the list.
+  const serviceJoin = service ? ` AND ${SERVICE_EXPR} = ?` : "";
   const params: (string | number)[] = [month];
+  if (service) params.push(service);
   const clientScope =
     crmClientIds && crmClientIds.length
       ? ` AND c.id IN (${crmClientIds.map(() => "?").join(",")})`
@@ -129,7 +135,7 @@ export async function getCategoryScorecard(
             COALESCE(SUM(d.status IN ${DONE}),0) AS approved
        FROM clients c
        LEFT JOIN deliverables d
-         ON d.client_id = c.id AND d.month_key = ?
+         ON d.client_id = c.id AND d.month_key = ?${serviceJoin}
         AND d.status NOT IN ('cancelled','rejected')
       WHERE c.status != 'churned'${clientScope}
       GROUP BY c.id, cat
@@ -194,16 +200,52 @@ export type ClientMonthTask = {
 /** Every task a client has in one month, in the order they're due to go out. */
 export async function getClientMonth(
   clientId: number,
-  month: string
+  month: string,
+  service?: ServiceKey
 ): Promise<ClientMonthTask[]> {
+  const params: (string | number)[] = [clientId, month];
+  if (service) params.push(service);
   return query<ClientMonthTask>(
     `SELECT d.id, d.title, d.description, d.content_category, d.video_type, d.service,
             d.promotion_type, d.scheduled_at, d.due_date, d.raw_drive_link, d.edited_link,
             d.thumbnail_url, d.status, d.reject_reason
        FROM deliverables d
-      WHERE d.client_id = ? AND d.month_key = ?
+      WHERE d.client_id = ? AND d.month_key = ?${service ? ` AND ${SERVICE_EXPR} = ?` : ""}
       ORDER BY (COALESCE(d.scheduled_at, d.due_date) IS NULL),
                COALESCE(d.scheduled_at, d.due_date) ASC, d.id ASC`,
-    [clientId, month]
+    params
   );
+}
+
+/** Tab badges for the reports list: how many tasks per service this month. */
+export async function getReportServiceCounts(
+  month: string,
+  crmClientIds?: number[] | null
+): Promise<Record<ServiceKey | "all", number>> {
+  const empty = Object.fromEntries(
+    [...SERVICE_KEYS, "all"].map((k) => [k, 0])
+  ) as Record<ServiceKey | "all", number>;
+  if (crmClientIds && crmClientIds.length === 0) return empty;
+
+  const params: (string | number)[] = [month];
+  const scope =
+    crmClientIds && crmClientIds.length
+      ? ` AND d.client_id IN (${crmClientIds.map(() => "?").join(",")})`
+      : "";
+  if (crmClientIds && crmClientIds.length) params.push(...crmClientIds);
+
+  const cols = SERVICE_KEYS.map(
+    (k) => `COALESCE(SUM(${SERVICE_EXPR} = '${k}'),0) AS ${k}`
+  ).join(",\n       ");
+
+  const row = await queryOne<Record<string, unknown>>(
+    `SELECT COUNT(*) AS all_count,
+       ${cols}
+     FROM deliverables d
+     WHERE d.month_key = ? AND d.status NOT IN ('cancelled','rejected')${scope}`,
+    params
+  );
+  const out = { ...empty, all: n(row?.all_count) };
+  for (const k of SERVICE_KEYS) out[k] = n(row?.[k]);
+  return out;
 }

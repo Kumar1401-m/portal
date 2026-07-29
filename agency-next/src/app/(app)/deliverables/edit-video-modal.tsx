@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { SquarePen, Loader2, Send, Wand2, UploadCloud, Trash2 } from "lucide-react";
+import { Pencil, Loader2, Send, Wand2, UploadCloud, Trash2 } from "lucide-react";
 import {
   updateVideoDetails,
   generateCaptionAction,
@@ -99,7 +99,7 @@ export function EditVideoModal({
         aria-label={`Update ${d.title}`}
         className={buttonClasses({ variant: "ghost", size: "icon" })}
       >
-        <SquarePen className="h-4 w-4" />
+        <Pencil className="h-4 w-4" />
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
