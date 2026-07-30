@@ -20,7 +20,7 @@ function Pct({ done, of }: { done: number; of: number }) {
   const pct = of ? Math.round((done / of) * 10000) / 100 : 0;
   const tone = pct >= 80 ? "bg-blue-700" : pct >= 40 ? "bg-red-500" : "bg-rose-400";
   return (
-    <div className="min-w-[5rem]">
+    <div>
       <div className="h-1.5 w-full overflow-hidden rounded-sm bg-rose-200 dark:bg-rose-950/60">
         <div className={`h-full ${tone}`} style={{ width: `${pct}%` }} />
       </div>
@@ -49,6 +49,35 @@ export default async function ReportsPage({
   const cols = 4 + categories.length * 3;
   const heading = service ? `${SERVICES[service].label} — clients list` : "Clients list";
 
+  /**
+   * Column widths as percentages of the container.
+   *
+   * Fixed pixel widths did two things wrong at once: they left the table
+   * narrower than the page when there was one category (cramped headings with
+   * empty space beside them) and wider than it when there were three (a
+   * scrollbar). Percentages of a table-fixed layout always add up to the
+   * container, so the space that exists gets used and none is invented.
+   */
+  const n = Math.max(categories.length, 1);
+  const FIXED = 4 + 18 + 7 + 5; // S.No, client, tier, actions
+  const group = (100 - FIXED) / n;
+  const w = {
+    sno: 4,
+    client: 18,
+    tier: 7,
+    count: group * 0.22,
+    approved: group * 0.28,
+    pct: group * 0.5,
+    actions: 5,
+  };
+  /**
+   * Past three categories, dividing the width evenly leaves columns around
+   * 40px — narrower than the numbers in them. Beyond that the table sizes to
+   * its content and the panel scrolls, which is legible; squashed is not.
+   */
+  const fits = n <= 3;
+  const pc = (x: number) => (fits ? `${x.toFixed(3)}%` : undefined);
+
   return (
     <div className="space-y-4">
       <ServiceTabs
@@ -67,32 +96,32 @@ export default async function ReportsPage({
           <MonthPicker month={month} basePath="/reports" extra={{ service }} />
         </div>
 
-        <div className="w-full overflow-x-auto">
-          <table className="w-full text-sm">
-            {/* Headers wrap rather than forcing the table wider than the page —
-                that is what put a scrollbar under it before. */}
+        <div className={fits ? "w-full" : "w-full overflow-x-auto"}>
+          <table className={`w-full text-sm ${fits ? "table-fixed" : "min-w-[70rem]"}`}>
             <thead className="border-b border-border">
-              <tr className="[&_th]:px-2 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
-                <th className="w-10">S.No</th>
-                <th className="min-w-32">
+              <tr className="[&_th]:px-3 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
+                <th style={{ width: pc(w.sno) }}>S.No</th>
+                <th style={{ width: pc(w.client) }}>
                   <span className="inline-flex items-center gap-1.5">
-                    <User className="h-3.5 w-3.5" /> Name of the Client
-                    <ListFilter className="h-3.5 w-3.5 opacity-60" />
+                    <User className="h-3.5 w-3.5 shrink-0" /> Name of the Client
+                    <ListFilter className="h-3.5 w-3.5 shrink-0 opacity-60" />
                   </span>
                 </th>
-                <th className="w-16">Category</th>
+                <th style={{ width: pc(w.tier) }}>Category</th>
                 {categories.map((c) => [
-                  <th key={`h1-${c}`} className="w-16">
+                  <th key={`h1-${c}`} style={{ width: pc(w.count) }}>
                     No Of {c}
                   </th>,
-                  <th key={`h2-${c}`} className="w-20">
+                  <th key={`h2-${c}`} style={{ width: pc(w.approved) }}>
                     Total {c} Approved
                   </th>,
-                  <th key={`h3-${c}`} className="w-28">
+                  <th key={`h3-${c}`} style={{ width: pc(w.pct) }}>
                     Percent of {c} Approved (%)
                   </th>,
                 ])}
-                <th className="w-14 text-right">Actions</th>
+                <th style={{ width: pc(w.actions) }} className="text-right">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -105,31 +134,39 @@ export default async function ReportsPage({
               ) : (
                 rows.map((r, i) => (
                   <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/40">
-                    <td className="px-2 py-3 align-top text-muted-foreground">{i + 1}</td>
-                    <td className="px-2 py-3 align-top">
+                    <td className="px-3 py-3 align-top text-muted-foreground">{i + 1}</td>
+                    <td className="px-3 py-3 align-top">
                       <Link
                         href={`/reports/${r.id}?month=${month}${service ? `&service=${service}` : ""}`}
                         className="font-medium hover:text-primary hover:underline"
                       >
                         {r.company_name}
                       </Link>
+                      {/* A task is reported in the month of its due date, so
+                          one due later simply isn't in this month's count. Say
+                          so rather than letting it look like a miscount. */}
+                      {r.other_months ? (
+                        <span className="block text-xs text-muted-foreground">
+                          +{r.other_months} in other months
+                        </span>
+                      ) : null}
                     </td>
-                    <td className="px-2 py-3 align-top">{r.tier || "—"}</td>
+                    <td className="px-3 py-3 align-top">{r.tier || "—"}</td>
                     {categories.map((c) => {
                       const t = r.categories[c] ?? { total: 0, approved: 0 };
                       return [
-                        <td key={`c1-${c}`} className="px-2 py-3 align-top tabular-nums">
+                        <td key={`c1-${c}`} className="px-3 py-3 align-top tabular-nums">
                           {t.total}
                         </td>,
-                        <td key={`c2-${c}`} className="px-2 py-3 align-top tabular-nums">
+                        <td key={`c2-${c}`} className="px-3 py-3 align-top tabular-nums">
                           {t.approved}
                         </td>,
-                        <td key={`c3-${c}`} className="px-2 py-3 align-top">
+                        <td key={`c3-${c}`} className="px-3 py-3 align-top">
                           <Pct done={t.approved} of={t.total} />
                         </td>,
                       ];
                     })}
-                    <td className="px-2 py-3 text-right align-top">
+                    <td className="px-3 py-3 text-right align-top">
                       <Link
                         href={`/reports/${r.id}?month=${month}${service ? `&service=${service}` : ""}`}
                         aria-label={`Open ${r.company_name}`}

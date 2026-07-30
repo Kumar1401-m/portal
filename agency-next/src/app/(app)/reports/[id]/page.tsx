@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Pencil, Video, GraduationCap, Layers } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
-import { getClientMonth } from "@/lib/reports";
+import { getClientMonth, getClientOtherMonths } from "@/lib/reports";
 import { queryOne } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
@@ -20,6 +20,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     [Number(id)]
   );
   return { title: c ? `${c.company_name} · Reports` : "Reports" };
+}
+
+/** "2026-09" -> "September 2026"; anything unparseable is passed through. */
+function longMonth(key: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) return key;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1)).toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /** dd-mm-yyyy, the way the old report wrote dates. */
@@ -90,7 +101,10 @@ export default async function ClientReportPage({
   if (!client) notFound();
   if (!(await canAccessClient(user, client.id))) notFound();
 
-  const tasks = await getClientMonth(client.id, month, service);
+  const [tasks, elsewhere] = await Promise.all([
+    getClientMonth(client.id, month, service),
+    getClientOtherMonths(client.id, month, service),
+  ]);
 
   // Counts per category, in the order they first appear.
   const counts = new Map<string, number>();
@@ -153,6 +167,29 @@ export default async function ClientReportPage({
               Total Videos: {tasks.length}
             </span>
           </div>
+
+          {/* A task counts towards the month of its due date. Without this,
+              moving a due date to next quarter quietly drops it out of the
+              report and the total looks wrong. */}
+          {elsewhere.length ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Also{" "}
+              {elsewhere.map((e, i) => (
+                <span key={e.month_key}>
+                  {i > 0 ? ", " : ""}
+                  <Link
+                    href={`/reports/${client.id}?month=${e.month_key}${
+                      service ? `&service=${service}` : ""
+                    }`}
+                    className="text-primary underline"
+                  >
+                    {e.n} in {longMonth(e.month_key)}
+                  </Link>
+                </span>
+              ))}
+              . A task is counted in the month of its due date.
+            </p>
+          ) : null}
         </div>
 
         <div className="w-full overflow-x-auto">

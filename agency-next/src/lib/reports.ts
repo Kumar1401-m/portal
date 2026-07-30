@@ -97,6 +97,8 @@ export type CategoryScorecardRow = {
   approved: number;
   /** Keyed by content category name, e.g. "Educational Reels". */
   categories: Record<string, CategoryTally>;
+  /** Tasks this client has in *other* months — see the note in the query. */
+  other_months: number;
 };
 
 const UNCATEGORISED = "Uncategorised";
@@ -164,6 +166,7 @@ export async function getCategoryScorecard(
         total: 0,
         approved: 0,
         categories: {},
+        other_months: 0,
       };
       byClient.set(id, row);
     }
@@ -178,11 +181,54 @@ export async function getCategoryScorecard(
     row.approved += n(r.approved);
   }
 
+  // A task is reported in the month of its due date. That is invisible on a
+  // month-at-a-time report: create one due next quarter and this month simply
+  // counts one fewer, which reads as a miscount. So count what falls outside
+  // the month too, and let the page say so.
+  const outsideParams: (string | number)[] = [month];
+  if (service) outsideParams.push(service);
+  if (crmClientIds && crmClientIds.length) outsideParams.push(...crmClientIds);
+  const outside = await query<{ client_id: number; n: number }>(
+    `SELECT d.client_id, COUNT(*) AS n
+       FROM deliverables d
+       JOIN clients c ON c.id = d.client_id
+      WHERE COALESCE(d.month_key,'') <> ?
+        AND d.status NOT IN ('cancelled','rejected')
+        AND c.status != 'churned'
+        ${service ? `AND ${SERVICE_EXPR} = ?` : ""}${clientScope}
+      GROUP BY d.client_id`,
+    outsideParams
+  );
+  for (const o of outside) {
+    const row = byClient.get(n(o.client_id));
+    if (row) row.other_months = n(o.n);
+  }
+
   // Uncategorised sorts last; the rest alphabetically.
   const categories = [...seen].sort((a, b) =>
     a === UNCATEGORISED ? 1 : b === UNCATEGORISED ? -1 : a.localeCompare(b)
   );
   return { rows: [...byClient.values()], categories };
+}
+
+/** Which other months a client has work in, so nothing is silently missed. */
+export async function getClientOtherMonths(
+  clientId: number,
+  month: string,
+  service?: ServiceKey
+): Promise<{ month_key: string; n: number }[]> {
+  const params: (string | number)[] = [clientId, month];
+  if (service) params.push(service);
+  return query<{ month_key: string; n: number }>(
+    `SELECT COALESCE(NULLIF(d.month_key,''),'—') AS month_key, COUNT(*) AS n
+       FROM deliverables d
+      WHERE d.client_id = ? AND COALESCE(d.month_key,'') <> ?
+        AND d.status NOT IN ('cancelled','rejected')
+        ${service ? `AND ${SERVICE_EXPR} = ?` : ""}
+      GROUP BY month_key
+      ORDER BY month_key`,
+    params
+  );
 }
 
 /* --------------------- One client's month of work --------------------- */
