@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil, Video, GraduationCap, Layers, Plus } from "lucide-react";
+import { ArrowLeft, Video, GraduationCap, Layers, Plus } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
-import { canAccessClient } from "@/lib/crm";
-import { getClientMonth, getClientOtherMonths } from "@/lib/reports";
+import { canAccessClient, crmClientIds } from "@/lib/crm";
+import { getDeliverables, getAssignees } from "@/lib/deliverables";
+import { getCategoryMap } from "@/lib/categories";
 import { queryOne } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
+import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
+import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
 import { monthKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -20,17 +23,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     [Number(id)]
   );
   return { title: c ? `${c.company_name} · Reports` : "Reports" };
-}
-
-/** "2026-09" -> "September 2026"; anything unparseable is passed through. */
-function longMonth(key: string): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(key);
-  if (!m) return key;
-  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1)).toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 /** dd-mm-yyyy, the way the old report wrote dates. */
@@ -106,9 +98,13 @@ export default async function ClientReportPage({
   if (!client) notFound();
   if (!(await canAccessClient(user, client.id))) notFound();
 
-  const [tasks, elsewhere] = await Promise.all([
-    getClientMonth(client.id, month, service),
-    getClientOtherMonths(client.id, month, service),
+  // The same rows the task list uses, so the pencil can open the very same
+  // editor rather than a read-only lookalike.
+  const scopeIds = await crmClientIds(user);
+  const [tasks, assignees, categoryMap] = await Promise.all([
+    getDeliverables({ clientId: client.id, month, service, crmClientIds: scopeIds }),
+    getAssignees(),
+    getCategoryMap(),
   ]);
 
   // Counts per category, in the order they first appear.
@@ -183,25 +179,6 @@ export default async function ClientReportPage({
             </span>
           </div>
 
-          {/* A task counts towards the month of its due date, so work due
-              later isn't in this month's chips. One chip per other month keeps
-              that visible without a sentence explaining it. */}
-          {elsewhere.length ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {elsewhere.map((e) => (
-                <Link
-                  key={e.month_key}
-                  href={`/reports/${client.id}?month=${e.month_key}${
-                    service ? `&service=${service}` : ""
-                  }`}
-                  title={`${e.n} due in ${longMonth(e.month_key)}`}
-                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  {longMonth(e.month_key)}: {e.n}
-                </Link>
-              ))}
-            </div>
-          ) : null}
         </div>
 
         {/* Percentages of a table-fixed layout, so thirteen columns fit the
@@ -327,14 +304,19 @@ export default async function ClientReportPage({
                         <span className="block truncate">{t.reject_reason || "—"}</span>
                       </td>
                       <td className="px-2 py-3 text-right align-top">
-                        <Link
-                          href={`/deliverables/${t.id}`}
-                          aria-label={`Open ${t.title}`}
-                          title={`Open ${t.title}`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Link>
+                        {/* The same editor as the task list — one dialog for
+                            editing a task, wherever you reach it from. */}
+                        <EditVideoModal
+                          deliverable={t}
+                          categories={categoryMap}
+                          canSendToClient={user.role === "super_admin" || user.role === "crm"}
+                          canDelete={user.role === "super_admin"}
+                          assignees={assignees}
+                          canUploadVideo={user.role !== "crm"}
+                          postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
+                          postCountry={POST_COUNTRIES[0].key}
+                          scheduledAtLocal={utcToLocalInput(t.scheduled_at, POST_COUNTRIES[0].key)}
+                        />
                       </td>
                     </tr>
                   );

@@ -3,10 +3,11 @@ import { Pencil, User, ListFilter } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getCategoryScorecard, getReportServiceCounts } from "@/lib/reports";
 import { crmClientIds } from "@/lib/crm";
-import { isServiceKey } from "@/lib/services";
+import { isServiceKey, SERVICES, SERVICE_LIST } from "@/lib/services";
 import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
-import { ServiceTabs } from "@/components/admin/service-tabs";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { monthKey } from "@/lib/utils";
 
 export const metadata = { title: "Reports · NVK Hub" };
@@ -47,6 +48,7 @@ export default async function ReportsPage({
 
   // S.No, client, tier, actions + 3 per content category.
   const cols = 4 + categories.length * 3;
+  const heading = service ? `${SERVICES[service].label} — Clients List` : "Clients List";
 
   /**
    * Column widths as percentages of the container.
@@ -79,16 +81,36 @@ export default async function ReportsPage({
 
   return (
     <div className="space-y-4">
-      <ServiceTabs
-        basePath="/reports"
-        active={service ?? null}
-        counts={counts}
-        params={{ month }}
-      />
-
       <Card className="overflow-hidden p-0">
-        <div className="border-b border-border px-5 py-4">
+        <div className="bg-indigo-700 px-5 py-3">
+          <h1 className="font-semibold text-white">{heading}</h1>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 border-b border-border px-5 py-4">
           <MonthPicker month={month} basePath="/reports" extra={{ service }} />
+
+          {/* Posters and videos each get their own report. A select rather
+              than a tab bar — it's one control beside the month, not a second
+              row of navigation above the page. */}
+          <form method="GET" action="/reports" className="flex items-end gap-2">
+            <input type="hidden" name="month" value={month} />
+            <div className="relative">
+              <span className="absolute -top-2 left-2 z-10 bg-card px-1 text-[11px] text-muted-foreground">
+                Service
+              </span>
+              <Select name="service" defaultValue={service ?? ""} className="h-[38px] w-44">
+                <option value="">All services ({counts.all})</option>
+                {SERVICE_LIST.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label} ({counts[s.key]})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Button type="submit" variant="secondary">
+              View
+            </Button>
+          </form>
         </div>
 
         <div className={fits ? "w-full" : "w-full overflow-x-auto"}>
@@ -137,14 +159,6 @@ export default async function ReportsPage({
                       >
                         {r.company_name}
                       </Link>
-                      {/* A task is reported in the month of its due date, so
-                          one due later simply isn't in this month's count. Say
-                          so rather than letting it look like a miscount. */}
-                      {r.other_months ? (
-                        <span className="block text-xs text-muted-foreground">
-                          +{r.other_months} in other months
-                        </span>
-                      ) : null}
                     </td>
                     <td className="px-3 py-3 align-top">{r.tier || "—"}</td>
                     {categories.map((c) => {

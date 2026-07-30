@@ -97,8 +97,6 @@ export type CategoryScorecardRow = {
   approved: number;
   /** Keyed by content category name, e.g. "Educational Reels". */
   categories: Record<string, CategoryTally>;
-  /** Tasks this client has in *other* months — see the note in the query. */
-  other_months: number;
 };
 
 const UNCATEGORISED = "Uncategorised";
@@ -166,7 +164,6 @@ export async function getCategoryScorecard(
         total: 0,
         approved: 0,
         categories: {},
-        other_months: 0,
       };
       byClient.set(id, row);
     }
@@ -181,29 +178,6 @@ export async function getCategoryScorecard(
     row.approved += n(r.approved);
   }
 
-  // A task is reported in the month of its due date. That is invisible on a
-  // month-at-a-time report: create one due next quarter and this month simply
-  // counts one fewer, which reads as a miscount. So count what falls outside
-  // the month too, and let the page say so.
-  const outsideParams: (string | number)[] = [month];
-  if (service) outsideParams.push(service);
-  if (crmClientIds && crmClientIds.length) outsideParams.push(...crmClientIds);
-  const outside = await query<{ client_id: number; n: number }>(
-    `SELECT d.client_id, COUNT(*) AS n
-       FROM deliverables d
-       JOIN clients c ON c.id = d.client_id
-      WHERE COALESCE(d.month_key,'') <> ?
-        AND d.status NOT IN ('cancelled','rejected')
-        AND c.status != 'churned'
-        ${service ? `AND ${SERVICE_EXPR} = ?` : ""}${clientScope}
-      GROUP BY d.client_id`,
-    outsideParams
-  );
-  for (const o of outside) {
-    const row = byClient.get(n(o.client_id));
-    if (row) row.other_months = n(o.n);
-  }
-
   // Uncategorised sorts last; the rest alphabetically.
   const categories = [...seen].sort((a, b) =>
     a === UNCATEGORISED ? 1 : b === UNCATEGORISED ? -1 : a.localeCompare(b)
@@ -211,66 +185,10 @@ export async function getCategoryScorecard(
   return { rows: [...byClient.values()], categories };
 }
 
-/** Which other months a client has work in, so nothing is silently missed. */
-export async function getClientOtherMonths(
-  clientId: number,
-  month: string,
-  service?: ServiceKey
-): Promise<{ month_key: string; n: number }[]> {
-  const params: (string | number)[] = [clientId, month];
-  if (service) params.push(service);
-  return query<{ month_key: string; n: number }>(
-    `SELECT COALESCE(NULLIF(d.month_key,''),'—') AS month_key, COUNT(*) AS n
-       FROM deliverables d
-      WHERE d.client_id = ? AND COALESCE(d.month_key,'') <> ?
-        AND d.status NOT IN ('cancelled','rejected')
-        ${service ? `AND ${SERVICE_EXPR} = ?` : ""}
-      GROUP BY month_key
-      ORDER BY month_key`,
-    params
-  );
-}
-
-/* --------------------- One client's month of work --------------------- */
-
-export type ClientMonthTask = {
-  id: number;
-  title: string;
-  description: string | null;
-  content_category: string | null;
-  video_type: string | null;
-  service: string | null;
-  promotion_type: string | null;
-  scheduled_at: string | null;
-  due_date: string | null;
-  raw_drive_link: string | null;
-  edited_link: string | null;
-  thumbnail_url: string | null;
-  status: string;
-  reject_reason: string | null;
-};
-
-/** Every task a client has in one month, in the order they're due to go out. */
-export async function getClientMonth(
-  clientId: number,
-  month: string,
-  service?: ServiceKey
-): Promise<ClientMonthTask[]> {
-  const params: (string | number)[] = [clientId, month];
-  if (service) params.push(service);
-  return query<ClientMonthTask>(
-    `SELECT d.id, d.title, d.description, d.content_category, d.video_type, d.service,
-            d.promotion_type, d.scheduled_at, d.due_date, d.raw_drive_link, d.edited_link,
-            d.thumbnail_url, d.status, d.reject_reason
-       FROM deliverables d
-      WHERE d.client_id = ? AND d.month_key = ?${service ? ` AND ${SERVICE_EXPR} = ?` : ""}
-      ORDER BY (COALESCE(d.scheduled_at, d.due_date) IS NULL),
-               COALESCE(d.scheduled_at, d.due_date) ASC, d.id ASC`,
-    params
-  );
-}
-
-/** Tab badges for the reports list: how many tasks per service this month. */
+/**
+ * How many tasks per service this month — the counts beside the Service
+ * selector on the clients list.
+ */
 export async function getReportServiceCounts(
   month: string,
   crmClientIds?: number[] | null
