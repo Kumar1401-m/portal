@@ -10,6 +10,7 @@ import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPublicSettings } from "@/lib/settings";
 import { getCategoryMap } from "@/lib/categories";
 import { getTeam } from "@/lib/team";
+import { schemaStatus } from "@/lib/schema-sync";
 import { env } from "@/lib/env";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
+import { SchemaPanel } from "./schema-panel";
 import { saveAgencyProfile, saveBillingSettings, saveStorageSettings } from "./actions";
 
 export const metadata = { title: "Settings · NVK Hub" };
@@ -51,10 +53,12 @@ export default async function SettingsPage() {
   // renders) and in the server actions themselves (what's allowed to run).
   const user = await requireUser(ADMIN_ROLES);
   const isSuperAdmin = user.role === "super_admin";
-  const [settings, categories, team] = await Promise.all([
+  const [settings, categories, team, schema] = await Promise.all([
     getPublicSettings(),
     getCategoryMap(true), // include hidden ones so they can be re-enabled
     getTeam(),
+    // Only a super admin can apply these, so only they need the status.
+    isSuperAdmin ? schemaStatus() : Promise.resolve([]),
   ]);
 
   return (
@@ -366,6 +370,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {isSuperAdmin ? <SchemaPanel initial={schema} /> : null}
     </div>
   );
 }

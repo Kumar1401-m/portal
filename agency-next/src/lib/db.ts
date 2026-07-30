@@ -63,6 +63,18 @@ export async function execute(
   return result as ResultSetHeader;
 }
 
+/**
+ * Run a DDL statement (ALTER TABLE, CREATE TABLE …).
+ *
+ * Separate from `execute` because that prepares its statement, and MySQL
+ * cannot prepare DDL — an `ALTER TABLE` sent through it just fails. Takes no
+ * parameters on purpose: there is nothing to bind in DDL, so the caller must
+ * pass a literal from the source, never anything derived from a request.
+ */
+export async function executeDdl(sql: string): Promise<void> {
+  await getPool().query(sql);
+}
+
 /** Run work inside a transaction; commits on success, rolls back on throw. */
 export async function transaction<T>(
   work: (conn: PoolConnection) => Promise<T>
@@ -111,4 +123,12 @@ export async function hasColumn(table: string, column: string): Promise<boolean>
   } catch {
     return false; // Assume missing; the caller falls back safely.
   }
+}
+
+/**
+ * Drop one entry from the cache. Needed after adding a column at runtime —
+ * without it this process keeps reporting the column missing until it restarts.
+ */
+export function forgetColumn(table: string, column: string): void {
+  columnCache.delete(`${table}.${column}`);
 }
