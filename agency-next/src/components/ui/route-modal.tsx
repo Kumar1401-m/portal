@@ -21,9 +21,12 @@ import { X } from "lucide-react";
 export function RouteModal({
   children,
   size = "wide",
+  title,
 }: {
   children: React.ReactNode;
   size?: "wide" | "normal";
+  /** Shown in the header bar, matching the portal's other dialogs. */
+  title?: string;
 }) {
   const router = useRouter();
   // document.body only exists once mounted on the client.
@@ -55,13 +58,20 @@ export function RouteModal({
           size === "wide" ? "max-w-5xl" : "max-w-2xl"
         }`}
       >
-        <button
-          onClick={() => router.back()}
-          aria-label="Close"
-          className="absolute right-3 top-3 z-20 rounded-md bg-card/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        {/* Same header bar as the portal's other dialogs, so a popup opened
+            from a link doesn't look like a different kind of thing. */}
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-4 text-white">
+          <h2 className="min-w-0 flex-1 truncate pr-3 text-lg font-semibold" title={title}>
+            {title}
+          </h2>
+          <button
+            onClick={() => router.back()}
+            aria-label="Close"
+            className="shrink-0 rounded-md p-1 transition-colors hover:bg-white/15"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
         {/* min-h-0 lets this flex child shrink so it actually scrolls; without
             it the panel's overflow-hidden clips long content. */}
         <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">{children}</div>

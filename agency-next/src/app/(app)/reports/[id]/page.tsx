@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil, Video, GraduationCap, Layers } from "lucide-react";
+import { ArrowLeft, Pencil, Video, GraduationCap, Layers, Plus } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { getClientMonth, getClientOtherMonths } from "@/lib/reports";
@@ -65,11 +65,16 @@ function promoColour(name: string) {
   return PROMO_COLOURS[h % PROMO_COLOURS.length];
 }
 
-/** Green when the stage is done, amber while it's in flight. */
+/**
+ * Green when the stage is done, amber while it's in flight.
+ *
+ * Deliberately allowed to wrap: a nowrap pill can't shrink below its text, and
+ * thirteen of those between them pushed the table wider than the page.
+ */
 function StatusPill({ text, done }: { text: string; done: boolean }) {
   return (
     <span
-      className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium text-white ${
+      className={`inline-block rounded-full px-2 py-1 text-center text-xs font-medium text-white ${
         done ? "bg-green-600" : "bg-amber-500"
       }`}
     >
@@ -130,6 +135,16 @@ export default async function ClientReportPage({
           {service ? (
             <span className="shrink-0 text-xs text-white/80">{SERVICES[service].label} only</span>
           ) : null}
+          {/* Add work for this client without leaving the report — the client
+              and the month you're looking at are carried into the form. */}
+          <Link
+            href={`/deliverables/new?client=${client.id}&month=${month}${
+              service ? `&service=${service}` : ""
+            }`}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-white/15 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-white/25"
+          >
+            <Plus className="h-4 w-4" /> New task
+          </Link>
         </div>
 
         <div className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-4">
@@ -168,53 +183,55 @@ export default async function ClientReportPage({
             </span>
           </div>
 
-          {/* A task counts towards the month of its due date. Without this,
-              moving a due date to next quarter quietly drops it out of the
-              report and the total looks wrong. */}
+          {/* A task counts towards the month of its due date, so work due
+              later isn't in this month's chips. One chip per other month keeps
+              that visible without a sentence explaining it. */}
           {elsewhere.length ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Also{" "}
-              {elsewhere.map((e, i) => (
-                <span key={e.month_key}>
-                  {i > 0 ? ", " : ""}
-                  <Link
-                    href={`/reports/${client.id}?month=${e.month_key}${
-                      service ? `&service=${service}` : ""
-                    }`}
-                    className="text-primary underline"
-                  >
-                    {e.n} in {longMonth(e.month_key)}
-                  </Link>
-                </span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {elsewhere.map((e) => (
+                <Link
+                  key={e.month_key}
+                  href={`/reports/${client.id}?month=${e.month_key}${
+                    service ? `&service=${service}` : ""
+                  }`}
+                  title={`${e.n} due in ${longMonth(e.month_key)}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {longMonth(e.month_key)}: {e.n}
+                </Link>
               ))}
-              . A task is counted in the month of its due date.
-            </p>
+            </div>
           ) : null}
         </div>
 
-        <div className="w-full overflow-x-auto">
-          <table className="w-full text-sm">
+        {/* Percentages of a table-fixed layout, so thirteen columns fit the
+            container exactly instead of overflowing it. Title, description and
+            remarks give up the slack — they're the ones with room to spare. */}
+        <div className="w-full">
+          <table className="w-full table-fixed text-sm">
             <thead className="border-y border-border bg-muted/40">
-              <tr className="[&_th]:px-3 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
-                <th className="w-12">S.No</th>
-                <th className="min-w-24">Creative Type</th>
-                <th className="min-w-20">Post schedule date</th>
-                <th className="min-w-24">Promotion Type</th>
-                <th className="w-16">Shoot Link</th>
-                <th className="w-16">Editor Link</th>
-                <th className="w-20">Thumbnail</th>
-                <th className="min-w-56">Title</th>
-                <th className="min-w-24">Description</th>
-                <th className="min-w-24">Content Status</th>
-                <th className="min-w-24">Editor Status</th>
-                <th className="min-w-24">Remarks</th>
-                <th className="w-16 text-right">Actions</th>
+              <tr className="[&_th]:px-2 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
+                <th style={{ width: "3%" }}>S.No</th>
+                <th style={{ width: "9%" }}>Creative Type</th>
+                <th style={{ width: "8%" }}>Post schedule date</th>
+                <th style={{ width: "9%" }}>Promotion Type</th>
+                <th style={{ width: "5%" }}>Shoot Link</th>
+                <th style={{ width: "5%" }}>Editor Link</th>
+                <th style={{ width: "6%" }}>Thumbnail</th>
+                <th style={{ width: "15%" }}>Title</th>
+                <th style={{ width: "10%" }}>Description</th>
+                <th style={{ width: "9%" }}>Content Status</th>
+                <th style={{ width: "9%" }}>Editor Status</th>
+                <th style={{ width: "8%" }}>Remarks</th>
+                <th style={{ width: "4%" }} className="text-right">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {tasks.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3 py-10 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-2 py-10 text-center text-muted-foreground">
                     No tasks for {client.company_name} this month. Anything you create for them
                     shows up here.
                   </td>
@@ -225,15 +242,15 @@ export default async function ClientReportPage({
                   const done = DONE_STATUSES.includes(t.status);
                   return (
                     <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/40">
-                      <td className="px-3 py-3 align-top text-muted-foreground">{i + 1}</td>
-                      <td className="px-3 py-3 align-top">{t.content_category || svc.short}</td>
-                      <td className="whitespace-nowrap px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top text-muted-foreground">{i + 1}</td>
+                      <td className="px-2 py-3 align-top">{t.content_category || svc.short}</td>
+                      <td className="px-2 py-3 align-top">
                         {shortDate(t.scheduled_at || t.due_date)}
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         {t.promotion_type ? (
                           <span
-                            className={`inline-block whitespace-nowrap rounded px-2.5 py-1 text-xs font-medium text-white ${promoColour(
+                            className={`inline-block rounded px-2 py-1 text-xs font-medium text-white ${promoColour(
                               t.promotion_type
                             )}`}
                           >
@@ -243,7 +260,7 @@ export default async function ClientReportPage({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         {t.raw_drive_link ? (
                           <a
                             href={t.raw_drive_link}
@@ -257,7 +274,7 @@ export default async function ClientReportPage({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         {t.edited_link ? (
                           <a
                             href={t.edited_link}
@@ -271,7 +288,7 @@ export default async function ClientReportPage({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         {t.thumbnail_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={t.thumbnail_url} alt="" className="h-8 w-12 rounded object-cover" />
@@ -279,7 +296,7 @@ export default async function ClientReportPage({
                           <span className="text-xs text-muted-foreground">N/A</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         <Link
                           href={`/deliverables/${t.id}`}
                           className="hover:text-primary hover:underline"
@@ -288,24 +305,28 @@ export default async function ClientReportPage({
                         </Link>
                       </td>
                       <td
-                        className="max-w-[10rem] truncate px-3 py-3 align-top text-muted-foreground"
+                        className="px-2 py-3 align-top text-muted-foreground"
                         title={t.description ?? ""}
                       >
-                        {t.description || "—"}
+                        {/* Truncation goes on an inner block, not the cell —
+                            a table cell doesn't clip its overflow reliably,
+                            and the few pixels that escaped were enough to put
+                            a scrollbar under the table. */}
+                        <span className="block truncate">{t.description || "—"}</span>
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         <StatusPill text={contentStatusLabel(t.status)} done={done} />
                       </td>
-                      <td className="px-3 py-3 align-top">
+                      <td className="px-2 py-3 align-top">
                         <StatusPill text={editorStatusLabel(t.status)} done={done} />
                       </td>
                       <td
-                        className="max-w-[10rem] truncate px-3 py-3 align-top text-muted-foreground"
+                        className="px-2 py-3 align-top text-muted-foreground"
                         title={t.reject_reason ?? ""}
                       >
-                        {t.reject_reason || "—"}
+                        <span className="block truncate">{t.reject_reason || "—"}</span>
                       </td>
-                      <td className="px-3 py-3 text-right align-top">
+                      <td className="px-2 py-3 text-right align-top">
                         <Link
                           href={`/deliverables/${t.id}`}
                           aria-label={`Open ${t.title}`}

@@ -3,7 +3,7 @@ import { Pencil, User, ListFilter } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getCategoryScorecard, getReportServiceCounts } from "@/lib/reports";
 import { crmClientIds } from "@/lib/crm";
-import { isServiceKey, SERVICES } from "@/lib/services";
+import { isServiceKey } from "@/lib/services";
 import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
 import { ServiceTabs } from "@/components/admin/service-tabs";
@@ -47,7 +47,6 @@ export default async function ReportsPage({
 
   // S.No, client, tier, actions + 3 per content category.
   const cols = 4 + categories.length * 3;
-  const heading = service ? `${SERVICES[service].label} — clients list` : "Clients list";
 
   /**
    * Column widths as percentages of the container.
@@ -88,10 +87,6 @@ export default async function ReportsPage({
       />
 
       <Card className="overflow-hidden p-0">
-        <div className="bg-indigo-700 px-5 py-3">
-          <h1 className="font-semibold text-white">{heading}</h1>
-        </div>
-
         <div className="border-b border-border px-5 py-4">
           <MonthPicker month={month} basePath="/reports" extra={{ service }} />
         </div>

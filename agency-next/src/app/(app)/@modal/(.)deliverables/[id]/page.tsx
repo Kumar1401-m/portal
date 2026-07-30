@@ -1,4 +1,5 @@
 import { RouteModal } from "@/components/ui/route-modal";
+import { queryOne } from "@/lib/db";
 import { TaskDetail } from "../../../deliverables/[id]/task-detail";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,16 @@ export default async function DeliverableModal({
   const { id } = await params;
   // Anything that isn't a task id belongs to a sibling route, not to a popup.
   if (!/^\d+$/.test(id)) return null;
+
+  // Just the title, for the header bar. TaskDetail does its own lookup and its
+  // own access check; this one is not trusted for either.
+  const head = await queryOne<{ title: string }>(
+    "SELECT title FROM deliverables WHERE id = ?",
+    [Number(id)]
+  );
+
   return (
-    <RouteModal>
+    <RouteModal title={head?.title ?? "Task"}>
       <TaskDetail id={Number(id)} inModal />
     </RouteModal>
   );

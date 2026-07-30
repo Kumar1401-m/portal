@@ -15,12 +15,12 @@ export const dynamic = "force-dynamic";
 export default async function NewTaskModal({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; service?: string }>;
+  searchParams: Promise<{ error?: string; service?: string; client?: string; month?: string }>;
 }) {
   const sp = await searchParams;
   return (
-    <RouteModal>
-      <NewTaskForm error={sp.error} service={sp.service} inModal />
+    <RouteModal title="New task">
+      <NewTaskForm error={sp.error} service={sp.service} client={sp.client} month={sp.month} inModal />
     </RouteModal>
   );
 }

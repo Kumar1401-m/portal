@@ -63,8 +63,11 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
           </Link>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{d.title}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          {/* In a popup the header bar already carries the title. */}
+          {inModal ? null : (
+            <h1 className="text-2xl font-semibold tracking-tight">{d.title}</h1>
+          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Building2 className="h-4 w-4" /> {d.company_name}
             </span>
@@ -75,10 +78,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             <ServiceBadge task={d} category={d.content_category} />
           </div>
         </div>
-        {/* The popup's close button lives in this corner. */}
-        <Badge tone={statusTone(d.status)} className={inModal ? "mr-9" : undefined}>
-          {label(d.status)}
-        </Badge>
+        <Badge tone={statusTone(d.status)}>{label(d.status)}</Badge>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

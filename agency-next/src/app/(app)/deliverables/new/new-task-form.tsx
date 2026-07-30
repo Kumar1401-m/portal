@@ -28,10 +28,16 @@ import { label } from "@/lib/utils";
 export async function NewTaskForm({
   error,
   service,
+  client,
+  month,
   inModal = false,
 }: {
   error?: string;
   service?: string;
+  /** Pre-selected client — set when coming from that client's report. */
+  client?: string;
+  /** Pre-fills the due date into this month, so the task lands where you were. */
+  month?: string;
   inModal?: boolean;
 }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
@@ -44,18 +50,25 @@ export async function NewTaskForm({
   ]);
   // Coming from a service tab pre-selects that service.
   const defaultService = isServiceKey(service) ? service : "video_editing";
+  // Only honour a client the signed-in user can actually pick — the action
+  // checks access again anyway, but an unpickable option would just confuse.
+  const defaultClient = clients.some((c) => String(c.id) === client) ? client! : "";
+  // The due date decides which month the task is reported in, so a task added
+  // from a month's report defaults into that month rather than today's.
+  const defaultDue = /^\d{4}-\d{2}$/.test(month || "") ? `${month}-01` : "";
   const sp = { error };
 
   return (
     <div className={inModal ? "space-y-6" : "mx-auto max-w-3xl space-y-6"}>
-      <div className="flex items-center gap-3">
-        {inModal ? null : (
+      {/* In a popup the header bar already says "New task". */}
+      {inModal ? null : (
+        <div className="flex items-center gap-3">
           <Link href="/deliverables" className={buttonClasses({ variant: "ghost", size: "icon" })}>
             <ArrowLeft className="h-5 w-5" />
           </Link>
-        )}
-        <h1 className="text-2xl font-semibold tracking-tight">New task</h1>
-      </div>
+          <h1 className="text-2xl font-semibold tracking-tight">New task</h1>
+        </div>
+      )}
 
       {sp.error ? (
         <p className="rounded-md bg-[color-mix(in_srgb,var(--destructive)_12%,transparent)] px-3 py-2 text-sm text-destructive">
@@ -79,7 +92,7 @@ export async function NewTaskForm({
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="client_id">Client *</Label>
-                  <Select id="client_id" name="client_id" required defaultValue="">
+                  <Select id="client_id" name="client_id" required defaultValue={defaultClient}>
                     <option value="" disabled>
                       Select a client…
                     </option>
@@ -92,7 +105,7 @@ export async function NewTaskForm({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="due_date">Due date</Label>
-                  <Input id="due_date" name="due_date" type="date" />
+                  <Input id="due_date" name="due_date" type="date" defaultValue={defaultDue} />
                 </div>
               </div>
 
