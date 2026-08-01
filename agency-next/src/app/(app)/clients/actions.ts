@@ -66,6 +66,24 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
     columns.category = s(fd, "category").toUpperCase().slice(0, 10);
   }
 
+  /* ---- Instagram automation. Same guard: these columns arrive with the
+     analytics migration, and a database that hasn't run it must still be able
+     to save a client. ---- */
+  if (await hasColumn("clients", "auto_publish")) {
+    columns.ig_username = orNull(s(fd, "ig_username").replace(/^@/, ""));
+    columns.whatsapp_number = orNull(s(fd, "whatsapp_number"));
+    // Unattended posting to a live account — never inferred, only ticked.
+    columns.auto_publish = fd.get("auto_publish") ? 1 : 0;
+    columns.analytics_enabled = fd.get("analytics_enabled") ? 1 : 0;
+
+    // A blank token means "leave whatever is stored alone", not "clear it" —
+    // the field renders as a password input and is never populated with the
+    // saved value, so treating blank as a clear would wipe the token on every
+    // unrelated edit. Clearing it is done by writing the word "none".
+    const token = s(fd, "ig_access_token");
+    if (token) columns.ig_access_token = token.toLowerCase() === "none" ? null : token;
+  }
+
   // Localization → these drive the AI caption brief (city/country/language/tone).
   const captionSettings: Record<string, string> = {};
   if (s(fd, "caption_language")) captionSettings.language = s(fd, "caption_language");

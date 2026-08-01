@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   CreditCard,
   BarChart3,
+  LineChart,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -35,6 +36,9 @@ export const NAV: NavItem[] = [
   { label: "Posters", href: "/poster", icon: ImageIcon, roles: ALL_STAFF, ready: true },
   { label: "Payments", href: "/payments", icon: CreditCard, roles: ADMIN, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
+  // Instagram performance, from the daily insights job. Separate from Reports,
+  // which is about delivery against the monthly package rather than results.
+  { label: "Analytics", href: "/analytics", icon: LineChart, roles: ADMIN_OR_CRM, ready: true },
   { label: "Settings", href: "/settings", icon: Settings, roles: ADMIN, ready: true },
 ];
 

@@ -37,6 +37,11 @@ export type ClientDefaults = Partial<{
   loc_whatsapp: string;
   services: ServiceKey[];
   ig_user_id: string;
+  ig_username: string;
+  ig_access_token: string;
+  whatsapp_number: string;
+  auto_publish: boolean;
+  analytics_enabled: boolean;
   is_personal: boolean;
   crm_user_ids: number[];
 }>;
@@ -170,24 +175,104 @@ export function ClientForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Instagram auto-posting</CardTitle>
+          <CardTitle>Instagram automation</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Set this to enable unattended posting for this client&apos;s approved
-            Reels via the Zapier automation. Find the account id in Zapier under
-            Instagram for Business → Publish Video → &quot;Instagram Account to Use&quot;
-            (must be an Instagram <b>Business</b> account added to a Facebook Page
-            you admin).
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Connects this client to the n8n workflows: publishing approved Reels at their
+            scheduled time, and collecting performance figures every day. The account must be an
+            Instagram <b>Business</b> account attached to a Facebook Page you administer.
           </p>
-          <Field label="Instagram Business account id" name="ig_user_id">
-            <Input
-              id="ig_user_id"
-              name="ig_user_id"
-              placeholder="e.g. 17841415221535647"
-              defaultValue={d.ig_user_id}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Instagram Business account id" name="ig_user_id">
+              <Input
+                id="ig_user_id"
+                name="ig_user_id"
+                placeholder="e.g. 17841415221535647"
+                defaultValue={d.ig_user_id}
+              />
+            </Field>
+            <Field label="Instagram handle" name="ig_username">
+              <Input
+                id="ig_username"
+                name="ig_username"
+                placeholder="without the @"
+                defaultValue={d.ig_username}
+              />
+            </Field>
+            <Field label="WhatsApp number" name="whatsapp_number">
+              <Input
+                id="whatsapp_number"
+                name="whatsapp_number"
+                placeholder="+91 98765 43210"
+                defaultValue={d.whatsapp_number}
+              />
+            </Field>
+            <Field label="Page access token (optional)" name="ig_access_token">
+              <Input
+                id="ig_access_token"
+                name="ig_access_token"
+                type="password"
+                placeholder="leave blank to use the agency token"
+                defaultValue={d.ig_access_token}
+              />
+            </Field>
+          </div>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            The token is only needed when this account sits outside your own Business Manager.
+            Leave it blank and the automation uses the agency-wide token.
+          </p>
+
+          {/*
+            Auto-publishing is off unless someone deliberately turns it on. The
+            failure mode of a default-on switch here is a post appearing on a
+            real client account that nobody approved, so it is opt-in per client
+            and the label says exactly what it does.
+          */}
+          <label
+            htmlFor="auto_publish"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="auto_publish"
+              type="checkbox"
+              name="auto_publish"
+              value="1"
+              defaultChecked={d.auto_publish}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
             />
-          </Field>
+            <span className="text-sm">
+              <span className="font-medium">Publish approved Reels automatically</span>
+              <br />
+              <span className="text-muted-foreground">
+                Once a Reel is approved and scheduled, it posts itself at that time — no one has
+                to be at a desk. The client is emailed and WhatsApped when it goes live.
+              </span>
+            </span>
+          </label>
+
+          <label
+            htmlFor="analytics_enabled"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="analytics_enabled"
+              type="checkbox"
+              name="analytics_enabled"
+              value="1"
+              defaultChecked={d.analytics_enabled ?? true}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Collect daily Instagram analytics</span>
+              <br />
+              <span className="text-muted-foreground">
+                Reads Insights each morning so the Analytics dashboard, the client&apos;s own
+                Performance page and the weekly report have figures to show.
+              </span>
+            </span>
+          </label>
         </CardContent>
       </Card>
 

@@ -12,6 +12,8 @@ import { serviceOf } from "@/lib/services";
 import { label, fmtDate } from "@/lib/utils";
 import { CaptionStudio } from "./caption-studio";
 import { WorkflowControls } from "./workflow-controls";
+import { PublishStatus } from "./publish-status";
+import { getPublishInfo } from "@/lib/instagram";
 
 function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -45,6 +47,10 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
       </p>
     );
   }
+
+  // Publishing state for the Instagram panel. Null on a database that predates
+  // the automation, in which case the panel simply isn't rendered.
+  const publishInfo = await getPublishInfo(d.id);
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
@@ -89,6 +95,12 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             status={d.status}
             canSendToClient={canSendToClient}
           />
+
+          {/* Posters don't go through the video publisher, so the panel would
+              only ever say "not scheduled" for them. */}
+          {publishInfo && !isPoster ? (
+            <PublishStatus deliverableId={d.id} info={publishInfo} />
+          ) : null}
 
           <Card>
             <CardHeader>

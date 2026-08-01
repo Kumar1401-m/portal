@@ -3,20 +3,38 @@
 import { useState, useTransition } from "react";
 import { Check, Database, Loader2, TriangleAlert } from "lucide-react";
 import { applySchemaUpdates, type ApplyState } from "./schema-actions";
-import type { SchemaColumnStatus } from "@/lib/schema-sync";
+import type { SchemaColumnStatus, SchemaTableStatus } from "@/lib/schema-sync";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 
 /**
- * Shows which columns the app expects but the database doesn't have yet, and
- * adds them. Only ever adds — see the note in `schema-sync.ts`.
+ * Shows which columns and tables the app expects but the database doesn't have
+ * yet, and adds them. Only ever adds — see the note in `schema-sync.ts`.
  */
-export function SchemaPanel({ initial }: { initial: SchemaColumnStatus[] }) {
+export function SchemaPanel({
+  initial,
+  initialTables = [],
+}: {
+  initial: SchemaColumnStatus[];
+  initialTables?: SchemaTableStatus[];
+}) {
   const [rows, setRows] = useState(initial);
+  const [tables, setTables] = useState(initialTables);
   const [result, setResult] = useState<ApplyState | null>(null);
   const [pending, start] = useTransition();
 
-  const missing = rows.filter((r) => !r.present);
+  const missingColumns = rows.filter((r) => !r.present);
+  const missingTables = tables.filter((t) => !t.present);
+  // Counted together because they're applied together, and the distinction
+  // isn't one the reader has to care about — both are "the database is behind".
+  const missing = [
+    ...missingTables.map((t) => ({ key: t.table, name: t.table, purpose: t.purpose })),
+    ...missingColumns.map((m) => ({
+      key: `${m.table}.${m.column}`,
+      name: `${m.table}.${m.column}`,
+      purpose: m.purpose,
+    })),
+  ];
 
   return (
     <Card>
@@ -35,17 +53,15 @@ export function SchemaPanel({ initial }: { initial: SchemaColumnStatus[] }) {
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              {missing.length === 1 ? "One column is" : `${missing.length} columns are`} missing.
+              {missing.length === 1 ? "One change is" : `${missing.length} changes are`} missing.
               The features that need {missing.length === 1 ? "it" : "them"} are switched off until
-              {missing.length === 1 ? " it is" : " they are"} added. Adding a column can&apos;t
-              affect existing data.
+              {missing.length === 1 ? " it is" : " they are"} applied. Nothing here alters or
+              removes existing data — it only adds.
             </p>
             <ul className="space-y-2">
               {missing.map((m) => (
-                <li key={`${m.table}.${m.column}`} className="rounded-md border border-border p-3">
-                  <p className="font-mono text-xs">
-                    {m.table}.{m.column}
-                  </p>
+                <li key={m.key} className="rounded-md border border-border p-3">
+                  <p className="font-mono text-xs">{m.name}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{m.purpose}</p>
                 </li>
               ))}
@@ -59,6 +75,7 @@ export function SchemaPanel({ initial }: { initial: SchemaColumnStatus[] }) {
                   const res = await applySchemaUpdates();
                   setResult(res);
                   if (res.status) setRows(res.status);
+                  if (res.tables) setTables(res.tables);
                 })
               }
               className={buttonClasses()}

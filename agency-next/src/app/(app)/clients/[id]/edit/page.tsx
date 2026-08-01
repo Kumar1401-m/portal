@@ -69,6 +69,17 @@ export default async function EditClientPage({
     loc_whatsapp: str(ph.whatsapp),
     services: parseClientServices(client.services),
     ig_user_id: str(client.ig_user_id),
+    ig_username: str(client.ig_username),
+    whatsapp_number: str(client.whatsapp_number),
+    auto_publish: Boolean(client.auto_publish),
+    // Defaults on for a client saved before the column existed, matching the
+    // column's own default — otherwise editing an old client would silently
+    // switch its analytics collection off.
+    analytics_enabled: client.analytics_enabled == null ? true : Boolean(client.analytics_enabled),
+    // Deliberately never populated: it is a live Meta credential, and a
+    // password input still ships its value to the browser. Blank means
+    // "unchanged" on save (see parseClient).
+    ig_access_token: "",
     is_personal: Boolean(client.is_personal),
     crm_user_ids: assignedCrmIds,
   };

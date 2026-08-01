@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS clients (
   notes             TEXT DEFAULT NULL,
   status            ENUM('active','inactive','paused','churned') NOT NULL DEFAULT 'active',
   ig_user_id        VARCHAR(64) DEFAULT NULL,           -- Meta Graph IG business id
+  ig_username       VARCHAR(100) DEFAULT NULL,          -- @handle, for display on the analytics dashboard
+  -- Per-client page access token. Optional: when blank the automation falls
+  -- back to the agency-wide META_ACCESS_TOKEN held in n8n's environment. Only
+  -- needed for clients whose account sits outside the agency's own Business
+  -- Manager, so most rows stay NULL.
+  ig_access_token   TEXT DEFAULT NULL,
+  whatsapp_number   VARCHAR(30) DEFAULT NULL,           -- E.164, for post-publish notifications
+  auto_publish      TINYINT(1) NOT NULL DEFAULT 0,      -- opt-in to unattended posting
+  analytics_enabled TINYINT(1) NOT NULL DEFAULT 1,      -- include in the daily insights pull
   fb_page_id        VARCHAR(64) DEFAULT NULL,
   youtube_channel_id VARCHAR(64) DEFAULT NULL,          -- YouTube Data API channel id
   designer_id       BIGINT UNSIGNED DEFAULT NULL,       -- default designer for this client's tasks
@@ -136,7 +145,20 @@ CREATE TABLE IF NOT EXISTS deliverables (
   edited_link     VARCHAR(700) DEFAULT NULL,
   thumbnail_url   VARCHAR(700) DEFAULT NULL,
   subtitle_link   VARCHAR(700) DEFAULT NULL,
+  hashtags        TEXT DEFAULT NULL,                    -- appended to the caption at publish time
+  -- Auto-publishing state. `instagram_status` is the single source of truth
+  -- the n8n publisher reads and writes:
+  --   not_posted → scheduled → processing → posted | failed
   instagram_status VARCHAR(20) NOT NULL DEFAULT 'not_posted',
+  instagram_media_id  VARCHAR(64) DEFAULT NULL,          -- Graph API media id, once published
+  instagram_permalink VARCHAR(500) DEFAULT NULL,
+  instagram_posted_at DATETIME DEFAULT NULL,             -- when Instagram accepted it
+  post_attempts   INT UNSIGNED NOT NULL DEFAULT 0,       -- retry budget consumed so far
+  post_error      TEXT DEFAULT NULL,                     -- last failure, shown in the UI
+  -- Set when the publisher claims the row and cleared when it settles. Acts as
+  -- a lease: a claim older than the lease window is treated as a crashed run
+  -- and may be re-claimed, so one stuck execution can't wedge the queue.
+  post_locked_at  DATETIME DEFAULT NULL,
   facebook_status VARCHAR(20) NOT NULL DEFAULT 'not_posted',
   youtube_status  VARCHAR(20) NOT NULL DEFAULT 'not_posted',
   metric_views    BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -332,6 +354,17 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
   comments       BIGINT DEFAULT 0,
   shares         BIGINT DEFAULT 0,
   saves          BIGINT DEFAULT 0,
+  -- Account-level metrics from the daily Instagram Insights pull. `followers`
+  -- above is the running total; `follower_delta` is that day's net change,
+  -- stored rather than derived so a gap in the series doesn't silently turn
+  -- into a fake spike on the next day we did collect.
+  follower_delta BIGINT NOT NULL DEFAULT 0,
+  accounts_engaged BIGINT NOT NULL DEFAULT 0,
+  profile_visits BIGINT NOT NULL DEFAULT 0,
+  website_clicks BIGINT NOT NULL DEFAULT 0,
+  reel_plays     BIGINT NOT NULL DEFAULT 0,
+  total_interactions BIGINT NOT NULL DEFAULT 0,
+  posts_count    INT UNSIGNED NOT NULL DEFAULT 0,   -- media published that day
   engagement_rate DECIMAL(6,2) DEFAULT 0.00,
   raw_json       JSON DEFAULT NULL,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -530,6 +563,134 @@ CREATE TABLE IF NOT EXISTS content_versions (
   PRIMARY KEY (id),
   KEY idx_ver_deliv (deliverable_id),
   CONSTRAINT fk_ver_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- PUBLISH ATTEMPTS  (one row per try by the n8n auto-publisher)
+--
+-- The deliverable itself only carries the *current* state; this is the audit
+-- trail behind it. Every claim, container build, publish, retry and failure
+-- lands here, so "why did this post go out late / not at all" is answerable
+-- after the fact without digging through n8n's own execution log (which
+-- expires). Kept append-only on purpose — nothing updates a row once written.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS publish_attempts (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  deliverable_id BIGINT UNSIGNED NOT NULL,
+  client_id      BIGINT UNSIGNED DEFAULT NULL,
+  platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+  attempt_no     INT UNSIGNED NOT NULL DEFAULT 1,
+  -- Where in the Graph API dance we got to: claimed → container → publishing
+  -- → posted, or failed at any of them.
+  stage          VARCHAR(40) NOT NULL DEFAULT 'claimed',
+  status         ENUM('processing','posted','failed','skipped') NOT NULL DEFAULT 'processing',
+  container_id   VARCHAR(64) DEFAULT NULL,   -- IG media container (creation_id)
+  media_id       VARCHAR(64) DEFAULT NULL,   -- published IG media id
+  permalink      VARCHAR(500) DEFAULT NULL,
+  error_code     VARCHAR(60) DEFAULT NULL,   -- Meta's error.code / our own slug
+  error_message  TEXT DEFAULT NULL,
+  duration_ms    INT UNSIGNED DEFAULT NULL,
+  run_id         VARCHAR(80) DEFAULT NULL,   -- n8n execution id, for cross-referencing
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_pa_deliv (deliverable_id),
+  KEY idx_pa_client (client_id),
+  KEY idx_pa_created (created_at),
+  KEY idx_pa_status (status),
+  CONSTRAINT fk_pa_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- POST INSIGHTS  (per-media metrics, re-read daily)
+--
+-- Instagram media insights are cumulative lifetime totals, not daily deltas.
+-- Storing one row per (media, day) keeps the history so a chart can show
+-- either the running total or the day-on-day change, and so a metric that
+-- Meta later stops serving doesn't erase what we already collected.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS post_insights (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  deliverable_id BIGINT UNSIGNED DEFAULT NULL,  -- NULL for media posted outside the portal
+  client_id      BIGINT UNSIGNED NOT NULL,
+  platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+  media_id       VARCHAR(64) NOT NULL,
+  media_type     VARCHAR(30) DEFAULT NULL,      -- REELS / IMAGE / VIDEO / CAROUSEL_ALBUM
+  permalink      VARCHAR(500) DEFAULT NULL,
+  thumbnail_url  VARCHAR(700) DEFAULT NULL,
+  caption        TEXT DEFAULT NULL,
+  published_at   DATETIME DEFAULT NULL,
+  snapshot_date  DATE NOT NULL,
+  reach          BIGINT NOT NULL DEFAULT 0,
+  impressions    BIGINT NOT NULL DEFAULT 0,
+  views          BIGINT NOT NULL DEFAULT 0,
+  plays          BIGINT NOT NULL DEFAULT 0,     -- reel plays
+  likes          BIGINT NOT NULL DEFAULT 0,
+  comments       BIGINT NOT NULL DEFAULT 0,
+  shares         BIGINT NOT NULL DEFAULT 0,
+  saves          BIGINT NOT NULL DEFAULT 0,
+  total_interactions BIGINT NOT NULL DEFAULT 0,
+  engagement_rate DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+  raw_json       JSON DEFAULT NULL,             -- exact Graph API response, for replay
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  -- One row per media per day: re-running today's fetch updates in place
+  -- rather than duplicating, so the job is safe to retry.
+  UNIQUE KEY uq_post_insight (media_id, snapshot_date),
+  KEY idx_pi_client_date (client_id, snapshot_date),
+  KEY idx_pi_deliv (deliverable_id),
+  KEY idx_pi_published (published_at),
+  CONSTRAINT fk_pi_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pi_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- AI INSIGHTS  (cached recommendations per client)
+--
+-- Generating these costs an LLM call, and the underlying numbers only move
+-- once a day, so they're computed on a schedule and read from here. `kind`
+-- separates the four recommendation types the dashboard renders.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_insights (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  client_id    BIGINT UNSIGNED NOT NULL,
+  platform     VARCHAR(30) NOT NULL DEFAULT 'instagram',
+  kind         VARCHAR(40) NOT NULL,   -- best_time | content_type | hashtags | engagement
+  headline     VARCHAR(255) NOT NULL,
+  detail       TEXT DEFAULT NULL,
+  confidence   DECIMAL(4,2) NOT NULL DEFAULT 0.00,  -- 0..1, how much data backs it
+  evidence_json JSON DEFAULT NULL,      -- the figures the advice was drawn from
+  period_start DATE DEFAULT NULL,
+  period_end   DATE DEFAULT NULL,
+  generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_ai_insight (client_id, platform, kind),
+  KEY idx_ai_client (client_id),
+  CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- SCHEDULED REPORTS  (weekly / monthly client report runs)
+--
+-- Records that a report was generated and emailed, so a re-run of the same
+-- period doesn't send the client a second copy.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  client_id    BIGINT UNSIGNED NOT NULL,
+  period       ENUM('weekly','monthly') NOT NULL,
+  period_start DATE NOT NULL,
+  period_end   DATE NOT NULL,
+  status       ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  sent_to      VARCHAR(190) DEFAULT NULL,
+  error_message TEXT DEFAULT NULL,
+  summary_json JSON DEFAULT NULL,       -- the totals that went into the email
+  sent_at      DATETIME DEFAULT NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_report_period (client_id, period, period_start),
+  KEY idx_sr_client (client_id),
+  CONSTRAINT fk_sr_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

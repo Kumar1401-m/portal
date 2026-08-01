@@ -22,6 +22,20 @@ export function isAuthorizedZapierRequest(req: Request): boolean {
   return key.length > 0 && timingSafeEqual(key, env.zapier.apiKey);
 }
 
+/**
+ * Same check for the n8n automation API (src/app/api/automation/*), against
+ * its own key. Header-only: unlike the Zapier poller, every n8n HTTP Request
+ * node can set headers, and these endpoints publish to live social accounts —
+ * a key in a query string ends up in access logs and proxy history.
+ */
+export function isAuthorizedAutomationRequest(req: Request): boolean {
+  if (!env.automation.enabled) return false;
+  const header = req.headers.get("authorization") || "";
+  const bearer = header.startsWith("Bearer ") ? header.slice(7) : header;
+  const key = bearer || req.headers.get("x-api-key") || "";
+  return key.length > 0 && timingSafeEqual(key, env.automation.apiKey);
+}
+
 /** Constant-time string compare so key checks don't leak timing info. */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

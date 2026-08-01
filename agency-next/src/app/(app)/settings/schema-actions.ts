@@ -2,12 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
-import { applyPendingColumns, schemaStatus, type SchemaColumnStatus } from "@/lib/schema-sync";
+import {
+  applyPendingColumns,
+  schemaStatus,
+  tableStatus,
+  type SchemaColumnStatus,
+  type SchemaTableStatus,
+} from "@/lib/schema-sync";
 
 export type ApplyState = {
   added?: string[];
   failed?: { column: string; error: string }[];
   status?: SchemaColumnStatus[];
+  tables?: SchemaTableStatus[];
   error?: string;
 };
 
@@ -20,10 +27,18 @@ export async function applySchemaUpdates(): Promise<ApplyState> {
   try {
     const { added, failed } = await applyPendingColumns();
     // Every page that reads one of these columns behind a hasColumn check.
-    for (const p of ["/reports", "/clients", "/deliverables", "/dashboard", "/settings"]) {
+    for (const p of [
+      "/reports",
+      "/clients",
+      "/deliverables",
+      "/dashboard",
+      "/analytics",
+      "/settings",
+    ]) {
       revalidatePath(p);
     }
-    return { added, failed, status: await schemaStatus() };
+    const [status, tables] = await Promise.all([schemaStatus(), tableStatus()]);
+    return { added, failed, status, tables };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reach the database." };
   }

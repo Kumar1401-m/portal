@@ -399,6 +399,160 @@ async function main() {
     "category VARCHAR(10) NOT NULL DEFAULT ''"
   );
 
+  /* ---------------------------------------------------------------------
+   * Cluster N — Instagram auto-publishing (n8n)
+   * An approved reel is picked up by an n8n workflow, pushed to the Meta
+   * Graph API and reported back here. These columns are the handshake: the
+   * workflow reads the queue, claims a row, and writes the outcome.
+   * ------------------------------------------------------------------- */
+
+  // Hashtags live apart from the caption so they can be regenerated, A/B'd and
+  // reported on without rewriting the copy the client approved.
+  await addColumn('deliverables', 'hashtags', 'hashtags TEXT DEFAULT NULL');
+
+  // What Instagram gave us back — needed for insights, and for linking a
+  // deliverable to the live post.
+  await addColumn('deliverables', 'instagram_media_id', 'instagram_media_id VARCHAR(64) DEFAULT NULL');
+  await addColumn('deliverables', 'instagram_permalink', 'instagram_permalink VARCHAR(500) DEFAULT NULL');
+  await addColumn('deliverables', 'instagram_posted_at', 'instagram_posted_at DATETIME DEFAULT NULL');
+
+  // Retry bookkeeping. `post_attempts` is the budget the publisher spends;
+  // `post_error` is the last failure, surfaced in the UI so a human can see
+  // why a post didn't go out without opening n8n.
+  await addColumn('deliverables', 'post_attempts', 'post_attempts INT UNSIGNED NOT NULL DEFAULT 0');
+  await addColumn('deliverables', 'post_error', 'post_error TEXT DEFAULT NULL');
+
+  // Claim lease. Set when a run takes the row, cleared when it settles; a
+  // stale lease is re-claimable so a crashed execution can't wedge the queue.
+  await addColumn('deliverables', 'post_locked_at', 'post_locked_at DATETIME DEFAULT NULL');
+
+  await addColumn('clients', 'ig_username', 'ig_username VARCHAR(100) DEFAULT NULL');
+  // Optional per-client token; blank means "use the agency-wide one in n8n".
+  await addColumn('clients', 'ig_access_token', 'ig_access_token TEXT DEFAULT NULL');
+  await addColumn('clients', 'whatsapp_number', 'whatsapp_number VARCHAR(30) DEFAULT NULL');
+  // Unattended posting is opt-in per client — never on by default.
+  await addColumn('clients', 'auto_publish', 'auto_publish TINYINT(1) NOT NULL DEFAULT 0');
+  await addColumn('clients', 'analytics_enabled', 'analytics_enabled TINYINT(1) NOT NULL DEFAULT 1');
+
+  // Append-only audit trail of every publish attempt. Survives n8n's own
+  // execution log, which expires.
+  await run('publish_attempts table', `
+    CREATE TABLE IF NOT EXISTS publish_attempts (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED NOT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      attempt_no     INT UNSIGNED NOT NULL DEFAULT 1,
+      stage          VARCHAR(40) NOT NULL DEFAULT 'claimed',
+      status         ENUM('processing','posted','failed','skipped') NOT NULL DEFAULT 'processing',
+      container_id   VARCHAR(64) DEFAULT NULL,
+      media_id       VARCHAR(64) DEFAULT NULL,
+      permalink      VARCHAR(500) DEFAULT NULL,
+      error_code     VARCHAR(60) DEFAULT NULL,
+      error_message  TEXT DEFAULT NULL,
+      duration_ms    INT UNSIGNED DEFAULT NULL,
+      run_id         VARCHAR(80) DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_pa_deliv (deliverable_id),
+      KEY idx_pa_client (client_id),
+      KEY idx_pa_created (created_at),
+      KEY idx_pa_status (status),
+      CONSTRAINT fk_pa_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  /* ---------------------------------------------------------------------
+   * Cluster O — Instagram analytics history
+   * A daily n8n job reads Instagram Insights and writes it here, so trends
+   * can be charted over time instead of only ever showing "right now".
+   * ------------------------------------------------------------------- */
+
+  // Account-level metrics the original snapshot table didn't carry.
+  await addColumn('analytics_snapshots', 'follower_delta', 'follower_delta BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'accounts_engaged', 'accounts_engaged BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'profile_visits', 'profile_visits BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'website_clicks', 'website_clicks BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'reel_plays', 'reel_plays BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'total_interactions', 'total_interactions BIGINT NOT NULL DEFAULT 0');
+  await addColumn('analytics_snapshots', 'posts_count', 'posts_count INT UNSIGNED NOT NULL DEFAULT 0');
+
+  // Per-media metrics, one row per media per day. Instagram serves lifetime
+  // totals, so keeping the daily series is what makes deltas possible.
+  await run('post_insights table', `
+    CREATE TABLE IF NOT EXISTS post_insights (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      client_id      BIGINT UNSIGNED NOT NULL,
+      platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      media_id       VARCHAR(64) NOT NULL,
+      media_type     VARCHAR(30) DEFAULT NULL,
+      permalink      VARCHAR(500) DEFAULT NULL,
+      thumbnail_url  VARCHAR(700) DEFAULT NULL,
+      caption        TEXT DEFAULT NULL,
+      published_at   DATETIME DEFAULT NULL,
+      snapshot_date  DATE NOT NULL,
+      reach          BIGINT NOT NULL DEFAULT 0,
+      impressions    BIGINT NOT NULL DEFAULT 0,
+      views          BIGINT NOT NULL DEFAULT 0,
+      plays          BIGINT NOT NULL DEFAULT 0,
+      likes          BIGINT NOT NULL DEFAULT 0,
+      comments       BIGINT NOT NULL DEFAULT 0,
+      shares         BIGINT NOT NULL DEFAULT 0,
+      saves          BIGINT NOT NULL DEFAULT 0,
+      total_interactions BIGINT NOT NULL DEFAULT 0,
+      engagement_rate DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+      raw_json       JSON DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_post_insight (media_id, snapshot_date),
+      KEY idx_pi_client_date (client_id, snapshot_date),
+      KEY idx_pi_deliv (deliverable_id),
+      KEY idx_pi_published (published_at),
+      CONSTRAINT fk_pi_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      CONSTRAINT fk_pi_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Cached LLM recommendations — one row per client per kind, refreshed daily.
+  await run('ai_insights table', `
+    CREATE TABLE IF NOT EXISTS ai_insights (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      platform     VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      kind         VARCHAR(40) NOT NULL,
+      headline     VARCHAR(255) NOT NULL,
+      detail       TEXT DEFAULT NULL,
+      confidence   DECIMAL(4,2) NOT NULL DEFAULT 0.00,
+      evidence_json JSON DEFAULT NULL,
+      period_start DATE DEFAULT NULL,
+      period_end   DATE DEFAULT NULL,
+      generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_ai_insight (client_id, platform, kind),
+      KEY idx_ai_client (client_id),
+      CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Guards against emailing a client the same weekly/monthly report twice.
+  await run('scheduled_reports table', `
+    CREATE TABLE IF NOT EXISTS scheduled_reports (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      period       ENUM('weekly','monthly') NOT NULL,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      status       ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+      sent_to      VARCHAR(190) DEFAULT NULL,
+      error_message TEXT DEFAULT NULL,
+      summary_json JSON DEFAULT NULL,
+      sent_at      DATETIME DEFAULT NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_report_period (client_id, period, period_start),
+      KEY idx_sr_client (client_id),
+      CONSTRAINT fk_sr_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

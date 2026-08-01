@@ -231,6 +231,55 @@ export async function sendPaidInvoiceEmail(
   return { client: toClient, agency: toAgency };
 }
 
+/**
+ * Confirms to the client that a post is live. Sent by the n8n publisher right
+ * after Instagram accepts the media, alongside the WhatsApp message.
+ *
+ * Deliberately short and links straight to the live post: the client's next
+ * action is to look at it, not to read a report.
+ */
+export async function sendPostPublishedEmail(
+  client: { company_name: string; contact_person?: string | null; email?: string | null },
+  post: {
+    title: string;
+    permalink?: string | null;
+    caption?: string | null;
+    postedAt?: string | null;
+    platform?: string;
+  }
+) {
+  const hi = client.contact_person || client.company_name;
+  const platform = post.platform || "Instagram";
+  const when = post.postedAt
+    ? new Date(post.postedAt.includes("T") ? post.postedAt : `${post.postedAt.replace(" ", "T")}Z`)
+    : null;
+  const whenLabel =
+    when && !Number.isNaN(when.getTime())
+      ? when.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+      : null;
+
+  // A caption preview reassures the client that what went out is what they
+  // approved, without making them open the app to check.
+  const preview = post.caption
+    ? `<div style="margin:16px 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #ea580c;border-radius:4px;color:#475569;font-size:13px;white-space:pre-wrap">${esc(
+        post.caption.length > 400 ? `${post.caption.slice(0, 400)}…` : post.caption
+      )}</div>`
+    : "";
+
+  return sendEmail(
+    client.email,
+    `Your post is live on ${platform}`,
+    "It's live 🎉",
+    `<p>Hi ${esc(hi)},</p>
+     <p><b>${esc(post.title)}</b> has been published to ${esc(platform)}${
+       whenLabel ? ` on ${esc(whenLabel)}` : ""
+     }.</p>
+     ${preview}
+     ${post.permalink ? button(post.permalink, `View on ${esc(platform)}`) : button("/portal", "Open your portal")}
+     <p style="color:#6b7280;font-size:13px">Performance figures will appear in your portal within a day of posting.</p>`
+  );
+}
+
 export async function sendNotificationEmail(
   to: string | null | undefined,
   title: string,

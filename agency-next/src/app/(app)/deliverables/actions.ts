@@ -13,6 +13,7 @@ import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey } from "@/lib/utils";
 import { localTimeToUtc } from "@/lib/zapier";
+import { retryPublish } from "@/lib/instagram";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
 
@@ -539,4 +540,47 @@ export async function submitRawOrReference(
     ok: true,
     message: rawLink ? "Raw footage added — ready to edit." : "Reference links added — ready to edit.",
   };
+}
+
+/* --------------------- Retry a failed Instagram post --------------------- */
+
+export type RetryState = { ok: boolean; error?: string };
+
+/**
+ * Put a deliverable whose publish failed back into the automation's queue.
+ *
+ * Resetting `post_attempts` is the whole point — the queue refuses anything
+ * that has spent its retry budget, so without the reset the row would be
+ * offered to nobody however many times the button was pressed.
+ *
+ * Admin-only, and scoped for a crm user: this causes a post to appear on a
+ * real client account, which is not something a scoped user should be able to
+ * trigger for a client they don't own.
+ */
+export async function retryPublishAction(
+  _prev: RetryState,
+  formData: FormData
+): Promise<RetryState> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing task." };
+
+  const row = await queryOne<{ client_id: number; instagram_status: string }>(
+    "SELECT client_id, instagram_status FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!row) return { ok: false, error: "Task not found." };
+  if (!(await canAccessClient(user, row.client_id))) {
+    return { ok: false, error: "You don't have access to this client." };
+  }
+  if (row.instagram_status === "posted") {
+    return { ok: false, error: "This is already live on Instagram." };
+  }
+
+  const ok = await retryPublish(id);
+  if (!ok) return { ok: false, error: "Could not queue it — try reloading the page." };
+
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/deliverables");
+  return { ok: true };
 }

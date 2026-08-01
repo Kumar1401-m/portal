@@ -170,7 +170,14 @@ async function callOpenAI(
   }
 }
 
-async function callJSON(
+/**
+ * Ask whichever provider is configured for a JSON object, OpenAI first.
+ * Exported so other AI features (analytics recommendations) share one place
+ * that knows about keys, models and fallbacks. Returns a null `data` when no
+ * provider is available or every one of them failed — callers are expected to
+ * have a non-AI fallback rather than to treat this as fatal.
+ */
+export async function callJSON(
   systemPrompt: string,
   userPrompt: string
 ): Promise<{ data: Record<string, unknown> | null; provider: "openai" | "gemini" | null }> {

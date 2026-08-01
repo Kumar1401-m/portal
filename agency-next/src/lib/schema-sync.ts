@@ -10,7 +10,8 @@
  * So the super admin can apply them from Settings. Deliberately narrow:
  *
  *   - only the statements written out below, never anything from a request
- *   - only ADD COLUMN, so nothing existing can be altered or dropped
+ *   - only ADD COLUMN and CREATE TABLE IF NOT EXISTS, so nothing existing can
+ *     be altered or dropped
  *   - skipped when the column is already there, so it's safe to run twice
  *
  * `database/migrate.js` remains the source of truth and does the same work;
@@ -65,9 +66,242 @@ const EXPECTED: ColumnSpec[] = [
     definition: "cloud_video_key VARCHAR(400) DEFAULT NULL",
     purpose: "Object key of an uploaded video — what signed links are built from.",
   },
+
+  /* --- Instagram auto-publishing (the n8n workflow's handshake) --- */
+  {
+    table: "deliverables",
+    column: "hashtags",
+    definition: "hashtags TEXT DEFAULT NULL",
+    purpose: "Hashtags kept apart from the caption, appended when the post goes out.",
+  },
+  {
+    table: "deliverables",
+    column: "instagram_media_id",
+    definition: "instagram_media_id VARCHAR(64) DEFAULT NULL",
+    purpose: "The Instagram media id returned once a post is published.",
+  },
+  {
+    table: "deliverables",
+    column: "instagram_permalink",
+    definition: "instagram_permalink VARCHAR(500) DEFAULT NULL",
+    purpose: "Public link to the published post.",
+  },
+  {
+    table: "deliverables",
+    column: "instagram_posted_at",
+    definition: "instagram_posted_at DATETIME DEFAULT NULL",
+    purpose: "When Instagram accepted the post.",
+  },
+  {
+    table: "deliverables",
+    column: "post_attempts",
+    definition: "post_attempts INT UNSIGNED NOT NULL DEFAULT 0",
+    purpose: "How many publish attempts have been spent, so retries can give up.",
+  },
+  {
+    table: "deliverables",
+    column: "post_error",
+    definition: "post_error TEXT DEFAULT NULL",
+    purpose: "The last publishing failure, shown in the portal.",
+  },
+  {
+    table: "deliverables",
+    column: "post_locked_at",
+    definition: "post_locked_at DATETIME DEFAULT NULL",
+    purpose: "Claim lease — stops two automation runs posting the same video twice.",
+  },
+  {
+    table: "clients",
+    column: "ig_username",
+    definition: "ig_username VARCHAR(100) DEFAULT NULL",
+    purpose: "The client's Instagram @handle, shown on the analytics dashboard.",
+  },
+  {
+    table: "clients",
+    column: "ig_access_token",
+    definition: "ig_access_token TEXT DEFAULT NULL",
+    purpose: "Optional per-client Meta token; blank uses the agency-wide one.",
+  },
+  {
+    table: "clients",
+    column: "whatsapp_number",
+    definition: "whatsapp_number VARCHAR(30) DEFAULT NULL",
+    purpose: "Where the 'your post is live' WhatsApp message goes.",
+  },
+  {
+    table: "clients",
+    column: "auto_publish",
+    definition: "auto_publish TINYINT(1) NOT NULL DEFAULT 0",
+    purpose: "Opt-in to unattended posting. Off unless the client agrees to it.",
+  },
+  {
+    table: "clients",
+    column: "analytics_enabled",
+    definition: "analytics_enabled TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Include this client in the daily Instagram insights pull.",
+  },
+
+  /* --- Analytics history (the daily insights job) --- */
+  {
+    table: "analytics_snapshots",
+    column: "follower_delta",
+    definition: "follower_delta BIGINT NOT NULL DEFAULT 0",
+    purpose: "That day's net follower change, stored rather than derived.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "accounts_engaged",
+    definition: "accounts_engaged BIGINT NOT NULL DEFAULT 0",
+    purpose: "Accounts that interacted with the profile that day.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "profile_visits",
+    definition: "profile_visits BIGINT NOT NULL DEFAULT 0",
+    purpose: "Profile visits, from Instagram Insights.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "website_clicks",
+    definition: "website_clicks BIGINT NOT NULL DEFAULT 0",
+    purpose: "Taps on the website link in the bio.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "reel_plays",
+    definition: "reel_plays BIGINT NOT NULL DEFAULT 0",
+    purpose: "Reel plays across the account for that day.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "total_interactions",
+    definition: "total_interactions BIGINT NOT NULL DEFAULT 0",
+    purpose: "Likes + comments + shares + saves, as Meta reports it.",
+  },
+  {
+    table: "analytics_snapshots",
+    column: "posts_count",
+    definition: "posts_count INT UNSIGNED NOT NULL DEFAULT 0",
+    purpose: "How many posts went out that day — drives the posting-frequency chart.",
+  },
+];
+
+/**
+ * Tables the analytics and publishing features need. Same rules as the
+ * columns: literal statements, `IF NOT EXISTS`, nothing that can destroy data.
+ * Written without foreign keys deliberately — `migrate.js` adds them, but a
+ * hosted database where the parent tables live in a different engine or
+ * charset would reject the constraint and leave the feature unusable. The
+ * app's queries never depend on the FK, only on the columns.
+ */
+type TableSpec = { table: string; purpose: string; ddl: string };
+
+const EXPECTED_TABLES: TableSpec[] = [
+  {
+    table: "publish_attempts",
+    purpose: "Audit trail of every Instagram publish attempt, including failures.",
+    ddl: `CREATE TABLE IF NOT EXISTS publish_attempts (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED NOT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      attempt_no     INT UNSIGNED NOT NULL DEFAULT 1,
+      stage          VARCHAR(40) NOT NULL DEFAULT 'claimed',
+      status         ENUM('processing','posted','failed','skipped') NOT NULL DEFAULT 'processing',
+      container_id   VARCHAR(64) DEFAULT NULL,
+      media_id       VARCHAR(64) DEFAULT NULL,
+      permalink      VARCHAR(500) DEFAULT NULL,
+      error_code     VARCHAR(60) DEFAULT NULL,
+      error_message  TEXT DEFAULT NULL,
+      duration_ms    INT UNSIGNED DEFAULT NULL,
+      run_id         VARCHAR(80) DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_pa_deliv (deliverable_id),
+      KEY idx_pa_client (client_id),
+      KEY idx_pa_created (created_at),
+      KEY idx_pa_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "post_insights",
+    purpose: "Per-post Instagram metrics, one row per post per day, for trends.",
+    ddl: `CREATE TABLE IF NOT EXISTS post_insights (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      client_id      BIGINT UNSIGNED NOT NULL,
+      platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      media_id       VARCHAR(64) NOT NULL,
+      media_type     VARCHAR(30) DEFAULT NULL,
+      permalink      VARCHAR(500) DEFAULT NULL,
+      thumbnail_url  VARCHAR(700) DEFAULT NULL,
+      caption        TEXT DEFAULT NULL,
+      published_at   DATETIME DEFAULT NULL,
+      snapshot_date  DATE NOT NULL,
+      reach          BIGINT NOT NULL DEFAULT 0,
+      impressions    BIGINT NOT NULL DEFAULT 0,
+      views          BIGINT NOT NULL DEFAULT 0,
+      plays          BIGINT NOT NULL DEFAULT 0,
+      likes          BIGINT NOT NULL DEFAULT 0,
+      comments       BIGINT NOT NULL DEFAULT 0,
+      shares         BIGINT NOT NULL DEFAULT 0,
+      saves          BIGINT NOT NULL DEFAULT 0,
+      total_interactions BIGINT NOT NULL DEFAULT 0,
+      engagement_rate DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+      raw_json       JSON DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_post_insight (media_id, snapshot_date),
+      KEY idx_pi_client_date (client_id, snapshot_date),
+      KEY idx_pi_deliv (deliverable_id),
+      KEY idx_pi_published (published_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "ai_insights",
+    purpose: "Cached AI recommendations per client (best time, hashtags, and so on).",
+    ddl: `CREATE TABLE IF NOT EXISTS ai_insights (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      platform     VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      kind         VARCHAR(40) NOT NULL,
+      headline     VARCHAR(255) NOT NULL,
+      detail       TEXT DEFAULT NULL,
+      confidence   DECIMAL(4,2) NOT NULL DEFAULT 0.00,
+      evidence_json JSON DEFAULT NULL,
+      period_start DATE DEFAULT NULL,
+      period_end   DATE DEFAULT NULL,
+      generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_ai_insight (client_id, platform, kind),
+      KEY idx_ai_client (client_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "scheduled_reports",
+    purpose: "Record of weekly/monthly reports emailed, so none is sent twice.",
+    ddl: `CREATE TABLE IF NOT EXISTS scheduled_reports (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      period       ENUM('weekly','monthly') NOT NULL,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      status       ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+      sent_to      VARCHAR(190) DEFAULT NULL,
+      error_message TEXT DEFAULT NULL,
+      summary_json JSON DEFAULT NULL,
+      sent_at      DATETIME DEFAULT NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_report_period (client_id, period, period_start),
+      KEY idx_sr_client (client_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
 ];
 
 export type SchemaColumnStatus = ColumnSpec & { present: boolean };
+export type SchemaTableStatus = { table: string; purpose: string; present: boolean };
 
 /**
  * One information_schema round trip for the whole list.
@@ -78,16 +312,36 @@ export type SchemaColumnStatus = ColumnSpec & { present: boolean };
  * columns that are already there.
  */
 export async function schemaStatus(): Promise<SchemaColumnStatus[]> {
+  // The tables to inspect come from EXPECTED itself, so adding a spec for a
+  // new table above is all that's needed — no second list to keep in step.
+  const tables = [...new Set(EXPECTED.map((c) => c.table.toLowerCase()))];
   const rows = await query<{ t: string; c: string }>(
     `SELECT LOWER(TABLE_NAME) AS t, LOWER(COLUMN_NAME) AS c
        FROM information_schema.columns
       WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME IN ('clients','deliverables')`
+        AND TABLE_NAME IN (${tables.map(() => "?").join(",")})`,
+    tables
   );
   const have = new Set(rows.map((r) => `${r.t}.${r.c}`));
   return EXPECTED.map((c) => ({
     ...c,
     present: have.has(`${c.table}.${c.column}`.toLowerCase()),
+  }));
+}
+
+/** Which of the analytics/publishing tables already exist. */
+export async function tableStatus(): Promise<SchemaTableStatus[]> {
+  const names = EXPECTED_TABLES.map((t) => t.table);
+  const rows = await query<{ t: string }>(
+    `SELECT LOWER(TABLE_NAME) AS t FROM information_schema.tables
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${names.map(() => "?").join(",")})`,
+    names
+  );
+  const have = new Set(rows.map((r) => r.t));
+  return EXPECTED_TABLES.map(({ table, purpose }) => ({
+    table,
+    purpose,
+    present: have.has(table.toLowerCase()),
   }));
 }
 
@@ -97,17 +351,36 @@ export type ApplyResult = {
 };
 
 /**
- * Add whatever is missing. Each column is attempted on its own so one failure
- * doesn't strand the rest, and `hasColumn`'s cache is cleared for anything
- * added — otherwise this process would keep believing the column is absent
- * until it restarts.
+ * Add whatever is missing. Each statement is attempted on its own so one
+ * failure doesn't strand the rest, and `hasColumn`'s cache is cleared for
+ * anything added — otherwise this process would keep believing the column is
+ * absent until it restarts.
+ *
+ * Tables are created before columns: a spec may add a column to a table this
+ * same run is responsible for creating.
  */
 export async function applyPendingColumns(): Promise<ApplyResult> {
-  const status = await schemaStatus();
   const added: string[] = [];
   const failed: { column: string; error: string }[] = [];
 
-  for (const c of status) {
+  // Checked first rather than relying on IF NOT EXISTS alone, so the result
+  // reports what this run actually created instead of listing every table.
+  const missingTables = new Set((await tableStatus()).filter((t) => !t.present).map((t) => t.table));
+  for (const t of EXPECTED_TABLES) {
+    if (!missingTables.has(t.table)) continue;
+    try {
+      // `ddl` is a literal from the list above, never from input.
+      await executeDdl(t.ddl);
+      added.push(`${t.table} (table)`);
+    } catch (e) {
+      failed.push({
+        column: `${t.table} (table)`,
+        error: e instanceof Error ? e.message : "Unknown error",
+      });
+    }
+  }
+
+  for (const c of await schemaStatus()) {
     if (c.present) continue;
     try {
       // `definition` is a literal from the list above, never from input.

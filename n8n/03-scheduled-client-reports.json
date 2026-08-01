@@ -1,0 +1,293 @@
+{
+  "name": "03 · Scheduled Client Reports",
+  "meta": {
+    "description": "Emails every client a weekly performance report on Monday morning and a monthly one on the 1st. The portal builds and sends the report; this workflow only decides when and for whom."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 1800,
+    "timezone": "Asia/Kolkata"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Scheduled Client Reports\n\n**Weekly** — Mondays 09:00, covering the week that just ended (Mon–Sun).\n**Monthly** — the 1st at 09:30, covering the whole previous month.\n\n**Why this workflow is so small**\nThe report — figures, comparison, top posts, recommendations, HTML — is built by the portal. n8n only says *when* and *for whom*.\n\nThat is deliberate. The numbers a client receives by email have to match the dashboard exactly, and the only reliable way to guarantee that is to compute them in one place. It also means editing this workflow can never silently change what a report says.\n\n**Duplicate protection**\n`scheduled_reports` has a unique key on (client, period, period_start), and the row is claimed *before* the email goes out. A retried run cannot send the same client the same report twice.",
+        "height": 460,
+        "width": 480,
+        "color": 4
+      },
+      "id": "sticky-overview",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1060, 160]
+    },
+    {
+      "parameters": {
+        "content": "### Period windows\n\nBoth triggers report on the period that has **finished**, never the one in progress — a Monday report covering that same Monday would show a few hours of data and read as a collapse.\n\nThe portal computes the window, so a cron that fires late (or a manual re-run mid-week) still covers the correct period.",
+        "height": 300,
+        "width": 420,
+        "color": 5
+      },
+      "id": "sticky-windows",
+      "name": "Section: windows",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-540, 620]
+    },
+
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 0 9 * * 1" }]
+        }
+      },
+      "id": "trigger-weekly",
+      "name": "Mondays at 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-480, 260],
+      "notes": "Monday 09:00 local. Deliberately after the daily insights job (06:30) so the week's final day is already collected — otherwise every weekly report would be missing its Sunday."
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 30 9 1 * *" }]
+        }
+      },
+      "id": "trigger-monthly",
+      "name": "1st of the month at 09:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-480, 420],
+      "notes": "The 1st at 09:30, half an hour after the weekly slot so the two never contend for the same SMTP connection when the 1st happens to be a Monday."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "period-weekly",
+              "name": "period",
+              "value": "weekly",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-weekly",
+      "name": "Period: weekly",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-260, 260],
+      "notes": "Tags the run so both triggers can share every node after this point."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "period-monthly",
+              "name": "period",
+              "value": "monthly",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-monthly",
+      "name": "Period: monthly",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-260, 420],
+      "notes": "Same, for the monthly run."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PORTAL_URL }}/api/automation/reports/due?period={{ $json.period }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "http-due",
+      "name": "Who is owed a report?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-40, 340],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000,
+      "notes": "GET /reports/due — clients with analytics on, an Instagram account and an email address, minus anyone already sent this period's report. Also returns the exact window, so nothing here has to do date arithmetic."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan the pending clients out into items.\n//\n// The endpoint has already filtered out anyone who received this period's\n// report, so an empty list is the correct outcome of a re-run — not a fault.\nconst response = $input.first().json;\nif (!response.ok) {\n  throw new Error(`Portal refused the report list: ${response.error || 'unknown error'}`);\n}\n\nconst clients = response.clients || [];\nconsole.log(\n  `${response.period} report for ${response.from} → ${response.to}: ` +\n  `${clients.length} of ${response.total} client(s) still to send.`\n);\n\nif (!clients.length) {\n  return [{ json: { nothing_to_send: true, period: response.period, from: response.from, to: response.to } }];\n}\n\nreturn clients.map((c) => ({\n  json: { ...c, period: response.period, from: response.from, to: response.to, nothing_to_send: false },\n}));"
+      },
+      "id": "code-clients",
+      "name": "Expand client list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [180, 340],
+      "notes": "One item per client still owed a report. Emits a single marker item when there are none, so the branch below has something to route."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "has-clients",
+              "leftValue": "={{ $json.nothing_to_send }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "false", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-any",
+      "name": "Anyone to send to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [400, 340],
+      "notes": "Everyone already has this period's report — a re-run, or the cron fired twice. Stop quietly."
+    },
+    {
+      "parameters": {},
+      "id": "noop-idle",
+      "name": "Everyone already has it",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [620, 500],
+      "notes": "Deliberate dead end — duplicate protection working as intended, not an error."
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": { "reset": false }
+      },
+      "id": "loop-clients",
+      "name": "One report at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [620, 320],
+      "notes": "Serial: each iteration sends a real email, and most SMTP providers rate-limit hard on a burst. Output 0 = finished, output 1 = next client."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PORTAL_URL }}/api/automation/reports/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ period: $json.period, client_id: $json.client_id }) }}",
+        "options": { "timeout": 120000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-send",
+      "name": "Build & send the report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [840, 320],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 20000,
+      "notes": "The portal gathers the figures, renders the branded HTML, sends the email and records the send — all in one call. Safe to retry: the row is claimed before the email goes out, so a retry after a timeout won't double-send. Long timeout because building a report queries several months of history."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep a per-client outcome so the execution log answers 'did Acme get their\n// report?' without opening the database.\n//\n// A skip is not a failure: 'no_email', 'no_data' and 'already_sent' are all\n// legitimate reasons not to send, and each one is worth seeing by name.\nconst response = $json;\nconst client = $('One report at a time').item.json;\nconst result = (response.results && response.results[0]) || {};\n\nconst outcome = result.sent\n  ? 'sent'\n  : result.skipped\n    ? `skipped (${result.skipped})`\n    : result.error\n      ? `failed: ${result.error}`\n      : response.ok === false\n        ? `failed: ${response.error || 'portal refused the request'}`\n        : 'unknown';\n\nconsole.log(`${client.client_name || client.client_id}: ${outcome}`);\n\nreturn [{\n  json: {\n    client_id: client.client_id,\n    client_name: client.client_name,\n    period: client.period,\n    outcome,\n    sent: Boolean(result.sent),\n  },\n}];"
+      },
+      "id": "code-outcome",
+      "name": "Record the outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 320],
+      "notes": "Turns the response into one readable line per client in the execution log. Never throws — one client's failure must not stop the rest of the list."
+    },
+    {
+      "parameters": {},
+      "id": "noop-summary",
+      "name": "All reports processed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [840, 160],
+      "notes": "Reached when the loop is exhausted. Every per-client outcome is on the items here — attach a Slack or email node if you want the agency told."
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "On workflow crash",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-480, 800],
+      "notes": "A crashed report run leaves rows as 'pending' in scheduled_reports rather than 'sent', so the next run picks them up by itself. This exists to make the failure visible."
+    },
+    {
+      "parameters": {},
+      "id": "noop-crash",
+      "name": "Crash recorded",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [-260, 800],
+      "notes": "Terminal. Nothing to undo: an unsent report is simply still due."
+    }
+  ],
+
+  "connections": {
+    "Mondays at 09:00": {
+      "main": [[{ "node": "Period: weekly", "type": "main", "index": 0 }]]
+    },
+    "1st of the month at 09:30": {
+      "main": [[{ "node": "Period: monthly", "type": "main", "index": 0 }]]
+    },
+    "Period: weekly": {
+      "main": [[{ "node": "Who is owed a report?", "type": "main", "index": 0 }]]
+    },
+    "Period: monthly": {
+      "main": [[{ "node": "Who is owed a report?", "type": "main", "index": 0 }]]
+    },
+    "Who is owed a report?": {
+      "main": [[{ "node": "Expand client list", "type": "main", "index": 0 }]]
+    },
+    "Expand client list": {
+      "main": [[{ "node": "Anyone to send to?", "type": "main", "index": 0 }]]
+    },
+    "Anyone to send to?": {
+      "main": [
+        [{ "node": "One report at a time", "type": "main", "index": 0 }],
+        [{ "node": "Everyone already has it", "type": "main", "index": 0 }]
+      ]
+    },
+    "One report at a time": {
+      "main": [
+        [{ "node": "All reports processed", "type": "main", "index": 0 }],
+        [{ "node": "Build & send the report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build & send the report": {
+      "main": [[{ "node": "Record the outcome", "type": "main", "index": 0 }]]
+    },
+    "Record the outcome": {
+      "main": [[{ "node": "One report at a time", "type": "main", "index": 0 }]]
+    },
+    "On workflow crash": {
+      "main": [[{ "node": "Crash recorded", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "versionId": "1.0.0",
+  "tags": [{ "name": "reports" }, { "name": "analytics" }]
+}

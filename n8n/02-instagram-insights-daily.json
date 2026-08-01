@@ -1,0 +1,485 @@
+{
+  "name": "02 · Instagram Insights (daily)",
+  "meta": {
+    "description": "Once a day, reads Instagram Insights for every client with analytics enabled — account metrics, follower count and per-post metrics for the last 30 days — stores them as history in the portal, then refreshes the AI recommendations."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 3600,
+    "timezone": "Asia/Kolkata"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Daily Instagram Insights\n\n**What it does**\nEvery morning, for each client: read account metrics for *yesterday*, read metrics for posts from the last 30 days, store both as history, then regenerate the AI recommendations.\n\n**Why yesterday, not today**\nInstagram's day-scoped metrics for the current day are still accumulating. Storing them would record a partial day as a real one and put a fake trough at the end of every chart.\n\n**Why the portal picks the posts**\nIt already knows which media it published and when, so the workflow only spends Graph API calls on posts still inside the freshness window instead of walking the whole feed.\n\n**Rate limits**\nMeta allows 200 calls/user/hour. This spends roughly 4 + 2×(posts) per client. The batching below keeps a 20-client agency well inside that.",
+        "height": 520,
+        "width": 460,
+        "color": 4
+      },
+      "id": "sticky-overview",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1180, 140]
+    },
+    {
+      "parameters": {
+        "content": "### Account-level metrics\n\nThree calls because Meta splits them:\n- plain `period=day` metrics\n- `metric_type=total_value` metrics (most of the interaction ones)\n- `follower_count`, which is a daily delta\n\nplus one field read for the running follower total.\n\nAll are `neverError` — an account that can't serve one metric must not cost us the other three.",
+        "height": 360,
+        "width": 620,
+        "color": 5
+      },
+      "id": "sticky-account",
+      "name": "Section: account",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [420, 60]
+    },
+    {
+      "parameters": {
+        "content": "### Per-post metrics\n\nn8n runs an HTTP node once per input item, so expanding the media list into items is all the looping this needs — no inner Loop node.\n\nPost metrics are Instagram's **lifetime** totals, not daily figures. The portal stores one row per post per day so a chart can show either the running total or the day-on-day change.",
+        "height": 340,
+        "width": 700,
+        "color": 6
+      },
+      "id": "sticky-posts",
+      "name": "Section: posts",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1720, 60]
+    },
+
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 30 6 * * *" }]
+        }
+      },
+      "id": "trigger-daily",
+      "name": "Daily at 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-600, 320],
+      "notes": "06:30 local. Late enough that Meta has settled yesterday's numbers, early enough that the dashboard is current before the agency starts work."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PORTAL_URL }}/api/automation/insights/targets?days=30",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "http-targets",
+      "name": "Fetch clients & their posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-380, 320],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "notes": "GET /insights/targets — every client with analytics enabled and an IG account id, each with the media ids published in the last 30 days and (when it has one) its own access token."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan the client list out into items, and work out the exact window to ask\n// Meta about.\n//\n// The Graph API wants unix seconds. `since`/`until` bracket YESTERDAY in UTC:\n// today is still accumulating, so storing it would record a partial day as a\n// real one — the single most common way a metrics chart ends up lying.\nconst response = $input.first().json;\nif (!response.ok) {\n  throw new Error(`Portal refused the targets request: ${response.error || 'unknown error'}`);\n}\n\nconst snapshotDate = response.snapshot_date; // YYYY-MM-DD, yesterday per the portal\nconst dayStart = Math.floor(Date.parse(`${snapshotDate}T00:00:00Z`) / 1000);\nconst dayEnd = dayStart + 86399;\nconst apiVersion = $env.META_API_VERSION || 'v21.0';\n\nconst clients = response.clients || [];\nif (!clients.length) {\n  // Not an error: a new install, or every client has analytics switched off.\n  return [{ json: { no_clients: true, snapshot_date: snapshotDate } }];\n}\n\nreturn clients.map((c) => ({\n  json: {\n    ...c,\n    snapshot_date: snapshotDate,\n    since: dayStart,\n    until: dayEnd,\n    api_version: apiVersion,\n    access_token: c.access_token || $env.META_ACCESS_TOKEN,\n    media_count: (c.media || []).length,\n  },\n}));"
+      },
+      "id": "code-clients",
+      "name": "Expand client list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 320],
+      "notes": "One item per client, each carrying the exact UTC day window and the token to use (its own, or the agency's)."
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": { "reset": false }
+      },
+      "id": "loop-clients",
+      "name": "One client at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [60, 320],
+      "notes": "Serial rather than parallel: Meta rate-limits per user, and a burst of 20 clients × 30 posts would trip it. Output 0 = all clients done, output 1 = next client."
+    },
+
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $json.api_version }}/{{ $json.ig_user_id }}/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "metric", "value": "reach,views" },
+            { "name": "period", "value": "day" },
+            { "name": "since", "value": "={{ $json.since }}" },
+            { "name": "until", "value": "={{ $json.until }}" },
+            { "name": "access_token", "value": "={{ $json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-insights-basic",
+      "name": "Account: reach & views",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 240],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000,
+      "notes": "The plain day-period metrics. `views` replaced `impressions` from v22 onwards; the portal's parser accepts either name, so this keeps working across API versions."
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $('One client at a time').item.json.api_version }}/{{ $('One client at a time').item.json.ig_user_id }}/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "metric",
+              "value": "accounts_engaged,total_interactions,likes,comments,shares,saves,profile_views,website_clicks"
+            },
+            { "name": "period", "value": "day" },
+            { "name": "metric_type", "value": "total_value" },
+            { "name": "since", "value": "={{ $('One client at a time').item.json.since }}" },
+            { "name": "until", "value": "={{ $('One client at a time').item.json.until }}" },
+            { "name": "access_token", "value": "={{ $('One client at a time').item.json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-insights-total",
+      "name": "Account: engagement metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 240],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000,
+      "notes": "Meta only serves these with metric_type=total_value, and rejects the whole call if ANY listed metric is unavailable for that account. neverError keeps a rejection as data so the run continues with whatever the other calls returned."
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $('One client at a time').item.json.api_version }}/{{ $('One client at a time').item.json.ig_user_id }}/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "metric", "value": "follower_count" },
+            { "name": "period", "value": "day" },
+            { "name": "since", "value": "={{ $('One client at a time').item.json.since }}" },
+            { "name": "until", "value": "={{ $('One client at a time').item.json.until }}" },
+            { "name": "access_token", "value": "={{ $('One client at a time').item.json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-followers-delta",
+      "name": "Account: follower change",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 240],
+      "onError": "continueRegularOutput",
+      "notes": "`follower_count` is the NET CHANGE for the day, not the total. Meta only serves it for accounts above 100 followers — smaller ones return an error, which neverError turns into a harmless zero."
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $('One client at a time').item.json.api_version }}/{{ $('One client at a time').item.json.ig_user_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "fields", "value": "followers_count,media_count,username" },
+            { "name": "access_token", "value": "={{ $('One client at a time').item.json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-followers-total",
+      "name": "Account: follower total",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 240],
+      "onError": "continueRegularOutput",
+      "notes": "The running follower count — a field on the account, not an insight. Stored so the followers chart has an absolute line as well as a daily delta."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PORTAL_URL }}/api/automation/insights/account",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $('One client at a time').item.json.client_id, date: $('One client at a time').item.json.snapshot_date, insights: { data: [].concat($('Account: reach & views').item.json.data || [], $('Account: engagement metrics').item.json.data || [], $('Account: follower change').item.json.data || []) }, followers: $json.followers_count || 0, posts_count: 0 }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "http-store-account",
+      "name": "Store account snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 240],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "notes": "The three insights responses are concatenated and passed through untouched — the portal's parser handles every shape Meta serves, so the fragile version-specific bit lives in tested code rather than in an n8n expression. Upserted by (client, date), so re-running the day is safe."
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// One item per post to refresh.\n//\n// n8n runs an HTTP node once per input item, so this expansion IS the loop —\n// no inner Loop node needed.\n//\n// Always emits at least one item: an empty output would leave the outer loop\n// with nothing to continue on and the whole run would stall on the first\n// client that posted nothing this month.\nconst client = $('One client at a time').item.json;\nconst media = client.media || [];\n\nif (!media.length) {\n  return [{ json: { client_id: client.client_id, no_media: true } }];\n}\n\nreturn media.map((m) => ({\n  json: {\n    client_id: client.client_id,\n    deliverable_id: m.deliverable_id,\n    media_id: m.media_id,\n    published_at: m.published_at,\n    snapshot_date: client.snapshot_date,\n    api_version: client.api_version,\n    access_token: client.access_token,\n    no_media: false,\n  },\n}));"
+      },
+      "id": "code-media",
+      "name": "Expand media list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 240],
+      "notes": "Fans the client's media ids out into items. Emits a single no_media marker for a client with nothing published, so the outer loop still advances."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "has-media",
+              "leftValue": "={{ $json.no_media }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "false", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-media",
+      "name": "Any posts to read?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1800, 240],
+      "notes": "False branch skips straight back to the loop for the next client."
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $json.api_version }}/{{ $json.media_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,media_type,media_product_type,permalink,thumbnail_url,media_url,caption,timestamp,like_count,comments_count"
+            },
+            { "name": "access_token", "value": "={{ $json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-media-object",
+      "name": "Post: media object",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2020, 200],
+      "onError": "continueRegularOutput",
+      "notes": "Runs once per media item. `like_count` and `comments_count` come from here rather than from insights — the media edge serves them even when the insights edge refuses a brand-new post, so they are the more reliable source."
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/{{ $('Expand media list').item.json.api_version }}/{{ $('Expand media list').item.json.media_id }}/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "metric", "value": "reach,views,likes,comments,shares,saved,total_interactions" },
+            { "name": "access_token", "value": "={{ $('Expand media list').item.json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-media-insights",
+      "name": "Post: insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 200],
+      "onError": "continueRegularOutput",
+      "notes": "Lifetime metrics for one post. Meta serves different metric sets per media type and rejects the whole call on an unsupported one — neverError means such a post falls back to the like/comment counts from the media object instead of failing the client's whole batch."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect every post back into ONE item for a single batched store call.\n//\n// Per-post HTTP calls are unavoidable — Meta has no bulk insights edge — but\n// per-post writes to our own API are not. A client with 30 posts becomes one\n// request instead of thirty.\nconst expanded = $('Expand media list').all();\nconst mediaObjects = $('Post: media object').all();\nconst insights = $input.all();\n\nconst posts = expanded.map((item, i) => {\n  const media = mediaObjects[i]?.json || {};\n  const insight = insights[i]?.json || {};\n\n  // A Graph error body has `error` and no `data`; pass null so the portal\n  // falls back to the media object's own counts.\n  const insightData = insight && Array.isArray(insight.data) ? insight : null;\n\n  return {\n    media_id: item.json.media_id,\n    deliverable_id: item.json.deliverable_id,\n    media: media.error ? {} : media,\n    insights: insightData,\n  };\n});\n\nreturn [{\n  json: {\n    client_id: expanded[0].json.client_id,\n    date: expanded[0].json.snapshot_date,\n    posts,\n    // Fed back into the account snapshot as that day's publishing count.\n    posts_published_on_date: posts.filter(\n      (p) => (p.media?.timestamp || '').slice(0, 10) === expanded[0].json.snapshot_date\n    ).length,\n  },\n}];"
+      },
+      "id": "code-bundle",
+      "name": "Bundle post insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 200],
+      "notes": "Re-pairs each media object with its insights response and collapses them into one payload — 1 write instead of N."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PORTAL_URL }}/api/automation/insights/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 60000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-store-posts",
+      "name": "Store post insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2680, 200],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "notes": "One batched write per client. The endpoint reports partial success — a post whose insights Meta refused is skipped and named, the other twenty-nine still land."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PORTAL_URL }}/api/automation/insights/account",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $('Bundle post insights').item.json.client_id, date: $('Bundle post insights').item.json.date, posts_count: $('Bundle post insights').item.json.posts_published_on_date }) }}",
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-update-posts-count",
+      "name": "Record posts-per-day",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2900, 200],
+      "onError": "continueRegularOutput",
+      "notes": "A second, tiny upsert on the same snapshot row, now that we know how many posts actually went out that day — the posting-frequency chart reads this. Separate call because the count is only knowable after the media objects have been fetched."
+    },
+    {
+      "parameters": {},
+      "id": "noop-next-client",
+      "name": "Next client",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3120, 300],
+      "notes": "Join point for both branches; returns to the loop."
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PORTAL_URL }}/api/automation/insights/recommendations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ days: 90 }) }}",
+        "options": { "timeout": 300000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "http-recommendations",
+      "name": "Refresh AI recommendations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 520],
+      "onError": "continueRegularOutput",
+      "notes": "Runs once, AFTER every client's numbers have landed — the advice is computed from those numbers, so running it first would recommend on yesterday's picture. 90 days, because 'best posting time' needs enough posts per weekday slot to be more than noise. Long timeout: this is one LLM call per client."
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "On workflow crash",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-600, 700],
+      "notes": "Analytics failing is not urgent — nothing is published and no client sees it — but a week of silent failure would leave every chart flat. This makes it visible in n8n's execution list."
+    },
+    {
+      "parameters": {},
+      "id": "noop-crash",
+      "name": "Crash recorded",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [-380, 700],
+      "notes": "Terminal. The failed execution is already in n8n's log; nothing to publish or undo. Add a Slack/email node here if you want to be told."
+    }
+  ],
+
+  "connections": {
+    "Daily at 06:30": {
+      "main": [[{ "node": "Fetch clients & their posts", "type": "main", "index": 0 }]]
+    },
+    "Fetch clients & their posts": {
+      "main": [[{ "node": "Expand client list", "type": "main", "index": 0 }]]
+    },
+    "Expand client list": {
+      "main": [[{ "node": "One client at a time", "type": "main", "index": 0 }]]
+    },
+    "One client at a time": {
+      "main": [
+        [{ "node": "Refresh AI recommendations", "type": "main", "index": 0 }],
+        [{ "node": "Account: reach & views", "type": "main", "index": 0 }]
+      ]
+    },
+    "Account: reach & views": {
+      "main": [[{ "node": "Account: engagement metrics", "type": "main", "index": 0 }]]
+    },
+    "Account: engagement metrics": {
+      "main": [[{ "node": "Account: follower change", "type": "main", "index": 0 }]]
+    },
+    "Account: follower change": {
+      "main": [[{ "node": "Account: follower total", "type": "main", "index": 0 }]]
+    },
+    "Account: follower total": {
+      "main": [[{ "node": "Store account snapshot", "type": "main", "index": 0 }]]
+    },
+    "Store account snapshot": {
+      "main": [[{ "node": "Expand media list", "type": "main", "index": 0 }]]
+    },
+    "Expand media list": {
+      "main": [[{ "node": "Any posts to read?", "type": "main", "index": 0 }]]
+    },
+    "Any posts to read?": {
+      "main": [
+        [{ "node": "Post: media object", "type": "main", "index": 0 }],
+        [{ "node": "Next client", "type": "main", "index": 0 }]
+      ]
+    },
+    "Post: media object": {
+      "main": [[{ "node": "Post: insights", "type": "main", "index": 0 }]]
+    },
+    "Post: insights": {
+      "main": [[{ "node": "Bundle post insights", "type": "main", "index": 0 }]]
+    },
+    "Bundle post insights": {
+      "main": [[{ "node": "Store post insights", "type": "main", "index": 0 }]]
+    },
+    "Store post insights": {
+      "main": [[{ "node": "Record posts-per-day", "type": "main", "index": 0 }]]
+    },
+    "Record posts-per-day": {
+      "main": [[{ "node": "Next client", "type": "main", "index": 0 }]]
+    },
+    "Next client": {
+      "main": [[{ "node": "One client at a time", "type": "main", "index": 0 }]]
+    },
+    "On workflow crash": {
+      "main": [[{ "node": "Crash recorded", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "versionId": "1.0.0",
+  "tags": [{ "name": "instagram" }, { "name": "analytics" }]
+}

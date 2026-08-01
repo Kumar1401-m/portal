@@ -24,6 +24,50 @@ links, promotion channel statuses, performance metrics) plus the
 `task_comments` discussion table. Fresh installs (`npm run db:reset`) already
 include everything.
 
+## What's new — Instagram automation & analytics
+
+Approved Reels now publish themselves, and the numbers come back the next
+morning. Three n8n workflows do the moving; the portal makes every decision.
+
+- **Auto-publishing** — `n8n/01-instagram-auto-publisher.json` polls
+  `/api/automation/publish/queue` every 5 minutes, claims a due deliverable,
+  builds an Instagram media container, waits for Meta to finish encoding,
+  publishes, then stores the media id, permalink and publish timestamp and
+  notifies the client by email and WhatsApp.
+- **Exactly-once by construction** — n8n can run two executions at once, so the
+  claim is settled by a conditional `UPDATE` inside a transaction. Five
+  simultaneous claims produce exactly one winner; the rest get a 409 and move
+  on. A claim is a 20-minute lease, so a crashed run recovers by itself.
+- **Retries in two layers** — n8n retries transient network failures in-node;
+  the portal counts attempts on the deliverable (4, then it gives up and tells
+  an admin). Meta's permanent error codes (190, 200, 9007…) skip the budget
+  entirely, because retrying an expired token never helps.
+- **Daily analytics** — `n8n/02-instagram-insights-daily.json` reads Instagram
+  Insights each morning into `analytics_snapshots` (per client per day) and
+  `post_insights` (per post per day), then refreshes AI recommendations.
+- **Analytics dashboard** (`/analytics`) — reach by day/week/month, follower
+  growth, engagement rate, views vs reach, interaction mix, posting frequency,
+  format performance, top posts, and a client-by-client table. Filter by
+  client, date range, platform and campaign; every metric shows its change
+  against the equally long period before. Charts are Chart.js on a
+  colour-vision-validated palette, and each one ships a table view.
+- **Clients see their own** at `/portal/analytics`, scoped by session — never
+  by a query parameter.
+- **AI recommendations** — best posting time, strongest format, hashtag
+  suggestions and an engagement read. Computed from the client's own history
+  first, then written up by the LLM; with no API key configured they still
+  appear, written from the statistics alone.
+- **Exports** — CSV/Excel of the exact view on screen (UTF-8 BOM, formula
+  injection neutralised), and a print-optimised A4 report at `/analytics/print`.
+- **Scheduled reports** — `n8n/03-scheduled-client-reports.json` emails clients
+  a weekly report on Monday and a monthly one on the 1st, covering the period
+  that just *finished*. A unique key on `scheduled_reports` means a retried run
+  can never send the same report twice.
+- **Setup** — see [`n8n/README.md`](n8n/README.md). Start with
+  `GET /api/automation/health`, which reports which parts are configured.
+  Auto-publishing is **off by default for every client** and is opted into per
+  client from the client edit page.
+
 ## What's new — ERP redesign
 
 The admin app was rebuilt as a modular SaaS-style ERP (white surface, deep

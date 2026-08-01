@@ -73,4 +73,41 @@ export const env = {
     apiKey: process.env.ZAPIER_API_KEY || "",
     enabled: Boolean(process.env.ZAPIER_API_KEY),
   },
+
+  /**
+   * Shared secret for the n8n automation API (src/app/api/automation/*).
+   *
+   * Separate from the Zapier key on purpose: these endpoints can publish to a
+   * client's Instagram account and write analytics history, so the credential
+   * that reaches them should be revocable without breaking the older, read-
+   * mostly Zapier integration. Falls back to the Zapier key only so an
+   * existing install keeps working after the upgrade.
+   */
+  automation: {
+    apiKey: process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY || "",
+    enabled: Boolean(process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY),
+  },
+
+  /**
+   * WhatsApp Cloud API, used for the "your post is live" message.
+   *
+   * n8n normally sends this itself; the portal keeps its own copy of the
+   * config so the same notification can be triggered from the UI, and so a
+   * client without n8n still gets notified.
+   */
+  whatsapp: {
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+    apiVersion: process.env.META_API_VERSION || "v21.0",
+    /** Template name for the post-published message, if using a template. */
+    template: process.env.WHATSAPP_TEMPLATE_NAME || "",
+    enabled: Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN),
+  },
+
+  /** Meta Graph API — the agency-wide token, when a client has none of its own. */
+  meta: {
+    accessToken: process.env.META_ACCESS_TOKEN || "",
+    apiVersion: process.env.META_API_VERSION || "v21.0",
+    enabled: Boolean(process.env.META_ACCESS_TOKEN),
+  },
 };
