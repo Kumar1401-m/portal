@@ -34,6 +34,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { StatCard } from "@/components/ui/stat-card";
 import { GrowthBadge } from "@/components/admin/growth-badge";
 import { AnalyticsFilterBar } from "./filter-bar";
+import { SyncButton } from "./sync-button";
 import {
   TrendChart,
   BarChart,
@@ -176,6 +177,10 @@ export default async function AnalyticsPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Only with one client selected — "analyse now" is a per-account
+              operation, and running it for every client at once would take
+              minutes and hammer Meta's rate limit. */}
+          {filters.clientId ? <SyncButton clientId={filters.clientId} /> : null}
           <Link
             href={`/analytics/export${exportQuery}`}
             className={buttonClasses({ variant: "secondary", size: "sm" })}
@@ -206,15 +211,30 @@ export default async function AnalyticsPage({
 
       {!hasData ? (
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            Nothing collected for this period yet. The daily insights job writes yesterday&apos;s
-            numbers each morning — a brand new connection has its first data the following day.
-            {filters.campaign ? (
+          <CardContent className="space-y-3 p-6 text-sm text-muted-foreground">
+            {filters.clientId ? (
               <>
-                {" "}
+                <p>
+                  Nothing collected for <b>{selectedClient?.company_name ?? "this client"}</b> yet.
+                  You don&apos;t have to wait for the nightly job — pull the last 30 days from
+                  Instagram right now.
+                </p>
+                {/* Repeated here rather than only in the header: this is the
+                    moment someone is actually looking for it. */}
+                <SyncButton clientId={filters.clientId} label="Fetch the last 30 days" />
+              </>
+            ) : (
+              <p>
+                Nothing collected for this period yet. Pick a client above and choose{" "}
+                <b>Analyse now</b> to pull its history immediately, or wait for the nightly job to
+                write yesterday&apos;s numbers.
+              </p>
+            )}
+            {filters.campaign ? (
+              <p>
                 This view is also filtered to the <b>{filters.campaign}</b> campaign, which only
                 covers posts published through the portal.
-              </>
+              </p>
             ) : null}
           </CardContent>
         </Card>

@@ -9,6 +9,7 @@ import {
   Globe,
   Building2,
   IndianRupee,
+  LineChart,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
@@ -132,11 +133,42 @@ export default async function ClientDetailPage({
                   ))}
                 </div>
               )}
-              <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-sm">
-                <span className="text-muted-foreground">Instagram auto-posting</span>
-                <Badge tone={c.ig_user_id ? "success" : "muted"}>
-                  {c.ig_user_id ? "Enabled" : "Not set up"}
-                </Badge>
+              <div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">Instagram</span>
+                  <Badge tone={c.ig_user_id ? "success" : "muted"}>
+                    {c.ig_user_id ? "Connected" : "Not set up"}
+                  </Badge>
+                  {c.ig_username ? (
+                    <a
+                      href={`https://instagram.com/${c.ig_username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      @{c.ig_username}
+                    </a>
+                  ) : null}
+                </div>
+                {/* The whole point of connecting an account is to see how it's
+                    doing, so the route there is one click from here. */}
+                {c.ig_user_id ? (
+                  <Link
+                    href={`/analytics?client=${c.id}`}
+                    className={buttonClasses({ variant: "secondary", size: "sm" })}
+                  >
+                    <LineChart className="h-3.5 w-3.5" /> Growth &amp; views
+                  </Link>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Add the Instagram Business account id on the{" "}
+                    <Link href={`/clients/${c.id}/edit`} className="text-primary hover:underline">
+                      edit page
+                    </Link>{" "}
+                    to track growth and views. Pasting the Facebook Page id is fine — it gets
+                    translated automatically.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

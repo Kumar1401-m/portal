@@ -167,6 +167,8 @@ export async function createClient(formData: FormData): Promise<void> {
     ).catch(() => {});
   }
 
+  await normalizeInstagramId(clientId, columns.ig_user_id);
+
   revalidatePath("/clients");
   redirect(`/clients/${clientId}`);
 }
@@ -222,9 +224,58 @@ export async function updateClient(formData: FormData): Promise<void> {
     await setClientCrmAccess(id, crmUserIds);
   }
 
+  await normalizeInstagramId(id, columns.ig_user_id);
+
   revalidatePath(`/clients/${id}`);
   revalidatePath("/clients");
   redirect(`/clients/${id}`);
+}
+
+/**
+ * Translate a pasted Facebook Page id into the Instagram Business account id.
+ *
+ * People paste the Page id here constantly — it's the number Meta's own UI
+ * shows most prominently and the two look identical. Stored unchanged, it
+ * fails at publish time with `(#100) Tried accessing nonexisting field
+ * (media)`, which names neither the problem nor the fix, and which nobody
+ * sees until a post silently doesn't go out.
+ *
+ * Correcting it on save turns a confusing runtime failure into no failure at
+ * all. Deliberately best-effort: a Meta outage, an expired token or no token
+ * configured must never stop someone saving a client, so anything that goes
+ * wrong here leaves the value exactly as typed.
+ */
+async function normalizeInstagramId(clientId: number, pasted: unknown): Promise<void> {
+  const id = typeof pasted === "string" ? pasted.trim() : "";
+  if (!id) return;
+
+  try {
+    const { resolveInstagramAccount } = await import("@/lib/instagram-sync");
+    const { env } = await import("@/lib/env");
+
+    const row = await queryOne<{ ig_access_token: string | null }>(
+      "SELECT ig_access_token FROM clients WHERE id = ?",
+      [clientId]
+    );
+    const token = row?.ig_access_token || env.meta.accessToken;
+    if (!token) return; // nothing to check against — keep what was typed
+
+    const resolved = await resolveInstagramAccount(id, token);
+    if (!resolved.ok) return;
+
+    const { igUserId, username } = resolved.account;
+    if (igUserId && igUserId !== id) {
+      await execute("UPDATE clients SET ig_user_id = ? WHERE id = ?", [igUserId, clientId]);
+    }
+    if (username && (await hasColumn("clients", "ig_username"))) {
+      await execute("UPDATE clients SET ig_username = ? WHERE id = ?", [username, clientId]);
+    }
+  } catch (err) {
+    console.warn(
+      "[clients] Instagram id check skipped:",
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /* --------------------------- Portal login --------------------------- */

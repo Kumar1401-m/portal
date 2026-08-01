@@ -12,3 +12,4 @@ tmp/
 
 # Local throwaway verification scripts
 zz-*
+.tmp-*
