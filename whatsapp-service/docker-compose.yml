@@ -1,0 +1,62 @@
+# WhatsApp approval service.
+#
+#   docker compose up -d
+#   docker compose logs -f            # watch for the QR prompt on first run
+#
+# The portal itself is NOT in here — it runs on Vercel. This compose file
+# exists to give the WhatsApp session a persistent, always-on home, which is
+# the one thing serverless cannot provide.
+
+services:
+  whatsapp-service:
+    build: .
+    container_name: whatsapp-approval-service
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Bound to localhost only. Put a reverse proxy with TLS in front of it —
+      # exposing this port publicly would put an unauthenticated QR endpoint
+      # and an authenticated send API on the open internet.
+      - "127.0.0.1:4000:4000"
+
+    volumes:
+      # THE critical line. The logged-in WhatsApp session lives here; without
+      # this volume every restart, redeploy and image rebuild silently logs the
+      # account out and needs a physical QR re-scan.
+      - wa-session:/app/.wwebjs_auth
+
+    # Chromium spawns a process tree and leaks zombies without an init.
+    init: true
+
+    # Chromium's default 64 MB /dev/shm is not enough for WhatsApp Web; it
+    # crashes with an obscure "Target closed" once the page grows.
+    shm_size: "1gb"
+
+    # Puppeteer plus a real browser sits around 500–800 MB. The cap stops a
+    # leak taking the whole host down, and is high enough not to OOM normally.
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Chromium's first cold start is slow; failing during it would restart-loop.
+      start_period: 90s
+
+volumes:
+  wa-session:
+    driver: local

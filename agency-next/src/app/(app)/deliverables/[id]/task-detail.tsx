@@ -14,6 +14,8 @@ import { CaptionStudio } from "./caption-studio";
 import { WorkflowControls } from "./workflow-controls";
 import { PublishStatus } from "./publish-status";
 import { getPublishInfo } from "@/lib/instagram";
+import { SendApproval } from "./send-approval";
+import { getPanel as getWaPanel } from "@/lib/whatsapp-approvals";
 
 function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -51,6 +53,8 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   // Publishing state for the Instagram panel. Null on a database that predates
   // the automation, in which case the panel simply isn't rendered.
   const publishInfo = await getPublishInfo(d.id);
+  // Same pattern for the WhatsApp client-approval panel.
+  const waPanel = await getWaPanel(d.id);
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
@@ -95,6 +99,13 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             status={d.status}
             canSendToClient={canSendToClient}
           />
+
+          {/* The client's own approval, over WhatsApp. Sits above the
+              publishing panel because it happens first — nothing should be
+              published that the client hasn't signed off. */}
+          {waPanel && !isPoster ? (
+            <SendApproval deliverableId={d.id} panel={waPanel} />
+          ) : null}
 
           {/* Posters don't go through the video publisher, so the panel would
               only ever say "not scheduled" for them. */}

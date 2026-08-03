@@ -5,7 +5,9 @@ import {
   Activity,
   Lock,
   CloudUpload,
+  MessageCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPublicSettings } from "@/lib/settings";
 import { getCategoryMap } from "@/lib/categories";
@@ -17,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
 import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
@@ -368,6 +371,29 @@ export default async function SettingsPage() {
                 : "add your R2 details above"
             }
           />
+        </CardContent>
+      </Card>
+
+      {/* WhatsApp lives on its own page: it has a QR code, a live session and a
+          group-mapping table, none of which fit the key/value shape of the
+          rest of Settings. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="h-5 w-5 text-muted-foreground" />
+            WhatsApp approvals
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Connect the agency WhatsApp account and map each client to their group.
+          </p>
+          <Link
+            href="/settings/whatsapp"
+            className={buttonClasses({ variant: "secondary", size: "sm" })}
+          >
+            Open WhatsApp settings
+          </Link>
         </CardContent>
       </Card>
 

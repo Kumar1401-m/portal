@@ -35,6 +35,31 @@ async function run(label, sql) {
   console.log(`  + ${label}`);
 }
 
+async function indexExists(table, indexName) {
+  const rows = await query(
+    `SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = ? AND table_name = ? AND index_name = ? LIMIT 1`,
+    [env.db.database, table, indexName]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Add an index only when it's missing.
+ *
+ * `ADD UNIQUE KEY` has no IF NOT EXISTS in MySQL, and swallowing the error
+ * instead would also hide the one that matters — a UNIQUE that can't be built
+ * because the column already holds duplicates.
+ */
+async function addIndex(table, indexName, definition) {
+  if (await indexExists(table, indexName)) {
+    console.log(`  = ${table}.${indexName} already present`);
+    return;
+  }
+  await query(`ALTER TABLE \`${table}\` ADD ${definition}`);
+  console.log(`  + ${table}.${indexName} added`);
+}
+
 async function main() {
   console.log('Running migrations ...');
 
@@ -551,6 +576,150 @@ async function main() {
       UNIQUE KEY uq_report_period (client_id, period, period_start),
       KEY idx_sr_client (client_id),
       CONSTRAINT fk_sr_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  /* ---------------------------------------------------------------------
+   * Cluster P — WhatsApp approvals
+   * The client approves the finished video in their own WhatsApp group by
+   * replying "APPROVE V245" or "CHANGE V245 <notes>". A separate Express
+   * service drives WhatsApp Web and calls back into the portal; these columns
+   * and tables are that conversation's memory.
+   * ------------------------------------------------------------------- */
+
+  // Short human-typable handle for a deliverable. A client types this into
+  // WhatsApp, so it has to be short and unambiguous — nobody is typing
+  // "APPROVE 7f3a91c2-...". Unique, and never reused.
+  await addColumn('deliverables', 'video_code', 'video_code VARCHAR(20) DEFAULT NULL');
+  await addIndex(
+    'deliverables',
+    'uq_deliv_video_code',
+    'UNIQUE KEY uq_deliv_video_code (video_code)'
+  );
+
+  // The WhatsApp conversation's own state, deliberately separate from the
+  // portal's `status` column. A client can approve on WhatsApp while the task
+  // is still mid-workflow internally, and collapsing the two would make one
+  // overwrite the other.
+  await addColumn(
+    'deliverables',
+    'wa_status',
+    "wa_status VARCHAR(24) NOT NULL DEFAULT 'not_sent'"
+  );
+  await addColumn('deliverables', 'wa_group_id', 'wa_group_id VARCHAR(64) DEFAULT NULL');
+  // whatsapp-web.js message id, so a delivery/read receipt can be matched back.
+  await addColumn('deliverables', 'wa_message_id', 'wa_message_id VARCHAR(128) DEFAULT NULL');
+  await addColumn('deliverables', 'wa_sent_at', 'wa_sent_at DATETIME DEFAULT NULL');
+  await addColumn('deliverables', 'wa_delivered_at', 'wa_delivered_at DATETIME DEFAULT NULL');
+  await addColumn('deliverables', 'wa_viewed_at', 'wa_viewed_at DATETIME DEFAULT NULL');
+  await addColumn('deliverables', 'wa_responded_at', 'wa_responded_at DATETIME DEFAULT NULL');
+  await addColumn('deliverables', 'wa_approved_by', 'wa_approved_by VARCHAR(150) DEFAULT NULL');
+  await addColumn('deliverables', 'wa_approved_phone', 'wa_approved_phone VARCHAR(40) DEFAULT NULL');
+  await addColumn('deliverables', 'wa_comment', 'wa_comment TEXT DEFAULT NULL');
+  await addColumn('deliverables', 'wa_send_attempts', 'wa_send_attempts INT UNSIGNED NOT NULL DEFAULT 0');
+  await addColumn('deliverables', 'wa_last_error', 'wa_last_error TEXT DEFAULT NULL');
+
+  // The WhatsApp message that produced the CURRENT verdict.
+  //
+  // This is the idempotency key for approvals, and it deliberately lives here
+  // rather than being inferred from the transcript. WhatsApp redelivers
+  // messages after a reconnect, so the same "APPROVE V245" arrives more than
+  // once; but the transcript is written by a separate, best-effort call that
+  // is allowed to fail. Keying replay-detection on the transcript therefore
+  // gets it wrong in both directions — it misses replays when the log failed,
+  // and (because the service logs before it approves) it treats the FIRST
+  // approval as a replay when the log succeeded.
+  await addColumn(
+    'deliverables',
+    'wa_approval_message_id',
+    'wa_approval_message_id VARCHAR(128) DEFAULT NULL'
+  );
+
+  // Which WhatsApp group belongs to which client. A client can have more than
+  // one (an internal group and a client-facing one), so the default is flagged
+  // rather than assumed from a single column on `clients`.
+  await run('whatsapp_groups table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_groups (
+      id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id   BIGINT UNSIGNED NOT NULL,
+      group_id    VARCHAR(64) NOT NULL,      -- e.g. 12036304@g.us
+      group_name  VARCHAR(190) DEFAULT NULL,
+      is_default  TINYINT(1) NOT NULL DEFAULT 1,
+      is_active   TINYINT(1) NOT NULL DEFAULT 1,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      -- One row per group: the same group must never map to two clients, or an
+      -- APPROVE reply becomes ambiguous.
+      UNIQUE KEY uq_wa_group (group_id),
+      KEY idx_wag_client (client_id),
+      CONSTRAINT fk_wag_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Every inbound group message, whether or not it was a command. Kept in full
+  // because "the client says they approved it" is a dispute that gets settled
+  // by the transcript, not by the parsed result.
+  await run('whatsapp_messages table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      wa_message_id  VARCHAR(128) DEFAULT NULL,
+      group_id       VARCHAR(64) NOT NULL,
+      group_name     VARCHAR(190) DEFAULT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      video_code     VARCHAR(20) DEFAULT NULL,
+      sender_name    VARCHAR(150) DEFAULT NULL,
+      sender_number  VARCHAR(40) DEFAULT NULL,
+      direction      ENUM('in','out') NOT NULL DEFAULT 'in',
+      message        TEXT DEFAULT NULL,
+      -- What we made of it: approve | change | reject | unmatched | noise
+      parsed_command VARCHAR(24) DEFAULT NULL,
+      message_time   DATETIME NOT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      -- Idempotency: WhatsApp redelivers on reconnect, and a replayed message
+      -- must not approve the same video twice.
+      UNIQUE KEY uq_wa_msg (wa_message_id),
+      KEY idx_wam_group (group_id),
+      KEY idx_wam_deliv (deliverable_id),
+      KEY idx_wam_time (message_time)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Outbound attempts: what we tried to send, whether it landed, and why not.
+  await run('whatsapp_send_log table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_send_log (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      video_code     VARCHAR(20) DEFAULT NULL,
+      group_id       VARCHAR(64) DEFAULT NULL,
+      attempt_no     INT UNSIGNED NOT NULL DEFAULT 1,
+      status         ENUM('queued','sending','sent','delivered','read','failed') NOT NULL DEFAULT 'queued',
+      wa_message_id  VARCHAR(128) DEFAULT NULL,
+      media_bytes    BIGINT UNSIGNED DEFAULT NULL,
+      duration_ms    INT UNSIGNED DEFAULT NULL,
+      error_code     VARCHAR(60) DEFAULT NULL,
+      error_message  TEXT DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_wsl_deliv (deliverable_id),
+      KEY idx_wsl_status (status),
+      KEY idx_wsl_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Health of the WhatsApp session itself — one row, updated in place. Lets
+  // the portal show "connected / disconnected" without holding a socket open
+  // to the service, which a serverless deployment cannot do.
+  await run('whatsapp_session table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_session (
+      id             TINYINT UNSIGNED NOT NULL DEFAULT 1,
+      state          VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+      phone_number   VARCHAR(40) DEFAULT NULL,
+      push_name      VARCHAR(150) DEFAULT NULL,
+      qr_available   TINYINT(1) NOT NULL DEFAULT 0,
+      last_ready_at  DATETIME DEFAULT NULL,
+      last_error     TEXT DEFAULT NULL,
+      heartbeat_at   DATETIME DEFAULT NULL,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
   console.log('✔ Migrations complete.');

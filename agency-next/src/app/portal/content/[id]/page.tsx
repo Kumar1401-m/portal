@@ -6,6 +6,8 @@ import { getPortalDeliverable } from "@/lib/portal";
 import { resolveVideoUrl } from "@/lib/storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { getVideoTimeline } from "@/lib/whatsapp-approvals";
+import { VideoTimeline } from "@/components/admin/video-timeline";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { buttonClasses } from "@/components/ui/button";
 import { label, fmtDate } from "@/lib/utils";
@@ -32,6 +34,10 @@ export default async function PortalContentDetail({
   const needsReview = ["content_review", "review"].includes(d.status);
   const needsRawFootage = d.status === "waiting_for_raw";
   const gate = d.status === "content_review" ? "content" : d.status === "review" ? "final" : null;
+
+  // Null on a database that predates the WhatsApp approval feature, in which
+  // case the timeline is simply not rendered.
+  const timeline = await getVideoTimeline(d.id);
 
   return (
     <div className="space-y-6">
@@ -85,6 +91,17 @@ export default async function PortalContentDetail({
                     <ExternalLink className="h-4 w-4" /> Open the design / video
                   </a>
                 ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {timeline ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Progress</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <VideoTimeline steps={timeline} />
               </CardContent>
             </Card>
           ) : null}

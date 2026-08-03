@@ -110,4 +110,25 @@ export const env = {
     apiVersion: process.env.META_API_VERSION || "v21.0",
     enabled: Boolean(process.env.META_ACCESS_TOKEN),
   },
+
+  /**
+   * The WhatsApp approval service (apps run separately — see whatsapp-service/).
+   *
+   * Two secrets pointing in opposite directions, deliberately not one:
+   *   `serviceToken` — the portal presenting itself TO the service.
+   *   `inboundKey`   — the service calling BACK into the portal.
+   * Either can be rotated without touching the other, and a leak of one does
+   * not grant the other direction.
+   */
+  whatsappService: {
+    url: (process.env.WHATSAPP_SERVICE_URL || "").replace(/\/+$/, ""),
+    serviceToken: process.env.WHATSAPP_SERVICE_TOKEN || "",
+    inboundKey: process.env.WHATSAPP_SERVICE_KEY || "",
+    /** Where the browser opens its Socket.IO connection for live updates. */
+    socketUrl:
+      process.env.NEXT_PUBLIC_WHATSAPP_SOCKET_URL ||
+      process.env.WHATSAPP_SERVICE_URL ||
+      "",
+    enabled: Boolean(process.env.WHATSAPP_SERVICE_URL && process.env.WHATSAPP_SERVICE_TOKEN),
+  },
 };

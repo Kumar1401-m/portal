@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+# The logged-in WhatsApp session — never commit this. It is equivalent to
+# handing over the account.
+.wwebjs_auth/
+.wwebjs_cache/
+*.log

@@ -36,6 +36,22 @@ export function isAuthorizedAutomationRequest(req: Request): boolean {
   return key.length > 0 && timingSafeEqual(key, env.automation.apiKey);
 }
 
+/**
+ * Auth for callbacks from the WhatsApp approval service (src/app/api/whatsapp/*).
+ *
+ * Its own key again, not shared with n8n or Zapier: this one is held by a
+ * container running an unofficial browser automation, which is the credential
+ * in this system most likely to need revoking in a hurry.
+ */
+export function isAuthorizedWhatsAppRequest(req: Request): boolean {
+  const expected = env.whatsappService.inboundKey;
+  if (!expected) return false;
+  const header = req.headers.get("authorization") || "";
+  const bearer = header.startsWith("Bearer ") ? header.slice(7) : header;
+  const key = bearer || req.headers.get("x-api-key") || "";
+  return key.length > 0 && timingSafeEqual(key, expected);
+}
+
 /** Constant-time string compare so key checks don't leak timing info. */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

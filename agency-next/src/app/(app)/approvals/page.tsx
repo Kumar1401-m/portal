@@ -2,6 +2,12 @@ import Link from "next/link";
 import { CheckCircle2, ArrowRight } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDeliverables, getApprovalCounts, getServiceCounts } from "@/lib/deliverables";
+import {
+  getApprovalBoard,
+  getApprovalCounts as getWaApprovalCounts,
+} from "@/lib/whatsapp-approvals";
+import { env } from "@/lib/env";
+import { ApprovalBoard } from "./approval-board";
 import { crmClientIds } from "@/lib/crm";
 import { isServiceKey } from "@/lib/services";
 import { quickStatus } from "../deliverables/actions";
@@ -41,10 +47,12 @@ export default async function ApprovalsPage({
   const scopeIds = await crmClientIds(user);
   const filters = { status: active.status, service: service ?? undefined, crmClientIds: scopeIds };
 
-  const [rows, counts, serviceCounts] = await Promise.all([
+  const [rows, counts, serviceCounts, waRows, waCounts] = await Promise.all([
     getDeliverables(filters),
     getApprovalCounts(scopeIds),
     getServiceCounts(filters),
+    getApprovalBoard(scopeIds),
+    getWaApprovalCounts(scopeIds),
   ]);
 
   return (
@@ -58,6 +66,15 @@ export default async function ApprovalsPage({
           Track content through the two approval gates.
         </p>
       </div>
+
+      {/* Live board for videos sent to clients on WhatsApp. Rendered above the
+          internal gates because it is the one that moves without anyone in the
+          agency touching it. */}
+      <ApprovalBoard
+        initialRows={waRows}
+        initialCounts={waCounts}
+        socketUrl={env.whatsappService.socketUrl || null}
+      />
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border">
