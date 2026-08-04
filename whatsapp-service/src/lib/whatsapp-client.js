@@ -451,19 +451,70 @@ class WhatsAppService extends EventEmitter {
     return { messageId: sent?.id?._serialized ?? null };
   }
 
-  /** The groups this account is in — for mapping clients in the portal UI. */
+  /**
+   * The groups this account is in — for mapping clients in the portal UI.
+   *
+   * `getChats()` runs library code inside the WhatsApp Web page, so when the
+   * page updates ahead of whatsapp-web.js it throws from minified code with a
+   * useless message (a single letter, typically). That is a library/web
+   * version mismatch, not a fault in the session — which stays perfectly
+   * usable for sending and receiving.
+   *
+   * So this degrades instead of failing: it tries the store directly, and
+   * whatever happens the caller gets an array plus a `warning` it can show.
+   * A broken group *picker* must not present as a broken *connection*.
+   */
   async listGroups() {
-    if (this.state !== STATE.CONNECTED) return [];
-    const chats = await this.client.getChats();
-    return chats
-      .filter((c) => c.isGroup)
-      .map((c) => ({
-        groupId: c.id?._serialized ?? null,
-        name: c.name ?? null,
-        participants: c.participants?.length ?? null,
-        unread: c.unreadCount ?? 0,
-      }))
-      .filter((g) => g.groupId);
+    if (this.state !== STATE.CONNECTED) return { groups: [], warning: 'Not connected.' };
+
+    try {
+      const chats = await this.client.getChats();
+      const groups = chats
+        .filter((c) => c.isGroup)
+        .map((c) => ({
+          groupId: c.id?._serialized ?? null,
+          name: c.name ?? null,
+          participants: c.participants?.length ?? null,
+          unread: c.unreadCount ?? 0,
+        }))
+        .filter((g) => g.groupId);
+      return { groups, warning: null };
+    } catch (err) {
+      log.warn('getChats failed — falling back to reading the store directly', {
+        error: err?.message || String(err),
+        name: err?.name,
+      });
+    }
+
+    // Fallback: read WhatsApp's own in-page store without going through the
+    // library's chat model, which is the part that breaks on a version skew.
+    try {
+      const groups = await this.client.pupPage.evaluate(() => {
+        // eslint-disable-next-line no-undef
+        const store = window.Store;
+        if (!store?.Chat?.getModelsArray) return [];
+        return store.Chat.getModelsArray()
+          .filter((c) => c.id?.server === 'g.us')
+          .map((c) => ({
+            groupId: c.id?._serialized || null,
+            name: c.name || c.formattedTitle || null,
+            participants: c.groupMetadata?.participants?.length ?? null,
+            unread: c.unreadCount ?? 0,
+          }))
+          .filter((g) => g.groupId);
+      });
+      log.info('read groups from the store directly', { count: groups.length });
+      return { groups, warning: null };
+    } catch (err) {
+      const message = err?.message || String(err);
+      log.error('could not list groups by any method', { error: message });
+      return {
+        groups: [],
+        warning:
+          'WhatsApp is connected, but this version of WhatsApp Web will not list groups. ' +
+          'Send any message in the group instead — it will appear as a discovered group.',
+      };
+    }
   }
 }
 

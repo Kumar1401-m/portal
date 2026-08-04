@@ -167,6 +167,41 @@ export async function unlinkGroup(groupId: string): Promise<void> {
   await execute("UPDATE whatsapp_groups SET is_active = 0 WHERE group_id = ?", [groupId]);
 }
 
+export type DiscoveredGroup = {
+  group_id: string;
+  group_name: string | null;
+  last_seen: string;
+  messages: number;
+};
+
+/**
+ * Groups we've received messages from but haven't linked to a client yet.
+ *
+ * The primary way to find a group is to ask WhatsApp for the chat list, but
+ * that runs library code inside the WhatsApp Web page and breaks whenever the
+ * page updates ahead of the library. This path doesn't care: send any message
+ * in the group and it appears here, because the id came from a message that
+ * actually arrived.
+ *
+ * It also proves more than the picker does — a group listed here has a working
+ * inbound path, which is the half that approvals depend on.
+ */
+export async function getDiscoveredGroups(): Promise<DiscoveredGroup[]> {
+  if (!(await approvalsReady())) return [];
+  return query<DiscoveredGroup>(
+    `SELECT m.group_id,
+            MAX(m.group_name)     AS group_name,
+            MAX(m.message_time)   AS last_seen,
+            COUNT(*)              AS messages
+       FROM whatsapp_messages m
+       LEFT JOIN whatsapp_groups g ON g.group_id = m.group_id AND g.is_active = 1
+      WHERE g.id IS NULL
+      GROUP BY m.group_id
+      ORDER BY last_seen DESC
+      LIMIT 25`
+  );
+}
+
 /* ------------------------------ Sending state ------------------------------ */
 
 export type SendableVideo = {

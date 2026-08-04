@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { buttonClasses } from "@/components/ui/button";
 import { linkGroupAction, unlinkGroupAction, type GroupState } from "../../approvals/whatsapp-actions";
-import type { WhatsAppGroup } from "@/lib/whatsapp-approvals";
+import type { WhatsAppGroup, DiscoveredGroup } from "@/lib/whatsapp-approvals";
 import type { ClientMini } from "@/lib/deliverables";
 
 export type ServiceGroup = { groupId: string; name: string | null; participants: number | null };
@@ -22,13 +22,18 @@ export type ServiceGroup = { groupId: string; name: string | null; participants:
 export function GroupManager({
   linked,
   available,
+  discovered,
   clients,
   serviceReachable,
+  listWarning,
 }: {
   linked: WhatsAppGroup[];
   available: ServiceGroup[];
+  /** Groups seen in inbound messages — the fallback when the picker can't enumerate. */
+  discovered: DiscoveredGroup[];
   clients: ClientMini[];
   serviceReachable: boolean;
+  listWarning?: string | null;
 }) {
   const [linkState, linkAction, linking] = useActionState<GroupState, FormData>(
     linkGroupAction,
@@ -40,7 +45,34 @@ export function GroupManager({
   );
 
   const linkedIds = new Set(linked.map((g) => g.group_id));
-  const unlinkedGroups = available.filter((g) => !linkedIds.has(g.groupId));
+
+  /*
+   * Two sources merged into one picker.
+   *
+   * `available` is WhatsApp's own chat list — complete when it works, but it
+   * runs library code inside the WhatsApp Web page and breaks on a version
+   * skew. `discovered` comes from messages that actually arrived, so it needs
+   * nothing from WhatsApp's internals and doubles as proof the inbound path
+   * works for that group.
+   */
+  const seen = new Set<string>();
+  const unlinkedGroups: (ServiceGroup & { fromMessages?: boolean })[] = [];
+
+  for (const g of available) {
+    if (linkedIds.has(g.groupId) || seen.has(g.groupId)) continue;
+    seen.add(g.groupId);
+    unlinkedGroups.push(g);
+  }
+  for (const d of discovered) {
+    if (linkedIds.has(d.group_id) || seen.has(d.group_id)) continue;
+    seen.add(d.group_id);
+    unlinkedGroups.push({
+      groupId: d.group_id,
+      name: d.group_name,
+      participants: null,
+      fromMessages: true,
+    });
+  }
 
   return (
     <Card>
@@ -111,10 +143,31 @@ export function GroupManager({
               </span>
             </p>
           ) : unlinkedGroups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Every group this account is in has already been linked. Create the group in WhatsApp
-              first, add the agency number to it, then reload this page.
-            </p>
+            <div className="space-y-2 rounded-md border border-dashed border-border p-4 text-sm">
+              {listWarning ? (
+                <>
+                  <p className="flex items-start gap-2 text-warning">
+                    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{listWarning}</span>
+                  </p>
+                  {/* The reliable path when WhatsApp won't enumerate: a message
+                      that arrives carries its own group id. */}
+                  <p className="font-medium">To add a group:</p>
+                  <ol className="ml-4 list-decimal space-y-1 text-muted-foreground">
+                    <li>Create the group in WhatsApp and add this number to it</li>
+                    <li>
+                      Send any message in that group — even just <b>hi</b>
+                    </li>
+                    <li>Reload this page; the group will appear in the list here</li>
+                  </ol>
+                </>
+              ) : (
+                <p className="text-muted-foreground">
+                  Every group this account is in has already been linked. Create the group in
+                  WhatsApp first, add this number to it, then reload.
+                </p>
+              )}
+            </div>
           ) : (
             <form action={linkAction} className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
@@ -143,6 +196,9 @@ export function GroupManager({
                     <option key={g.groupId} value={g.groupId}>
                       {g.name || g.groupId}
                       {g.participants ? ` (${g.participants})` : ""}
+                      {/* Marked because it's the stronger signal: a message
+                          from this group has already reached us. */}
+                      {g.fromMessages ? " — seen in messages" : ""}
                     </option>
                   ))}
                 </Select>

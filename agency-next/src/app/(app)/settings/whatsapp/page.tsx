@@ -8,6 +8,7 @@ import {
   getAllGroups,
   getSessionHealth,
   getMessages,
+  getDiscoveredGroups,
 } from "@/lib/whatsapp-approvals";
 import { getServiceStatus, getQrCode, listServiceGroups } from "@/lib/whatsapp-service-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,12 +48,13 @@ export default async function WhatsAppSettingsPage() {
   // The live service and the stored snapshot are fetched together: the
   // snapshot renders even when the service is down, which is exactly when
   // someone opens this page.
-  const [health, linked, clients, status, messages] = await Promise.all([
+  const [health, linked, clients, status, messages, discovered] = await Promise.all([
     getSessionHealth(),
     getAllGroups(),
     getClientsMini(),
     getServiceStatus(),
     getMessages(25),
+    getDiscoveredGroups(),
   ]);
 
   const serviceReachable = status.ok;
@@ -111,8 +113,10 @@ export default async function WhatsAppSettingsPage() {
       <GroupManager
         linked={linked}
         available={groups?.ok ? groups.groups : []}
+        discovered={discovered}
         clients={clients}
         serviceReachable={serviceReachable}
+        listWarning={groups?.ok ? groups.warning : null}
       />
 
       <Card>

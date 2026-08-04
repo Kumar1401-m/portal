@@ -122,10 +122,13 @@ function buildRoutes({ whatsapp, sendQueue }) {
       return res.status(409).json({ ok: false, error: 'WhatsApp is not connected.' });
     }
     try {
-      const groups = await whatsapp.listGroups();
-      res.json({ ok: true, count: groups.length, groups });
+      // Answers ok:true even with an empty list. A group picker that can't
+      // enumerate is a degraded picker, not a failed request — and reporting
+      // it as an error makes a working connection look broken.
+      const { groups, warning } = await whatsapp.listGroups();
+      res.json({ ok: true, count: groups.length, groups, warning });
     } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(500).json({ ok: false, error: err.message || 'Could not list groups' });
     }
   });
 

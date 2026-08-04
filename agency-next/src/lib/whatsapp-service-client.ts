@@ -101,11 +101,17 @@ export const getQrCode = () =>
 export const reconnectService = () =>
   call<WaServiceStatus>("/api/reconnect", { method: "POST", timeoutMs: 60_000 });
 
+/**
+ * `warning` is set when WhatsApp is connected but refuses to enumerate chats —
+ * a library/web-version skew that leaves sending and receiving working. The
+ * caller shows it and falls back to groups discovered from inbound messages.
+ */
 export const listServiceGroups = () =>
-  call<{ count: number; groups: { groupId: string; name: string | null; participants: number | null }[] }>(
-    "/api/groups",
-    { method: "GET", timeoutMs: 30_000 }
-  );
+  call<{
+    count: number;
+    groups: { groupId: string; name: string | null; participants: number | null }[];
+    warning?: string | null;
+  }>("/api/groups", { method: "GET", timeoutMs: 30_000 });
 
 export const sendVideoToGroup = (payload: {
   videoCode: string;
