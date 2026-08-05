@@ -20,6 +20,13 @@ import "server-only";
 import { query, queryOne, execute, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
+import {
+  getClientContext,
+  renderContext,
+  groundingAvailable,
+  allowedPhones,
+  correctPhones,
+} from "./client-context";
 
 const BASE = "https://generativelanguage.googleapis.com";
 
@@ -63,6 +70,9 @@ export type VideoAnalysis = {
   caption: string | null;
   hook: string | null;
   hashtags: string | null;
+  brand_seen: string | null;
+  context_used: string | null;
+  grounded: number;
   tokens_used: number | null;
   duration_ms: number | null;
   attempts: number;
@@ -93,19 +103,15 @@ export async function getAnalysis(deliverableId: number): Promise<VideoAnalysis 
  * footage — and the summary is what a human checks when the caption looks off.
  */
 function buildPrompt(brief: {
-  clientName: string;
-  businessType: string | null;
+  clientContext: string;
   title: string;
   description: string | null;
   language: string | null;
   tone: string | null;
-  city: string | null;
-  phone: string | null;
   cta: string | null;
 }): string {
   const context = [
-    `Business: ${brief.clientName}${brief.businessType ? ` (${brief.businessType})` : ""}`,
-    brief.city ? `Location: ${brief.city}` : null,
+    brief.clientContext,
     `Task title: ${brief.title}`,
     brief.description ? `Brief from the team: ${brief.description}` : null,
     brief.tone ? `House tone: ${brief.tone}` : null,
@@ -117,14 +123,29 @@ function buildPrompt(brief: {
 
   return `You are writing the Instagram caption for a video an agency has just edited for a client.
 
+WHAT WE ALREADY KNOW ABOUT THE CLIENT
 ${context}
 
-First WATCH the video. Then reply with JSON only:
+Now WATCH the video. Pay attention to the branding as well as the content —
+logos, watermarks, the footer bar, and any phone number, website, handle or
+tagline shown on screen. That is how the business presents itself, and the
+caption should sound like the same business.
+
+Reply with JSON only:
 
 {
   "summary": "2-3 sentences on what actually happens in the video",
   "spoken_language": "the language spoken, e.g. Telugu, Hindi, English, or 'none'",
-  "on_screen_text": ["any text visible on screen, verbatim"],
+  "on_screen_text": ["all text visible on screen, verbatim"],
+  "branding": {
+    "logo_text": "text in the logo or watermark, or null",
+    "footer_text": "text in any footer or lower-third bar, or null",
+    "phone": "phone number shown, or null",
+    "website": "website shown, or null",
+    "handle": "social handle shown, or null",
+    "tagline": "any slogan or designation shown, e.g. 'loan provider', or null",
+    "business_name_seen": "the business name as it appears on screen, or null"
+  },
   "scenes": [{"start":"00:00","end":"00:12","label":"what happens"}],
   "topic": "the subject in 3-6 words",
   "mood": "one word: informative, energetic, emotional, promotional, calm",
@@ -138,8 +159,14 @@ Rules for the caption:
   language above disagrees with what you hear, follow what you hear — the
   audience is whoever the speaker is addressing.
 - Open with the hook, then 2-3 short lines, then one clear call to action.
-- Describe what is genuinely in the video. Do not invent offers, prices,
-  guarantees or claims that were never made.
+- NEVER write a phone number, website or handle that is not either listed
+  above or visible on screen in the video. If there is no number to give,
+  end with "DM us" or "link in bio" — a made-up number reaches a stranger.
+- Write as the business the branding shows. If the video's footer says
+  "loan provider", the caption should read like a loan provider wrote it.
+- Describe what is genuinely in the video. Never invent offers, prices,
+  interest rates, guarantees or claims that were not made — for a regulated
+  business this is the difference between marketing and a false promise.
 - 8-12 hashtags: a few broad, several specific to the business and its city.
 - No preamble, no explanation, JSON only.`;
 }
@@ -245,7 +272,7 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
   }
 
   try {
-    const fileUri = await ensureUploaded(deliverableId, job);
+    const fileUri = await ensureUploaded(deliverableId);
     if (!fileUri.ok) {
       await setState(deliverableId, fileUri.permanent ? "failed" : "queued", {
         last_error: fileUri.error,
@@ -280,8 +307,7 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
 /* ----------------------------- Step 1: get it there ---------------------------- */
 
 async function ensureUploaded(
-  deliverableId: number,
-  job: VideoAnalysis
+  deliverableId: number
 ): Promise<{ ok: true; uri: string; name: string; mimeType: string } | (StepResult & { ok: false })> {
   const existing = await queryOne<{
     file_uri: string | null;
@@ -467,13 +493,10 @@ async function generate(
   const d = await queryOne<{
     title: string;
     description: string | null;
-    company_name: string;
-    business_type: string | null;
+    client_id: number;
     caption_settings: unknown;
-    placeholder_values: unknown;
   }>(
-    `SELECT d.title, d.description, c.company_name, c.business_type,
-            c.caption_settings, c.placeholder_values
+    `SELECT d.title, d.description, d.client_id, c.caption_settings
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
@@ -483,20 +506,32 @@ async function generate(
   const asObj = (v: unknown): Record<string, unknown> =>
     v && typeof v === "object" ? (v as Record<string, unknown>) : {};
   const cs = asObj(d.caption_settings);
-  const ph = asObj(d.placeholder_values);
   const str = (v: unknown) => (v == null ? null : String(v));
 
+  // Everything we know about the business: the record, their Instagram bio,
+  // their website. Gathered here rather than in the prompt builder so the
+  // exact briefing can be stored alongside the caption it produced.
+  const ctx = await getClientContext(d.client_id);
+  const contextBlock = ctx ? renderContext(ctx) : "Business: (unknown)";
+
   const prompt = buildPrompt({
-    clientName: d.company_name,
-    businessType: d.business_type,
+    clientContext: contextBlock,
     title: d.title,
     description: d.description,
     language: str(cs.language),
     tone: str(cs.tone),
-    city: str(ph.location),
-    phone: str(ph.phone),
     cta: str(cs.cta),
   });
+
+  /*
+   * Grounded web search when the tier allows it.
+   *
+   * Off by default: Gemini's `google_search` tool is a paid-tier feature and
+   * returns a quota error on the free one, which would fail every caption. The
+   * context above is the client's own words and is better material anyway —
+   * search adds reach, not accuracy.
+   */
+  const useGrounding = groundingAvailable();
 
   const res = await fetch(
     `${BASE}/v1beta/models/${VIDEO_MODEL}:generateContent?key=${env.gemini.apiKey}`,
@@ -510,7 +545,13 @@ async function generate(
             parts: [{ file_data: { mime_type: mimeType, file_uri: fileUri } }, { text: prompt }],
           },
         ],
-        generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
+        ...(useGrounding ? { tools: [{ google_search: {} }] } : {}),
+        generationConfig: {
+          temperature: 0.7,
+          // Grounding and forced-JSON output are mutually exclusive in the
+          // API, so the JSON is parsed out of the text when searching is on.
+          ...(useGrounding ? {} : { responseMimeType: "application/json" }),
+        },
       }),
     }
   );
@@ -533,7 +574,10 @@ async function generate(
   const text = (out.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(text);
+    // With grounding on, the reply is prose that contains JSON rather than
+    // pure JSON, so the object is extracted before parsing.
+    const json = useGrounding ? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1) : text;
+    parsed = JSON.parse(json);
   } catch {
     await setState(deliverableId, "queued", {
       last_error: "Gemini's reply wasn't valid JSON.",
@@ -550,10 +594,48 @@ async function generate(
     .map((h) => (h.startsWith("#") ? h : `#${h}`))
     .join(" ");
 
+  // Flatten the branding block into readable lines. Stored as text rather than
+  // JSON because its only reader is a human checking why a caption came out
+  // the way it did.
+  const b = asObj(parsed.branding);
+  const brandSeen =
+    [
+      s(b.business_name_seen) ? `Name on screen: ${s(b.business_name_seen)}` : null,
+      s(b.tagline) ? `Tagline: ${s(b.tagline)}` : null,
+      s(b.logo_text) ? `Logo: ${s(b.logo_text)}` : null,
+      s(b.footer_text) ? `Footer: ${s(b.footer_text)}` : null,
+      s(b.phone) ? `Phone: ${s(b.phone)}` : null,
+      s(b.website) ? `Website: ${s(b.website)}` : null,
+      s(b.handle) ? `Handle: ${s(b.handle)}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n") || null;
+
+  /*
+   * Check the contact details before storing them.
+   *
+   * Asked to end on a call to action with no number to hand, the model invents
+   * a ten-digit one that reads exactly like a real number — observed on the
+   * very first run against a loan consultancy. The instruction above tells it
+   * not to; this makes sure. Any number the client doesn't actually own is
+   * swapped for one they do, or the line goes.
+   */
+  const phones = allowedPhones(ctx, s(b.phone));
+  const rawCaption = s(parsed.caption);
+  const checked = rawCaption
+    ? correctPhones(rawCaption, phones, ctx?.phone ?? null)
+    : { caption: null, changed: 0 };
+  if (checked.changed) {
+    console.warn(
+      `[video-ai] deliverable ${deliverableId}: corrected ${checked.changed} invented phone number(s)`
+    );
+  }
+
   await execute(
     `UPDATE video_analysis
         SET state = 'done', summary = ?, spoken_language = ?, topic = ?, mood = ?,
             on_screen_text = ?, scenes_json = ?, caption = ?, hook = ?, hashtags = ?,
+            brand_seen = ?, context_used = ?, grounded = ?,
             raw_json = ?, tokens_used = ?, duration_ms = ?, last_error = NULL, locked_at = NULL
       WHERE deliverable_id = ?`,
     [
@@ -563,9 +645,14 @@ async function generate(
       s(parsed.mood),
       arr(parsed.on_screen_text).join("\n") || null,
       JSON.stringify(parsed.scenes ?? []),
-      s(parsed.caption),
+      checked.caption,
       s(parsed.hook),
       hashtags || null,
+      brandSeen,
+      // Kept so a caption can be traced to the briefing it was written from,
+      // including which sources were reachable at the time.
+      ctx ? `${contextBlock}\n\n[sources: ${ctx.sources.join(", ")}]` : null,
+      useGrounding ? 1 : 0,
       JSON.stringify(parsed),
       out.usageMetadata?.totalTokenCount ?? null,
       Date.now() - started,
@@ -573,7 +660,7 @@ async function generate(
     ]
   );
 
-  return { ok: true, state: "done", caption: s(parsed.caption), more: false };
+  return { ok: true, state: "done", caption: checked.caption, more: false };
 }
 
 /* -------------------------------- Applying it -------------------------------- */

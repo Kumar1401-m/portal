@@ -778,6 +778,14 @@ async function main() {
       CONSTRAINT fk_va_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // What branding the AI actually spotted in the frame (logo text, watermark,
+  // footer bar, phone, website, handle) and what business context it was given.
+  // Both stored so a caption that reads oddly can be traced to its inputs
+  // rather than re-run and guessed at.
+  await addColumn('video_analysis', 'brand_seen', 'brand_seen TEXT DEFAULT NULL');
+  await addColumn('video_analysis', 'context_used', 'context_used TEXT DEFAULT NULL');
+  await addColumn('video_analysis', 'grounded', 'grounded TINYINT(1) NOT NULL DEFAULT 0');
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

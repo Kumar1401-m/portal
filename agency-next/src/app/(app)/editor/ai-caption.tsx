@@ -7,6 +7,7 @@ import {
   Check,
   TriangleAlert,
   Eye,
+  BadgeCheck,
   RotateCw,
   ArrowDownToLine,
 } from "lucide-react";
@@ -22,6 +23,10 @@ export type AiCaptionData = {
   topic: string | null;
   mood: string | null;
   onScreenText: string | null;
+  /** Logo, footer and contact details the AI read off the video itself. */
+  brandSeen: string | null;
+  /** The briefing it was given about the business, and where each part came from. */
+  contextUsed: string | null;
   caption: string | null;
   hook: string | null;
   hashtags: string | null;
@@ -150,6 +155,34 @@ export function AiCaption({
               </p>
             ) : null}
           </div>
+        ) : null}
+
+        {/* The branding it read off the video — the logo, the footer bar, the
+            phone number. Shown separately from the summary because this is
+            what an editor checks when a caption names the wrong business or
+            puts the wrong number in the call to action. */}
+        {done && data.brandSeen ? (
+          <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <BadgeCheck className="h-3.5 w-3.5" /> Branding on the video
+            </p>
+            <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
+              {data.brandSeen}
+            </pre>
+          </div>
+        ) : null}
+
+        {/* Folded away: useful when tracing why a caption came out as it did,
+            noise the rest of the time. */}
+        {done && data.contextUsed ? (
+          <details className="rounded-md border border-border bg-muted/20 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              What it knew about the client
+            </summary>
+            <pre className="mt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">
+              {data.contextUsed}
+            </pre>
+          </details>
         ) : null}
 
         {done && caption ? (

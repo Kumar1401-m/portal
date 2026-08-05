@@ -115,6 +115,8 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
                 topic: analysis?.topic ?? null,
                 mood: analysis?.mood ?? null,
                 onScreenText: analysis?.on_screen_text ?? null,
+                brandSeen: analysis?.brand_seen ?? null,
+                contextUsed: analysis?.context_used ?? null,
                 caption: analysis?.caption ?? null,
                 hook: analysis?.hook ?? null,
                 hashtags: analysis?.hashtags ?? null,
