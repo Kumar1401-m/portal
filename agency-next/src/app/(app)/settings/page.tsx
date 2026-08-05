@@ -24,6 +24,7 @@ import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
 import { SchemaPanel } from "./schema-panel";
+import { StorageCheck } from "./storage-check";
 import { saveAgencyProfile, saveBillingSettings, saveStorageSettings } from "./actions";
 
 export const metadata = { title: "Settings · NVK Hub" };
@@ -306,6 +307,10 @@ export default async function SettingsPage() {
                 </p>
               </div>
             </ActionForm>
+
+            {/* Outside the form on purpose: it tests what is SAVED, not what
+                is currently typed into the boxes. */}
+            {isSuperAdmin ? <StorageCheck /> : null}
           </CardContent>
         </Card>
       ) : null}
