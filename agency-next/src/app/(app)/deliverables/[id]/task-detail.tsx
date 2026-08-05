@@ -15,6 +15,8 @@ import { WorkflowControls } from "./workflow-controls";
 import { PublishStatus } from "./publish-status";
 import { getPublishInfo } from "@/lib/instagram";
 import { SendApproval } from "./send-approval";
+import { AiCaption } from "../../editor/ai-caption";
+import { getAnalysis, videoAiReady } from "@/lib/video-ai";
 import { getPanel as getWaPanel } from "@/lib/whatsapp-approvals";
 
 function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
@@ -55,6 +57,9 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   const publishInfo = await getPublishInfo(d.id);
   // Same pattern for the WhatsApp client-approval panel.
   const waPanel = await getWaPanel(d.id);
+  // AI caption panel — hidden entirely when no Gemini key is configured, since
+  // every control on it would be dead.
+  const [aiOn, analysis] = await Promise.all([videoAiReady(), getAnalysis(d.id)]);
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
@@ -99,6 +104,26 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             status={d.status}
             canSendToClient={canSendToClient}
           />
+
+          {aiOn && !isPoster ? (
+            <AiCaption
+              deliverableId={d.id}
+              data={{
+                state: analysis?.state ?? "queued",
+                summary: analysis?.summary ?? null,
+                spokenLanguage: analysis?.spoken_language ?? null,
+                topic: analysis?.topic ?? null,
+                mood: analysis?.mood ?? null,
+                onScreenText: analysis?.on_screen_text ?? null,
+                caption: analysis?.caption ?? null,
+                hook: analysis?.hook ?? null,
+                hashtags: analysis?.hashtags ?? null,
+                lastError: analysis?.last_error ?? null,
+                tokensUsed: analysis?.tokens_used ?? null,
+                hasVideo: Boolean(d.cloud_video_url || d.edited_link),
+              }}
+            />
+          ) : null}
 
           {/* The client's own approval, over WhatsApp. Sits above the
               publishing panel because it happens first — nothing should be

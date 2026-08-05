@@ -722,6 +722,62 @@ async function main() {
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  /* ---------------------------------------------------------------------
+   * Cluster Q — AI video analysis
+   * When an editor uploads a finished video, Gemini watches it and writes a
+   * caption from what it actually saw and heard, rather than from the brief
+   * someone typed weeks earlier.
+   * ------------------------------------------------------------------- */
+
+  // One row per deliverable, holding the job as well as the result.
+  //
+  // It has to be a job, not a plain result: analysing a 66 MB video takes
+  // ~30 seconds across four steps (fetch from R2, upload to Gemini, wait for
+  // processing, generate), and a serverless function can be killed partway.
+  // Recording which step succeeded means a retry resumes instead of paying
+  // for the upload twice.
+  await run('video_analysis table', `
+    CREATE TABLE IF NOT EXISTS video_analysis (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED NOT NULL,
+      -- queued → uploading → processing → analysing → done | failed
+      state          VARCHAR(24) NOT NULL DEFAULT 'queued',
+      -- Gemini's handle for the uploaded file. Present once the upload has
+      -- succeeded, which is what makes a resume cheap.
+      file_uri       VARCHAR(500) DEFAULT NULL,
+      file_name      VARCHAR(255) DEFAULT NULL,
+      file_expires_at DATETIME DEFAULT NULL,
+      model          VARCHAR(60) DEFAULT NULL,
+      -- What the model understood: summary, language, on-screen text, scenes.
+      summary        TEXT DEFAULT NULL,
+      spoken_language VARCHAR(40) DEFAULT NULL,
+      topic          VARCHAR(190) DEFAULT NULL,
+      mood           VARCHAR(60) DEFAULT NULL,
+      on_screen_text TEXT DEFAULT NULL,
+      scenes_json    JSON DEFAULT NULL,
+      -- What it wrote. Kept apart from deliverables.caption so a regenerated
+      -- draft never silently overwrites copy a human has edited.
+      caption        TEXT DEFAULT NULL,
+      hook           TEXT DEFAULT NULL,
+      hashtags       TEXT DEFAULT NULL,
+      raw_json       JSON DEFAULT NULL,
+      video_bytes    BIGINT UNSIGNED DEFAULT NULL,
+      tokens_used    INT UNSIGNED DEFAULT NULL,
+      duration_ms    INT UNSIGNED DEFAULT NULL,
+      attempts       INT UNSIGNED NOT NULL DEFAULT 0,
+      last_error     TEXT DEFAULT NULL,
+      -- Lease, same idea as the publish claim: a job whose lease has expired
+      -- was killed mid-run and may be picked up again.
+      locked_at      DATETIME DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      -- One analysis per deliverable; a rewrite updates in place.
+      UNIQUE KEY uq_va_deliv (deliverable_id),
+      KEY idx_va_state (state),
+      CONSTRAINT fk_va_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

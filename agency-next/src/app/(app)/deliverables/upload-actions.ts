@@ -14,6 +14,7 @@ import {
   isStorageConfigured,
 } from "@/lib/storage";
 import { buildVideoPermalink } from "@/lib/video-link";
+import { startAnalysisAfterUpload } from "../editor/actions";
 
 export type PresignResult =
   | { ok: true; uploadUrl: string; publicUrl: string; key: string }
@@ -122,10 +123,24 @@ export async function attachUploadedVideo(
     };
   }
 
+  /*
+   * Start the AI on it straight away.
+   *
+   * Awaited rather than fired and forgotten: a serverless function is frozen
+   * the moment its response is sent, so a dangling promise here would simply
+   * never run. This does one step — usually enough to get the file to Gemini —
+   * and whoever opens the task next finishes it off.
+   *
+   * Best-effort throughout. A failed analysis must never make a successful
+   * upload report failure.
+   */
+  await startAnalysisAfterUpload(deliverableId);
+
   revalidatePath("/deliverables");
   revalidatePath(`/deliverables/${deliverableId}`);
   revalidatePath("/today");
   revalidatePath("/approvals");
+  revalidatePath("/editor");
 
   return {
     ok: true,
