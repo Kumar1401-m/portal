@@ -32,7 +32,6 @@ export async function applySchemaUpdates(): Promise<ApplyState> {
       "/clients",
       "/deliverables",
       "/dashboard",
-      "/analytics",
       "/settings",
     ]) {
       revalidatePath(p);

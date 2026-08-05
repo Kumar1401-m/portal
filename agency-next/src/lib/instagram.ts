@@ -20,6 +20,7 @@
  */
 import "server-only";
 import { query, queryOne, execute, transaction, hasColumn } from "./db";
+import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
 
@@ -552,6 +553,84 @@ export async function retryPublish(deliverableId: number): Promise<boolean> {
     [deliverableId]
   );
   return res.affectedRows > 0;
+}
+
+/* ------------------------ Resolving what was pasted ------------------------ */
+
+export type ResolvedAccount = {
+  igUserId: string;
+  username: string | null;
+  /** True when the value pasted was a Facebook Page id that we translated. */
+  correctedFromPageId: boolean;
+};
+
+/**
+ * Work out the real Instagram Business account id from whatever was pasted.
+ *
+ * People paste the Facebook **Page** id here constantly — it's the number
+ * Meta's own UI shows most prominently, and the two are indistinguishable by
+ * eye. Stored unchanged it breaks publishing with `(#100) Tried accessing
+ * nonexisting field (media)`, which names neither the problem nor the fix,
+ * and which nobody notices until a post silently doesn't go out.
+ *
+ * So rather than validate and reject, this translates: if the id turns out to
+ * be a Page, follow `instagram_business_account` to the account actually
+ * wanted.
+ */
+export async function resolveInstagramAccount(
+  pastedId: string,
+  token: string
+): Promise<{ ok: true; account: ResolvedAccount } | { ok: false; error: string }> {
+  const id = pastedId.trim();
+  if (!/^\d{5,}$/.test(id)) {
+    return { ok: false, error: "That doesn't look like a Meta account id — it should be all digits." };
+  }
+
+  const call = async <T>(path: string): Promise<T & { error?: { message?: string; code?: number } }> => {
+    const url = `https://graph.facebook.com/${env.meta.apiVersion}${path}${
+      path.includes("?") ? "&" : "?"
+    }access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    return (await res.json()) as T & { error?: { message?: string; code?: number } };
+  };
+
+  // Try it as an Instagram account first: the common case, and one call.
+  const asIg = await call<{ id?: string; username?: string }>(`/${id}?fields=username`);
+  if (!asIg.error && asIg.username) {
+    return {
+      ok: true,
+      account: { igUserId: asIg.id || id, username: asIg.username, correctedFromPageId: false },
+    };
+  }
+
+  // No `username` means it isn't an IG account. See if it's a Page with one.
+  const asPage = await call<{
+    name?: string;
+    instagram_business_account?: { id: string; username?: string };
+  }>(`/${id}?fields=name,instagram_business_account{id,username}`);
+
+  if (!asPage.error && asPage.instagram_business_account) {
+    const ig = asPage.instagram_business_account;
+    return {
+      ok: true,
+      account: { igUserId: ig.id, username: ig.username ?? null, correctedFromPageId: true },
+    };
+  }
+
+  if (!asPage.error) {
+    return {
+      ok: false,
+      error: `"${asPage.name || id}" is a Facebook Page with no Instagram Business account linked.`,
+    };
+  }
+
+  return {
+    ok: false,
+    error:
+      asIg.error?.code === 190
+        ? "The Meta access token has expired or been revoked."
+        : `Couldn't read that account: ${asPage.error?.message || "unknown error"}`,
+  };
 }
 
 export type DeliverablePublishInfo = {

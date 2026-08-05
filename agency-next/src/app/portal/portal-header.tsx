@@ -28,7 +28,6 @@ export function PortalHeader({
   const NAV = [
     { label: "Dashboard", href: "/portal", badge: 0 },
     { label: "Content", href: "/portal/content", badge: actionCounts.content },
-    { label: "Performance", href: "/portal/analytics", badge: 0 },
     { label: "Invoices", href: "/portal/invoices", badge: actionCounts.invoices },
   ];
 

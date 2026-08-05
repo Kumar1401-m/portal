@@ -13,7 +13,6 @@
 import { guard, ok } from "@/lib/automation-api";
 import { env } from "@/lib/env";
 import { queryOne, hasColumn } from "@/lib/db";
-import { analyticsReady } from "@/lib/analytics";
 import { publishingReadiness } from "@/lib/instagram";
 import { isStorageConfigured } from "@/lib/storage";
 
@@ -23,9 +22,8 @@ export async function GET(request: Request) {
   const denied = guard(request);
   if (denied) return denied;
 
-  const [publishing, analytics, storage, autoPublishColumn] = await Promise.all([
+  const [publishing, storage, autoPublishColumn] = await Promise.all([
     publishingReadiness(),
-    analyticsReady(),
     isStorageConfigured(),
     hasColumn("clients", "auto_publish"),
   ]);
@@ -51,7 +49,6 @@ export async function GET(request: Request) {
   const checks = {
     database: true,
     publishing_schema: publishing.ready,
-    analytics_schema: analytics,
     r2_storage: storage,
     meta_token: env.meta.enabled,
     whatsapp: env.whatsapp.enabled,
@@ -68,7 +65,6 @@ export async function GET(request: Request) {
     queue_depth: queueDepth,
     warnings: [
       publishing.ready ? null : publishing.reason,
-      analytics ? null : "Analytics columns missing — the insights job will be rejected.",
       storage ? null : "Cloudflare R2 is not configured; videos have no fetchable URL.",
       env.mail.enabled ? null : "SMTP is off — client confirmation emails will be skipped.",
       env.whatsapp.enabled ? null : "WhatsApp is not configured in the portal (n8n may send it instead).",

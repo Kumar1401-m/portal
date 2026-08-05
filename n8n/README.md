@@ -1,13 +1,10 @@
 # n8n automation
 
-Three workflows that publish approved content to Instagram, collect the numbers
-afterwards, and email clients their reports.
+One workflow: publishing approved content to Instagram.
 
 | File | Trigger | What it does |
 | --- | --- | --- |
 | `01-instagram-auto-publisher.json` | every 5 min | Publishes scheduled reels/posts to Instagram, notifies the client |
-| `02-instagram-insights-daily.json` | daily 06:30 | Collects account + per-post metrics, refreshes AI recommendations |
-| `03-scheduled-client-reports.json` | Mon 09:00, 1st 09:30 | Emails weekly and monthly performance reports |
 
 ## The division of labour
 
@@ -77,7 +74,6 @@ Every `false` in `checks` is a feature that will silently do nothing:
   "checks": {
     "database": true,
     "publishing_schema": true,
-    "analytics_schema": true,
     "r2_storage": true,
     "meta_token": true,
     "whatsapp": false,
@@ -103,8 +99,8 @@ real account without anyone approving it. Per client you need:
 
 ### 7. Activate
 
-Start with **02** (read-only — it can't post anything) and let it run once.
-Once the dashboard shows numbers, activate **01**, then **03**.
+Activate **01**. Start with one low-stakes Reel on a client who has opted in,
+and watch it go out before trusting it with the rest.
 
 ## How publishing works
 
@@ -150,38 +146,6 @@ expires and the queue offers the post again by itself. Nothing to do.
 
 For a post that has genuinely failed and been fixed, use **Retry** in the portal
 — it resets the attempt counter, which is what the queue's budget check reads.
-
-## Analytics
-
-`02` runs daily and writes at two grains:
-
-- **`analytics_snapshots`** — one row per client per day. Meta's account metrics
-  are already day-scoped, so these are additive across a date range.
-- **`post_insights`** — one row per post per day, holding Instagram's *lifetime*
-  totals for that post as of that day. **Not additive across days** — summing a
-  post's rows counts the same likes once per collection day.
-
-The dashboard queries respect that distinction; anything you build on top of
-these tables should too.
-
-Metrics are always collected for **yesterday**. Today's day-scoped numbers are
-still accumulating, and storing them would put a fake trough at the end of every
-chart.
-
-### Backfilling
-
-The store endpoints are idempotent by `(client, date)`, so a backfill is just
-the same call with an older date:
-
-```bash
-curl -X POST https://your-portal.vercel.app/api/automation/insights/account \
-  -H "Authorization: Bearer $PORTAL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"client_id":4,"date":"2026-07-15","reach":12043,"profile_visits":210}'
-```
-
-Meta only serves account insights for the last ~2 years, and `follower_count`
-for 30 days.
 
 ## WhatsApp
 
@@ -234,12 +198,6 @@ a query string ends up in access logs.
 | POST | `/api/automation/publish/result` | Report posted / failed |
 | POST | `/api/automation/publish/log` | Breadcrumb for an intermediate step |
 | POST | `/api/automation/notify` | Email + WhatsApp the client |
-| GET | `/api/automation/insights/targets` | Clients and posts to collect |
-| POST | `/api/automation/insights/account` | Store one day of account metrics |
-| POST | `/api/automation/insights/posts` | Store a batch of post metrics |
-| POST | `/api/automation/insights/recommendations` | Regenerate AI advice |
-| GET | `/api/automation/reports/due` | Clients owed a report |
-| POST | `/api/automation/reports/send` | Build and email reports |
 
 `ok: false` from `/publish/claim` is expected traffic, not an error — another
 execution holds the item, or it is already live.
@@ -260,10 +218,3 @@ last 60 days unless exchanged for a long-lived one.
 accept: reels must be 3s–15min, 9:16-ish, H.264/AAC in MP4 or MOV. The post is
 marked failed with that explanation and retried on the next run.
 
-**Insights return zeros.** Instagram serves account insights only for Business
-and Creator accounts with 100+ followers. Personal accounts return errors, which
-`neverError` turns into zeros.
-
-**A report never arrived.** Check `scheduled_reports` for that client and
-period. `status = 'failed'` means SMTP; a missing row means the client was
-filtered out (no email, no Instagram account, or analytics disabled).

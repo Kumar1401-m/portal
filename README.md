@@ -24,10 +24,9 @@ links, promotion channel statuses, performance metrics) plus the
 `task_comments` discussion table. Fresh installs (`npm run db:reset`) already
 include everything.
 
-## What's new — Instagram automation & analytics
+## What's new — Instagram publishing & WhatsApp approvals
 
-Approved Reels now publish themselves, and the numbers come back the next
-morning. Three n8n workflows do the moving; the portal makes every decision.
+Approved Reels publish themselves, and clients sign them off from WhatsApp.
 
 - **Auto-publishing** — `n8n/01-instagram-auto-publisher.json` polls
   `/api/automation/publish/queue` every 5 minutes, claims a due deliverable,
@@ -42,31 +41,42 @@ morning. Three n8n workflows do the moving; the portal makes every decision.
   the portal counts attempts on the deliverable (4, then it gives up and tells
   an admin). Meta's permanent error codes (190, 200, 9007…) skip the budget
   entirely, because retrying an expired token never helps.
-- **Daily analytics** — `n8n/02-instagram-insights-daily.json` reads Instagram
-  Insights each morning into `analytics_snapshots` (per client per day) and
-  `post_insights` (per post per day), then refreshes AI recommendations.
-- **Analytics dashboard** (`/analytics`) — reach by day/week/month, follower
-  growth, engagement rate, views vs reach, interaction mix, posting frequency,
-  format performance, top posts, and a client-by-client table. Filter by
-  client, date range, platform and campaign; every metric shows its change
-  against the equally long period before. Charts are Chart.js on a
-  colour-vision-validated palette, and each one ships a table view.
-- **Clients see their own** at `/portal/analytics`, scoped by session — never
-  by a query parameter.
-- **AI recommendations** — best posting time, strongest format, hashtag
-  suggestions and an engagement read. Computed from the client's own history
-  first, then written up by the LLM; with no API key configured they still
-  appear, written from the statistics alone.
-- **Exports** — CSV/Excel of the exact view on screen (UTF-8 BOM, formula
-  injection neutralised), and a print-optimised A4 report at `/analytics/print`.
-- **Scheduled reports** — `n8n/03-scheduled-client-reports.json` emails clients
-  a weekly report on Monday and a monthly one on the 1st, covering the period
-  that just *finished*. A unique key on `scheduled_reports` means a retried run
-  can never send the same report twice.
-- **Setup** — see [`n8n/README.md`](n8n/README.md). Start with
-  `GET /api/automation/health`, which reports which parts are configured.
-  Auto-publishing is **off by default for every client** and is opted into per
-  client from the client edit page.
+- **A pasted Page id corrects itself** — people paste the Facebook Page id into
+  `ig_user_id` constantly, and stored unchanged it fails at publish time with
+  `(#100) Tried accessing nonexisting field (media)`, which names neither the
+  problem nor the fix. Saving a client now follows `instagram_business_account`
+  to the real account.
+
+### WhatsApp approvals
+
+The client gets the finished MP4 in their own group with a short code, replies
+`APPROVE V245` or `CHANGE V245 make the subtitles bigger`, and the portal
+records it — status flipped, team notified, board updated live. No login.
+
+- A separate Express service (`whatsapp-service/`) drives WhatsApp Web. It also
+  hosts the Socket.IO hub, because Vercel tears functions down between requests
+  and cannot hold a socket open.
+- **Ambiguity resolves to the safe side** — "approved but change the music" is
+  read as a change request, never an approval; reading it the other way
+  publishes work the client just objected to. A reply naming another client's
+  code is refused, so one group can never approve another's video.
+- Replays are no-ops: WhatsApp redelivers after every reconnect, and a repeated
+  approval records once and notifies once.
+- 32 parser cases cover how clients actually type — lowercase, `#`, hyphens,
+  "please", or replying to the video without typing a code at all.
+- Live approval board at `/approvals`, a client-facing timeline
+  (Uploaded → Sent → Viewed → Approved → Posted), and a full message transcript.
+
+**Setup** — see [`n8n/README.md`](n8n/README.md) and
+[`whatsapp-service/README.md`](whatsapp-service/README.md). Start with
+`GET /api/automation/health`, which reports which parts are configured.
+Auto-publishing is **off by default for every client** and is opted into per
+client from the client edit page.
+
+Note on the WhatsApp dependency: whatsapp-web.js is unofficial and against
+WhatsApp's ToS; accounts running it do get banned. There is no official
+alternative — the Cloud API cannot read or post to groups, which is the whole
+mechanism. Use a dedicated number.
 
 ## What's new — ERP redesign
 

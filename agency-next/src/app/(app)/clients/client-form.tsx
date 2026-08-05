@@ -41,7 +41,6 @@ export type ClientDefaults = Partial<{
   ig_access_token: string;
   whatsapp_number: string;
   auto_publish: boolean;
-  analytics_enabled: boolean;
   is_personal: boolean;
   crm_user_ids: number[];
 }>;
@@ -179,9 +178,9 @@ export function ClientForm({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Connects this client to the n8n workflows: publishing approved Reels at their
-            scheduled time, and collecting performance figures every day. The account must be an
-            Instagram <b>Business</b> account attached to a Facebook Page you administer.
+            Lets the portal publish this client&apos;s approved Reels at their scheduled time. The
+            account must be an Instagram <b>Business</b> account attached to a Facebook Page you
+            administer.
           </p>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -252,27 +251,6 @@ export function ClientForm({
             </span>
           </label>
 
-          <label
-            htmlFor="analytics_enabled"
-            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
-          >
-            <input
-              id="analytics_enabled"
-              type="checkbox"
-              name="analytics_enabled"
-              value="1"
-              defaultChecked={d.analytics_enabled ?? true}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
-            />
-            <span className="text-sm">
-              <span className="font-medium">Collect daily Instagram analytics</span>
-              <br />
-              <span className="text-muted-foreground">
-                Reads Insights each morning so the Analytics dashboard, the client&apos;s own
-                Performance page and the weekly report have figures to show.
-              </span>
-            </span>
-          </label>
         </CardContent>
       </Card>
 

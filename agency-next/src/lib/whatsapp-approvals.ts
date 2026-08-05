@@ -471,16 +471,41 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
     return { ok: false, error: `No video with the code ${input.videoCode}.` };
   }
 
-  // A reply must come from the group the video was sent to. Without this, a
-  // client in one group could approve another client's video simply by typing
-  // its code.
+  /*
+   * A reply is only honoured from the group the video was actually sent to.
+   *
+   * The strict form matters. An earlier version only refused when the group
+   * belonged to a *different* client, which silently allowed any group the
+   * agency number happens to be in — including one it was added to by someone
+   * else — to approve any video just by typing its code. Anyone can be added
+   * to a WhatsApp group by anyone, so "unrecognised" has to mean "refused",
+   * not "unchecked".
+   */
   if (input.groupId) {
-    const owner = await clientForGroup(input.groupId);
-    if (owner !== null && owner !== d.client_id) {
-      return {
-        ok: false,
-        error: `${input.videoCode} does not belong to this WhatsApp group.`,
-      };
+    if (d.wa_group_id) {
+      // The video was sent somewhere specific; only that group may answer.
+      if (input.groupId !== d.wa_group_id) {
+        return {
+          ok: false,
+          error: `${input.videoCode} was not sent to this WhatsApp group.`,
+        };
+      }
+    } else {
+      // Never sent (approved out of band) — fall back to ownership, and treat
+      // an unmapped group as untrusted rather than as an absent constraint.
+      const owner = await clientForGroup(input.groupId);
+      if (owner === null) {
+        return {
+          ok: false,
+          error: "This WhatsApp group isn't linked to a client.",
+        };
+      }
+      if (owner !== d.client_id) {
+        return {
+          ok: false,
+          error: `${input.videoCode} does not belong to this WhatsApp group.`,
+        };
+      }
     }
   }
 

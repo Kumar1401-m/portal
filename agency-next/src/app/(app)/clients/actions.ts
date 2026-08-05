@@ -66,15 +66,14 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
     columns.category = s(fd, "category").toUpperCase().slice(0, 10);
   }
 
-  /* ---- Instagram automation. Same guard: these columns arrive with the
-     analytics migration, and a database that hasn't run it must still be able
-     to save a client. ---- */
+  /* ---- Instagram automation. Guarded because these columns arrive with a
+     later migration, and a database that has not run it must still be able to
+     save a client. ---- */
   if (await hasColumn("clients", "auto_publish")) {
     columns.ig_username = orNull(s(fd, "ig_username").replace(/^@/, ""));
     columns.whatsapp_number = orNull(s(fd, "whatsapp_number"));
     // Unattended posting to a live account — never inferred, only ticked.
     columns.auto_publish = fd.get("auto_publish") ? 1 : 0;
-    columns.analytics_enabled = fd.get("analytics_enabled") ? 1 : 0;
 
     // A blank token means "leave whatever is stored alone", not "clear it" —
     // the field renders as a password input and is never populated with the
@@ -250,7 +249,7 @@ async function normalizeInstagramId(clientId: number, pasted: unknown): Promise<
   if (!id) return;
 
   try {
-    const { resolveInstagramAccount } = await import("@/lib/instagram-sync");
+    const { resolveInstagramAccount } = await import("@/lib/instagram");
     const { env } = await import("@/lib/env");
 
     const row = await queryOne<{ ig_access_token: string | null }>(
