@@ -220,6 +220,24 @@ const EXPECTED: ColumnSpec[] = [
     definition: "wa_approval_message_id VARCHAR(128) DEFAULT NULL",
     purpose: "Stops a redelivered WhatsApp reply approving the same video twice.",
   },
+  {
+    table: "video_analysis",
+    column: "brand_seen",
+    definition: "brand_seen TEXT DEFAULT NULL",
+    purpose: "The logo, footer and contact details the AI read off the video.",
+  },
+  {
+    table: "video_analysis",
+    column: "context_used",
+    definition: "context_used TEXT DEFAULT NULL",
+    purpose: "The briefing about the business a caption was written from.",
+  },
+  {
+    table: "video_analysis",
+    column: "grounded",
+    definition: "grounded TINYINT(1) NOT NULL DEFAULT 0",
+    purpose: "Whether web search was on when the caption was written.",
+  },
 ];
 
 /**

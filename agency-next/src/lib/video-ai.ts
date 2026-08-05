@@ -631,11 +631,23 @@ async function generate(
     );
   }
 
+  /*
+   * The audit columns are written only if they exist.
+   *
+   * They arrived after the table did, and a hosted database gets them when
+   * someone opens Settings and presses the button. Naming them unconditionally
+   * would mean an unmigrated install downloads the video, uploads it to Gemini,
+   * pays for the generation and *then* dies on "Unknown column" — losing the
+   * caption it had already written. Better to store the caption and skip the
+   * provenance.
+   */
+  const audit = await hasColumn("video_analysis", "brand_seen");
+
   await execute(
     `UPDATE video_analysis
         SET state = 'done', summary = ?, spoken_language = ?, topic = ?, mood = ?,
             on_screen_text = ?, scenes_json = ?, caption = ?, hook = ?, hashtags = ?,
-            brand_seen = ?, context_used = ?, grounded = ?,
+            ${audit ? "brand_seen = ?, context_used = ?, grounded = ?," : ""}
             raw_json = ?, tokens_used = ?, duration_ms = ?, last_error = NULL, locked_at = NULL
       WHERE deliverable_id = ?`,
     [
@@ -648,11 +660,15 @@ async function generate(
       checked.caption,
       s(parsed.hook),
       hashtags || null,
-      brandSeen,
-      // Kept so a caption can be traced to the briefing it was written from,
-      // including which sources were reachable at the time.
-      ctx ? `${contextBlock}\n\n[sources: ${ctx.sources.join(", ")}]` : null,
-      useGrounding ? 1 : 0,
+      ...(audit
+        ? [
+            brandSeen,
+            // Kept so a caption can be traced to the briefing it was written
+            // from, including which sources were reachable at the time.
+            ctx ? `${contextBlock}\n\n[sources: ${ctx.sources.join(", ")}]` : null,
+            useGrounding ? 1 : 0,
+          ]
+        : []),
       JSON.stringify(parsed),
       out.usageMetadata?.totalTokenCount ?? null,
       Date.now() - started,
