@@ -786,6 +786,23 @@ async function main() {
   await addColumn('video_analysis', 'context_used', 'context_used TEXT DEFAULT NULL');
   await addColumn('video_analysis', 'grounded', 'grounded TINYINT(1) NOT NULL DEFAULT 0');
 
+  // Which video the cached Gemini upload was made from.
+  //
+  // Without it, replacing a task's video left the old upload in place and the
+  // AI kept captioning the file it already held — a caption with no relation
+  // to the video on screen, and no way to clear it short of waiting 40 hours
+  // for Google to expire the file.
+  await addColumn('video_analysis', 'source_ref', 'source_ref VARCHAR(600) DEFAULT NULL');
+
+  // Existing rows describe whatever video the task points at now. Saying so
+  // explicitly stops the first run after this migration from treating every
+  // analysis as stale and re-doing all of them.
+  await run('backfill video_analysis.source_ref', `
+    UPDATE video_analysis v
+      JOIN deliverables d ON d.id = v.deliverable_id
+       SET v.source_ref = COALESCE(d.cloud_video_key, d.cloud_video_url, d.edited_link)
+     WHERE v.source_ref IS NULL`);
+
   console.log('✔ Migrations complete.');
   await getPool().end();
 }

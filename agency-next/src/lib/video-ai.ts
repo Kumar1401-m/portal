@@ -195,12 +195,78 @@ async function setState(
  * Returns immediately after creating the row. The caller then drives it with
  * `runAnalysis`, which is the part that can take half a minute.
  */
+/**
+ * Which video a task currently points at.
+ *
+ * The storage key first: it changes whenever a new file is uploaded, even if
+ * the deliverable link is rewritten to the same permalink afterwards.
+ */
+async function currentSourceRef(deliverableId: number): Promise<string | null> {
+  const d = await queryOne<{
+    cloud_video_key: string | null;
+    cloud_video_url: string | null;
+    edited_link: string | null;
+  }>(
+    "SELECT cloud_video_key, cloud_video_url, edited_link FROM deliverables WHERE id = ?",
+    [deliverableId]
+  );
+  if (!d) return null;
+  return d.cloud_video_key || d.cloud_video_url || d.edited_link || null;
+}
+
+/**
+ * Forget an analysis whose video has been replaced.
+ *
+ * Deletes the row rather than nulling twenty columns: everything in it — the
+ * summary, the caption, the branding, and the Gemini file URI — describes a
+ * video that is no longer attached to this task, and a row that has to be
+ * blanked field by field is one column away from leaking the old caption the
+ * next time somebody adds a column.
+ */
+export async function invalidateAnalysis(deliverableId: number): Promise<void> {
+  if (!(await hasColumn("video_analysis", "state"))) return;
+  await execute("DELETE FROM video_analysis WHERE deliverable_id = ?", [deliverableId]);
+}
+
+/**
+ * Drop the analysis if it belongs to a different video than the task now has.
+ *
+ * A NULL `source_ref` means "recorded before this was tracked" and is left
+ * alone — the migration backfills those, and treating unknown as stale would
+ * re-run every analysis in the database on first deploy.
+ */
+async function discardIfVideoChanged(deliverableId: number): Promise<void> {
+  if (!(await hasColumn("video_analysis", "source_ref"))) return;
+
+  const row = await queryOne<{ source_ref: string | null }>(
+    "SELECT source_ref FROM video_analysis WHERE deliverable_id = ?",
+    [deliverableId]
+  );
+  if (!row) return;
+
+  const now = await currentSourceRef(deliverableId);
+  if (row.source_ref === null) {
+    // Adopt the current video, so the *next* replacement is detected.
+    await execute("UPDATE video_analysis SET source_ref = ? WHERE deliverable_id = ?", [
+      now,
+      deliverableId,
+    ]);
+    return;
+  }
+  if (row.source_ref !== now) await invalidateAnalysis(deliverableId);
+}
+
 export async function queueAnalysis(deliverableId: number, force = false): Promise<void> {
   if (!(await hasColumn("video_analysis", "state"))) return;
 
+  // Before anything else: is what we know about still the video on the task?
+  await discardIfVideoChanged(deliverableId);
+
   if (force) {
     // A rewrite keeps the uploaded file — re-uploading 66 MB to get a second
-    // opinion on footage Gemini already holds would be pure waste.
+    // opinion on footage Gemini already holds would be pure waste. Safe only
+    // because the check above has already thrown the row away if the video
+    // itself changed.
     await execute(
       `INSERT INTO video_analysis (deliverable_id, state, attempts)
        VALUES (?, 'queued', 0)
@@ -309,19 +375,36 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
 async function ensureUploaded(
   deliverableId: number
 ): Promise<{ ok: true; uri: string; name: string; mimeType: string } | (StepResult & { ok: false })> {
+  const tracksSource = await hasColumn("video_analysis", "source_ref");
+  const ref = await currentSourceRef(deliverableId);
+
   const existing = await queryOne<{
     file_uri: string | null;
     file_name: string | null;
     file_expires_at: string | null;
-  }>("SELECT file_uri, file_name, file_expires_at FROM video_analysis WHERE deliverable_id = ?", [
-    deliverableId,
-  ]);
+    source_ref?: string | null;
+  }>(
+    `SELECT file_uri, file_name, file_expires_at${tracksSource ? ", source_ref" : ""}
+       FROM video_analysis WHERE deliverable_id = ?`,
+    [deliverableId]
+  );
 
-  // Reuse an upload that Google hasn't expired yet.
+  /*
+   * Reuse an upload that Google hasn't expired yet — but only if it is an
+   * upload of *this* video.
+   *
+   * Gemini holds a file for ~40 hours and it is addressed by URI, not by
+   * content. Reusing one after the task's video has been replaced means the
+   * model watches the old footage and writes a caption with no relation to
+   * what is now attached, which is indistinguishable from the AI hallucinating
+   * and cannot be cleared by re-running it.
+   */
   if (existing?.file_uri && existing.file_name) {
     const expired =
       existing.file_expires_at && new Date(existing.file_expires_at + "Z").getTime() < Date.now();
-    if (!expired) {
+    const stale = tracksSource && existing.source_ref != null && existing.source_ref !== ref;
+
+    if (!expired && !stale) {
       return {
         ok: true,
         uri: existing.file_uri,
@@ -440,6 +523,9 @@ async function ensureUploaded(
     file_name: upJson.file.name,
     file_expires_at: expires,
     video_bytes: bytes.byteLength,
+    // Stamped with the video it came from, so this upload can never be handed
+    // back for a different one.
+    ...(tracksSource ? { source_ref: ref } : {}),
   });
 
   return {

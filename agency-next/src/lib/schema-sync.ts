@@ -238,6 +238,12 @@ const EXPECTED: ColumnSpec[] = [
     definition: "grounded TINYINT(1) NOT NULL DEFAULT 0",
     purpose: "Whether web search was on when the caption was written.",
   },
+  {
+    table: "video_analysis",
+    column: "source_ref",
+    definition: "source_ref VARCHAR(600) DEFAULT NULL",
+    purpose: "Which video the caption describes, so replacing it can't leave the old one's caption behind.",
+  },
 ];
 
 /**
