@@ -52,21 +52,49 @@ export function VideoUpload({
 
     // XHR rather than fetch — it's the only way to get upload progress.
     setPhase("uploading");
-    const ok = await new Promise<boolean>((resolve) => {
+    const result = await new Promise<{ status: number; body: string }>((resolve) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", signed.uploadUrl, true);
+      // Sending this is what makes R2 store the object as a video, which both
+      // Instagram and the AI analyser depend on. It also costs a CORS
+      // preflight: "video/mp4" isn't a safelisted Content-Type value, so the
+      // browser sends OPTIONS first and the bucket has to allow that header.
       xhr.setRequestHeader("Content-Type", file.type);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
       };
-      xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
-      xhr.onerror = () => resolve(false);
+      xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText || "" });
+      // status 0 means the browser never got a response — blocked before it
+      // left, or the preflight was refused.
+      xhr.onerror = () => resolve({ status: 0, body: "" });
       xhr.send(file);
     });
 
-    if (!ok) {
+    if (result.status < 200 || result.status >= 300) {
       setPhase("error");
-      setError("Upload failed. Check the bucket's CORS rules allow PUT from this site.");
+      /*
+       * These two look identical to a user and have opposite causes, so they
+       * must not share a message. A status of 0 means the request never
+       * reached R2 — CORS. Any real status means CORS is fine and R2 itself
+       * refused, which is a credentials or permissions problem.
+       */
+      if (result.status === 0) {
+        setError(
+          `The browser blocked the upload before it reached Cloudflare. Add ${window.location.origin} ` +
+            `to the bucket's CORS policy, allowing PUT and the content-type header.`
+        );
+      } else {
+        const code = result.body.match(/<Code>([^<]+)<\/Code>/)?.[1];
+        setError(
+          code === "SignatureDoesNotMatch"
+            ? "Cloudflare rejected the signature — the R2 secret access key in Settings is wrong."
+            : code === "AccessDenied"
+              ? "Cloudflare refused the upload — the R2 API token needs Object Read & Write."
+              : code === "NoSuchBucket"
+                ? "That bucket doesn't exist — check the bucket name and account ID in Settings."
+                : `Cloudflare returned ${result.status}${code ? ` (${code})` : ""}. CORS is fine; this is a credentials problem.`
+        );
+      }
       return;
     }
 
