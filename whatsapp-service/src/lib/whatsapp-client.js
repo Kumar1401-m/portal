@@ -369,7 +369,7 @@ class WhatsAppService extends EventEmitter {
     return run;
   }
 
-  async sendVideo({ groupId, videoUrl, caption, filename }) {
+  async sendVideo({ groupId, videoUrl, watchUrl, caption, filename }) {
     if (this.state !== STATE.CONNECTED) {
       const err = new Error(`WhatsApp is not connected (state: ${this.state})`);
       err.code = 'not_connected';
@@ -387,7 +387,40 @@ class WhatsAppService extends EventEmitter {
     // Fetched here rather than handed to WhatsApp as a URL: the library would
     // download it anyway, and doing it ourselves means the size check below
     // happens before Chromium is asked to hold the bytes in memory.
-    const media = await this.fetchMedia(videoUrl, filename);
+    let media;
+    try {
+      media = await this.fetchMedia(videoUrl, filename);
+    } catch (err) {
+      /*
+       * Too big for WhatsApp, but not too big to review.
+       *
+       * The caption still goes, with a link to watch it — the portal sends a
+       * public, non-expiring page for exactly this. The client can watch and
+       * reply APPROVE from the same group, which is the whole point of the
+       * message; only the convenience of inline playback is lost.
+       *
+       * Any other failure is rethrown: a link is a fallback for a file that
+       * cannot be sent, not a cover for one that could not be fetched.
+       */
+      if (err?.code !== 'media_too_large' || !watchUrl) throw err;
+
+      log.warn('video too large for WhatsApp — sending the caption and a link', {
+        groupId,
+        reason: err.message,
+      });
+
+      const text =
+        `${caption}\n\n▶️ *Watch the video:*\n${watchUrl}\n\n` +
+        `_(Too large to send here, so it opens in your browser.)_`;
+
+      const sentLink = await this.client.sendMessage(groupId, text);
+      return {
+        messageId: sentLink?.id?._serialized ?? null,
+        bytes: 0,
+        sentAsLink: true,
+        note: err.message,
+      };
+    }
 
     log.info('sending', { groupId, bytes: media.bytes, ms: Date.now() - started });
 

@@ -18,6 +18,14 @@ import { io, type Socket } from "socket.io-client";
 export type VideoUpdate = {
   videoCode?: string | null;
   deliverableId?: number | null;
+  /**
+   * WhatsApp's own id for the message we sent.
+   *
+   * Delivery receipts arrive from WhatsApp carrying nothing but this — the
+   * service has no database and cannot say which video it belongs to, so the
+   * portal matches it against the id it stored when the video was sent.
+   */
+  waMessageId?: string | null;
   waStatus?: string;
   status?: string;
   approvedBy?: string | null;
@@ -80,6 +88,25 @@ export function useWhatsAppSocket(socketUrl: string | null | undefined, options:
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
     socket.on("connect_error", () => setConnected(false));
+
+    /*
+     * Delivery receipts — sent, delivered, read.
+     *
+     * A separate event from the service, and one nothing was listening for, so
+     * a video sat on "queued" in the board until the page was reloaded even
+     * though the database had it right all along. Normalised into the same
+     * shape as an approval update so the board has one path to handle, and
+     * "read" is renamed to "viewed" here because that is the word the portal
+     * stores and shows — two names for one state is how a live view and a
+     * refreshed one come to disagree.
+     */
+    socket.on("videoDelivery", ({ waMessageId, status }: { waMessageId?: string; status?: string }) => {
+      if (!waMessageId || !status) return;
+      handlers.current.onVideoUpdate?.({
+        waMessageId,
+        waStatus: status === "read" ? "viewed" : status,
+      });
+    });
 
     socket.on("videoUpdated", (update: VideoUpdate) => {
       setLastUpdate(update);

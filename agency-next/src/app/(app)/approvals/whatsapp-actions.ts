@@ -49,6 +49,7 @@ export async function sendForApprovalAction(
     deliverableId: video.deliverableId,
     groupId: video.groupId,
     videoUrl: video.videoUrl,
+    watchUrl: video.watchUrl,
     caption: video.caption,
     filename: `${video.videoCode}.mp4`,
   });

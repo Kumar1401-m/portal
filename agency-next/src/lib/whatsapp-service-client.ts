@@ -118,10 +118,12 @@ export const sendVideoToGroup = (payload: {
   deliverableId: number;
   groupId: string;
   videoUrl: string;
+  /** Used instead of the file when WhatsApp refuses the size. */
+  watchUrl?: string | null;
   caption: string;
   filename?: string;
 }) =>
-  call<{ messageId: string | null; attempts: number }>("/api/send-video", {
+  call<{ messageId: string | null; attempts: number; sentAsLink?: boolean }>("/api/send-video", {
     method: "POST",
     body: JSON.stringify(payload),
   });

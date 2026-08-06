@@ -144,7 +144,7 @@ function buildRoutes({ whatsapp, sendQueue }) {
    * Body: { videoCode, deliverableId, groupId, videoUrl, caption?, filename? }
    */
   router.post('/api/send-video', async (req, res) => {
-    const { videoCode, deliverableId, groupId, videoUrl, caption, filename } = req.body || {};
+    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename } = req.body || {};
 
     const missing = [];
     if (!videoCode) missing.push('videoCode');
@@ -180,6 +180,8 @@ function buildRoutes({ whatsapp, sendQueue }) {
         deliverableId: deliverableId ?? null,
         groupId,
         videoUrl,
+        // Used only if WhatsApp refuses the file for its size.
+        watchUrl: watchUrl || null,
         caption: caption || defaultCaption(videoCode),
         filename: filename || `${videoCode}.mp4`,
       });

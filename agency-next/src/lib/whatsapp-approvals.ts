@@ -20,6 +20,7 @@ import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { notifyAdmins } from "./notify";
 import { resolveVideoUrl } from "./storage";
 import { composeCaption } from "./instagram";
+import { buildVideoPermalink } from "./video-link";
 
 /** How the WhatsApp conversation for one video is going. */
 export type WaStatus =
@@ -223,6 +224,15 @@ export type SendableVideo = {
   title: string;
   groupId: string;
   videoUrl: string;
+  /**
+   * A public, permanent page for the same video.
+   *
+   * WhatsApp refuses media over 16 MB, and a finished reel is routinely four
+   * or five times that. Rather than the send simply failing, the client gets
+   * the caption and this link — it needs no login, does not expire, and they
+   * can still reply APPROVE from the same group.
+   */
+  watchUrl: string | null;
   caption: string;
 };
 
@@ -296,6 +306,7 @@ export async function prepareSend(
       title: d.title,
       groupId: group.group_id,
       videoUrl,
+      watchUrl: d.cloud_video_key ? buildVideoPermalink(d.id, d.cloud_video_key) : d.edited_link,
       caption: buildCaption(videoCode, d.title, composeCaption(d.caption, d.hashtags)),
     },
   };
@@ -780,6 +791,8 @@ export type ApprovalRow = {
   client_id: number;
   wa_status: string;
   wa_group_id: string | null;
+  /** WhatsApp's id for the message we sent — how a delivery receipt finds this row. */
+  wa_message_id: string | null;
   wa_sent_at: string | null;
   wa_viewed_at: string | null;
   wa_responded_at: string | null;
@@ -803,7 +816,7 @@ export async function getApprovalBoard(
 
   return query<ApprovalRow>(
     `SELECT d.id, d.video_code, d.title, c.company_name, d.client_id,
-            d.wa_status, d.wa_group_id, d.wa_sent_at, d.wa_viewed_at,
+            d.wa_status, d.wa_group_id, d.wa_message_id, d.wa_sent_at, d.wa_viewed_at,
             d.wa_responded_at, d.wa_approved_by, d.wa_comment, d.wa_last_error, d.status
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE c.status <> 'churned' AND d.wa_status <> 'not_sent' ${scope}

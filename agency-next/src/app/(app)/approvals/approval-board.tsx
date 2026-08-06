@@ -95,7 +95,10 @@ export function ApprovalBoard({
       const index = current.findIndex(
         (r) =>
           (update.deliverableId != null && r.id === update.deliverableId) ||
-          (update.videoCode != null && r.video_code === update.videoCode)
+          (update.videoCode != null && r.video_code === update.videoCode) ||
+          // Delivery receipts identify the video only by the WhatsApp message
+          // we sent, which is why the row carries that id.
+          (update.waMessageId != null && r.wa_message_id === update.waMessageId)
       );
       // An update for a row this view doesn't hold — a different client's
       // video, or one sent since the page loaded. Ask the server rather than
