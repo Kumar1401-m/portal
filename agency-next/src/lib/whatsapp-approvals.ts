@@ -19,6 +19,7 @@ import "server-only";
 import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { notifyAdmins } from "./notify";
 import { resolveVideoUrl } from "./storage";
+import { composeCaption } from "./instagram";
 
 /** How the WhatsApp conversation for one video is going. */
 export type WaStatus =
@@ -247,10 +248,12 @@ export async function prepareSend(
     edited_link: string | null;
     wa_status: string;
     video_code: string | null;
+    caption: string | null;
+    hashtags: string | null;
   }>(
     `SELECT d.id, d.client_id, d.title, c.company_name,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
-            d.wa_status, d.video_code
+            d.wa_status, d.video_code, d.caption, d.hashtags
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
@@ -293,7 +296,7 @@ export async function prepareSend(
       title: d.title,
       groupId: group.group_id,
       videoUrl,
-      caption: buildCaption(videoCode, d.title),
+      caption: buildCaption(videoCode, d.title, composeCaption(d.caption, d.hashtags)),
     },
   };
 }
@@ -304,12 +307,32 @@ export async function prepareSend(
  * The reply syntax shown here must stay identical to what the service's parser
  * accepts — if they drift, clients follow instructions that no longer work.
  */
-export function buildCaption(videoCode: string, title?: string | null): string {
+export function buildCaption(
+  videoCode: string,
+  title?: string | null,
+  postCaption?: string | null
+): string {
+  /*
+   * The caption travels with the video.
+   *
+   * Approving here approves what gets published, and the caption is half of
+   * that — it carries the offer, the phone number and the call to action. Left
+   * out, the client was approving a silent video and first saw the words under
+   * their own live post, which is the worst possible moment to disagree with
+   * them.
+   *
+   * Trimmed, because WhatsApp truncates a long message behind "Read more" and
+   * a caption the client has to expand is one they will skim.
+   */
+  const caption = (postCaption || "").trim();
+  const shown = caption.length > 700 ? `${caption.slice(0, 699)}…` : caption;
+
   return (
     `📹 *Video Ready*\n\n` +
     (title ? `_${title}_\n\n` : "") +
     `Video ID: *${videoCode}*\n\n` +
-    `Please review and reply:\n\n` +
+    (shown ? `*Caption we'll post:*\n${shown}\n\n` : "") +
+    `Please review the video${shown ? " and caption" : ""} and reply:\n\n` +
     `✅ *APPROVE ${videoCode}*\n` +
     `📝 *CHANGE ${videoCode}* (then your notes)\n\n` +
     `_You can also reply directly to this message._`

@@ -19,7 +19,7 @@ import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/const
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey } from "@/lib/utils";
 import { localTimeToUtc } from "@/lib/zapier";
-import { retryPublish } from "@/lib/instagram";
+import { retryPublish, publishHandoff } from "@/lib/instagram";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
 
@@ -438,6 +438,9 @@ type WfRow = {
   video_type: string | null;
   posted_at: string | null;
   title: string;
+  /** Read so scheduling can hand the post to the publisher without undoing one. */
+  instagram_status: string | null;
+  scheduled_at: string | null;
 };
 
 /**
@@ -457,7 +460,7 @@ async function applyStatus(
     return { ok: false, error: "Invalid status." };
   }
   const d = await queryOne<WfRow>(
-    "SELECT id, client_id, status, video_type, posted_at, title FROM deliverables WHERE id = ?",
+    "SELECT id, client_id, status, video_type, posted_at, title, instagram_status, scheduled_at FROM deliverables WHERE id = ?",
     [id]
   );
   if (!d) return { ok: false, error: "Deliverable not found." };
@@ -498,7 +501,8 @@ async function applyStatus(
     updates.approval_status = "rejected";
     updates.posting_status = "rejected";
   }
-  if (effective === "scheduled") updates.posting_status = "scheduled";
+  // Scheduling has to reach instagram_status too, or the publisher never sees it.
+  if (effective === "scheduled") Object.assign(updates, publishHandoff(d));
   if (effective === "posted" || effective === "completed") {
     updates.posting_status = "posted";
     if (!d.posted_at) updates.posted_at = nowStr();

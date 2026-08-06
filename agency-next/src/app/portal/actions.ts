@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
+import { publishHandoff } from "@/lib/instagram";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
@@ -97,8 +98,15 @@ async function clientTransition(
         ? String(d.scheduled_at).slice(0, 19).replace("T", " ")
         : nextBestPostTime(country);
       updates.status = "scheduled";
-      updates.posting_status = "scheduled";
       updates.scheduled_at = scheduledFor;
+      /*
+       * The same handoff the admin path uses. `posting_status` alone was never
+       * enough: the publish queue selects on `instagram_status`, so a client
+       * approving their video used to schedule something the publisher could
+       * not see — the one moment in the whole flow where auto-posting is
+       * supposed to begin.
+       */
+      Object.assign(updates, publishHandoff({ ...d, scheduled_at: scheduledFor }));
     }
   }
 

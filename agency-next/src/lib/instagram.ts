@@ -89,6 +89,46 @@ export type PublishQueueItem = {
 const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 
 /** Hashtags are stored apart from the caption; Instagram wants one string. */
+/**
+ * The columns that actually hand a deliverable to the publisher.
+ *
+ * `instagram_status` is what the queue filters on, and it is the one field
+ * both scheduling paths forgot to set: the workflow status went to
+ * "scheduled", `posting_status` went to "scheduled", and `instagram_status`
+ * stayed at its default of `not_posted`, which the queue does not select. The
+ * result was a queue that was always empty and a video that sat marked
+ * scheduled for ever without posting.
+ *
+ * Expressed once, here, because the bug was two places disagreeing about what
+ * "scheduled" means. Anything that schedules a post merges this in.
+ *
+ * `posted` is never walked back — a published post cannot be unpublished by
+ * scheduling it again.
+ */
+export function publishHandoff(current: {
+  instagram_status?: string | null;
+  scheduled_at?: string | null;
+}): Record<string, string | null> {
+  if (current.instagram_status === "posted") return {};
+
+  const out: Record<string, string | null> = {
+    instagram_status: "scheduled",
+    posting_status: "scheduled",
+  };
+
+  /*
+   * A time is required — the queue only returns rows whose slot has arrived,
+   * so a null one is never due and never posts. Pressing Schedule without
+   * choosing a time means "as soon as you can", which is now; an existing
+   * time is always left alone.
+   */
+  if (!current.scheduled_at) {
+    out.scheduled_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+  }
+
+  return out;
+}
+
 export function composeCaption(caption: string | null, hashtags: string | null): string {
   const body = (caption || "").trim();
   const tags = (hashtags || "").trim();
