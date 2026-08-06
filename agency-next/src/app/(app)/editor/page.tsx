@@ -18,6 +18,7 @@ import {
   type EditorStage,
 } from "@/lib/editor-queue";
 import { videoAiReady } from "@/lib/video-ai";
+import { CaptionCatchUp } from "./catch-up";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
@@ -79,6 +80,8 @@ export default async function EditorPage({
 
   return (
     <div className="space-y-5">
+      {/* Renders nothing; finishes any caption left mid-flight. */}
+      {aiReady ? <CaptionCatchUp /> : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">

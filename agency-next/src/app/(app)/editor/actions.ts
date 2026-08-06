@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { queryOne } from "@/lib/db";
-import { queueAnalysis, runAnalysis, applyCaption, getAnalysis } from "@/lib/video-ai";
+import {
+  queueAnalysis,
+  runAnalysis,
+  applyCaption,
+  getAnalysis,
+  getPendingAnalyses,
+} from "@/lib/video-ai";
 
 export type AnalyseState = {
   ok: boolean;
@@ -135,6 +141,42 @@ export async function finishAnalysisAfterUpload(
             ? "The AI is watching the video…"
             : "Writing the caption…",
   };
+}
+
+/**
+ * Nudge along any analysis left half-finished.
+ *
+ * The scheduled catch-up runs once a day, which is what the hosting plan
+ * allows, and a caption nobody notices for a day may as well not have been
+ * written. So the Editing queue does the same work while someone is looking at
+ * it — which is both the page where a stalled job would be noticed and the
+ * page whose whole purpose is videos waiting on something.
+ *
+ * One step per job, three jobs at most: this runs on every visit to the queue,
+ * and it must never be the reason that page feels slow.
+ */
+export async function advanceStalledAnalyses(): Promise<{ advanced: number }> {
+  const user = await requireUser(STAFF_ROLES);
+  void user;
+
+  try {
+    const jobs = await getPendingAnalyses(3);
+    let advanced = 0;
+    for (const job of jobs) {
+      const before = job.state;
+      const r = await runAnalysis(job.deliverable_id);
+      if (r.state !== before) advanced++;
+    }
+    if (advanced) {
+      revalidatePath("/editor");
+      revalidatePath("/deliverables");
+    }
+    return { advanced };
+  } catch {
+    // A catch-up that fails is a caption that arrives later, not an error the
+    // person reading the queue can do anything about.
+    return { advanced: 0 };
+  }
 }
 
 /** Copy the AI draft onto the task, replacing whatever caption is there. */
