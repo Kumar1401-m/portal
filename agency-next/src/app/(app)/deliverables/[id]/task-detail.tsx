@@ -12,6 +12,7 @@ import { serviceOf } from "@/lib/services";
 import { label, fmtDate } from "@/lib/utils";
 import { CaptionStudio } from "./caption-studio";
 import { WorkflowControls } from "./workflow-controls";
+import { VideoUpload } from "../video-upload";
 import { PublishStatus } from "./publish-status";
 import { getPublishInfo } from "@/lib/instagram";
 import { SendApproval } from "./send-approval";
@@ -68,6 +69,8 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
   const editingOnly = user.role === "video_editor";
+  // A crm manages the relationship, not the footage — same rule as the tasks list.
+  const canUploadVideo = user.role !== "crm";
   const isPoster = service === "poster_designing";
 
   return (
@@ -110,6 +113,24 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             canSendToClient={canSendToClient}
             editingOnly={editingOnly}
           />
+
+          {/*
+            The uploader belongs here, not only in the popup on the tasks list.
+            That popup lives on /deliverables, which a video editor cannot open
+            — so without this the one person whose whole job is uploading cuts
+            had nowhere to do it. It also sits directly above the AI panel,
+            which does nothing until a video exists.
+          */}
+          {canUploadVideo && !isPoster ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Finished video</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <VideoUpload deliverableId={d.id} currentUrl={d.cloud_video_url} />
+              </CardContent>
+            </Card>
+          ) : null}
 
           {aiOn && !isPoster ? (
             <AiCaption
