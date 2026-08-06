@@ -39,8 +39,16 @@ export const env = {
 
   jwt: {
     secret: process.env.JWT_SECRET || "dev_access_secret_change_me",
-    // Single long-lived httpOnly session cookie for this internal ERP.
-    expiresDays: toInt(process.env.JWT_EXPIRES_DAYS, 7),
+    /**
+     * How long a sign-in lasts, in minutes. Counted from sign-in, not from
+     * last activity: an hour after signing in the session is over, whatever
+     * the person is in the middle of.
+     *
+     * Supersedes JWT_EXPIRES_DAYS, which is no longer read — a value in days
+     * cannot express an hour, and leaving both live would mean two settings
+     * quietly disagreeing about the same thing.
+     */
+    expiresMinutes: toInt(process.env.SESSION_MINUTES, 60),
   },
 
   bcryptRounds: toInt(process.env.BCRYPT_ROUNDS, 12),

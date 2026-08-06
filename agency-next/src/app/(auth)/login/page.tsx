@@ -1,13 +1,19 @@
 import { redirect } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Clock } from "lucide-react";
 import { getSession, homeForRole } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Sign in · NVK Hub" };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ expired?: string }>;
+}) {
   const user = await getSession();
   if (user) redirect(homeForRole(user.role));
+
+  const expired = (await searchParams).expired === "1";
 
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
@@ -47,6 +53,19 @@ export default async function LoginPage() {
           <p className="mt-1 mb-6 text-sm text-muted-foreground">
             Sign in to your account to continue.
           </p>
+
+          {/* Says why, rather than leaving someone to wonder whether they
+              were signed out or something broke. */}
+          {expired ? (
+            <div className="mb-6 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <span>
+                Your session ended after an hour. Sign in again to carry on —
+                nothing you saved has been lost.
+              </span>
+            </div>
+          ) : null}
+
           <LoginForm />
         </div>
       </div>

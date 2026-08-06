@@ -45,9 +45,20 @@ type UserRow = {
 /** Sign a session JWT for a user id. */
 export function signToken(userId: number, role: Role): string {
   return jwt.sign({ sub: String(userId), role }, env.jwt.secret, {
-    expiresIn: `${env.jwt.expiresDays}d`,
+    expiresIn: `${env.jwt.expiresMinutes}m`,
   });
 }
+
+/**
+ * How much longer the cookie survives than the token inside it.
+ *
+ * The token is the thing that actually expires — an expired one is refused
+ * whatever the cookie says. Letting the cookie linger a few minutes past it
+ * means the server still receives something on the next request and can say
+ * "your session expired" rather than presenting a bare login page to someone
+ * who was working thirty seconds ago.
+ */
+const COOKIE_GRACE_MINUTES = 5;
 
 /** Set the httpOnly session cookie. */
 export async function setSessionCookie(token: string): Promise<void> {
@@ -57,7 +68,7 @@ export async function setSessionCookie(token: string): Promise<void> {
     sameSite: "lax",
     secure: env.isProd,
     path: "/",
-    maxAge: env.jwt.expiresDays * 24 * 60 * 60,
+    maxAge: (env.jwt.expiresMinutes + COOKIE_GRACE_MINUTES) * 60,
   });
 }
 
@@ -78,7 +89,29 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 
   let sub: string;
   try {
-    const payload = jwt.verify(token, env.jwt.secret) as { sub: string };
+    const payload = jwt.verify(token, env.jwt.secret) as {
+      sub: string;
+      iat?: number;
+      exp?: number;
+    };
+
+    /*
+     * Refuse a token that was granted a longer life than we now allow.
+     *
+     * Shortening the session only affects tokens signed afterwards, so without
+     * this everyone already signed in would keep the session they were given —
+     * up to a week — and the new rule would apply to nobody who was actually
+     * using the portal when it changed. Comparing the token's own lifespan to
+     * the current setting expires those immediately, and keeps doing so
+     * automatically if the setting is ever shortened again.
+     */
+    if (payload.iat && payload.exp) {
+      const grantedSeconds = payload.exp - payload.iat;
+      // A minute of slack so a token signed exactly at the limit isn't
+      // rejected by rounding.
+      if (grantedSeconds > env.jwt.expiresMinutes * 60 + 60) return null;
+    }
+
     sub = payload.sub;
   } catch {
     return null;
@@ -124,7 +157,13 @@ export function homeForRole(role: Role): string {
  */
 export async function requireUser(roles?: Role[]): Promise<SessionUser> {
   const user = await getSession();
-  if (!user) redirect("/login");
+  if (!user) {
+    // A cookie that's still here but no longer resolves to a user is a session
+    // that ran out, which is worth saying. Landing on a blank login screen
+    // mid-task otherwise reads as the portal having lost your work.
+    const jar = await cookies();
+    redirect(jar.get(COOKIE_NAME) ? "/login?expired=1" : "/login");
+  }
   if (roles && !roles.includes(user.role)) redirect(homeForRole(user.role));
   return user;
 }
