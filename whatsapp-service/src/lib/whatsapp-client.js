@@ -454,67 +454,123 @@ class WhatsAppService extends EventEmitter {
   /**
    * The groups this account is in — for mapping clients in the portal UI.
    *
-   * `getChats()` runs library code inside the WhatsApp Web page, so when the
-   * page updates ahead of whatsapp-web.js it throws from minified code with a
-   * useless message (a single letter, typically). That is a library/web
-   * version mismatch, not a fault in the session — which stays perfectly
-   * usable for sending and receiving.
+   * Every route to the chat list goes through code whatsapp-web.js injects
+   * into the WhatsApp Web page, and that page ships far more often than the
+   * library does. When they disagree the injected code throws from minified
+   * source with a one-letter message, or the global it wanted is simply gone.
+   * Observed on 1.34.7 against the current web build: window.Store is
+   * undefined and WWebJS.getChats() throws 'r'.
    *
-   * So this degrades instead of failing: it tries the store directly, and
-   * whatever happens the caller gets an array plus a `warning` it can show.
-   * A broken group *picker* must not present as a broken *connection*.
+   * None of that touches the session, which sends and receives perfectly. So
+   * this reports the shortfall rather than failing:
+   *
+   *   groups  — whatever could be read, possibly empty
+   *   warning — non-null ONLY when the list could not be obtained
+   *
+   * The distinction is the point. An empty list with no warning means "you are
+   * in no groups"; an empty list with one means "ask WhatsApp another way".
+   * Returning the first when the second is true is what makes a working setup
+   * look broken.
    */
   async listGroups() {
     if (this.state !== STATE.CONNECTED) return { groups: [], warning: 'Not connected.' };
 
-    try {
-      const chats = await this.client.getChats();
-      const groups = chats
-        .filter((c) => c.isGroup)
+    const shape = (raw) =>
+      raw
         .map((c) => ({
-          groupId: c.id?._serialized ?? null,
-          name: c.name ?? null,
-          participants: c.participants?.length ?? null,
-          unread: c.unreadCount ?? 0,
+          groupId: c.groupId || null,
+          name: c.name || null,
+          participants: c.participants ?? null,
+          unread: c.unread ?? 0,
         }))
         .filter((g) => g.groupId);
-      return { groups, warning: null };
+
+    // 1. The library's own method. Correct when versions agree.
+    try {
+      const chats = await this.client.getChats();
+      return {
+        groups: shape(
+          chats
+            .filter((c) => c.isGroup)
+            .map((c) => ({
+              groupId: c.id?._serialized ?? null,
+              name: c.name ?? null,
+              participants: c.participants?.length ?? null,
+              unread: c.unreadCount ?? 0,
+            }))
+        ),
+        warning: null,
+      };
     } catch (err) {
-      log.warn('getChats failed — falling back to reading the store directly', {
+      log.warn('getChats failed, trying the page directly', {
         error: err?.message || String(err),
-        name: err?.name,
       });
     }
 
-    // Fallback: read WhatsApp's own in-page store without going through the
-    // library's chat model, which is the part that breaks on a version skew.
+    /*
+     * 2. The page, without the library's model layer.
+     *
+     * Returns null — not [] — when neither global is usable, so "could not
+     * read" survives the trip back instead of arriving as "nothing found".
+     */
     try {
-      const groups = await this.client.pupPage.evaluate(() => {
-        // eslint-disable-next-line no-undef
+      const raw = await this.client.pupPage.evaluate(async () => {
+        const out = [];
+        if (window.WWebJS && typeof window.WWebJS.getChats === 'function') {
+          try {
+            const chats = await window.WWebJS.getChats();
+            for (const c of chats) {
+              if (!c.isGroup) continue;
+              out.push({
+                groupId: (c.id && (c.id._serialized || c.id)) || null,
+                name: c.name || c.formattedTitle || null,
+                participants: (c.groupMetadata && c.groupMetadata.participants
+                  ? c.groupMetadata.participants.length
+                  : null),
+                unread: c.unreadCount || 0,
+              });
+            }
+            return out;
+          } catch {
+            // Falls through to the store attempt below.
+          }
+        }
         const store = window.Store;
-        if (!store?.Chat?.getModelsArray) return [];
-        return store.Chat.getModelsArray()
-          .filter((c) => c.id?.server === 'g.us')
-          .map((c) => ({
-            groupId: c.id?._serialized || null,
+        if (!store || !store.Chat || !store.Chat.getModelsArray) return null;
+        for (const c of store.Chat.getModelsArray()) {
+          if (!c.id || c.id.server !== 'g.us') continue;
+          out.push({
+            groupId: c.id._serialized || null,
             name: c.name || c.formattedTitle || null,
-            participants: c.groupMetadata?.participants?.length ?? null,
-            unread: c.unreadCount ?? 0,
-          }))
-          .filter((g) => g.groupId);
+            participants: (c.groupMetadata && c.groupMetadata.participants
+              ? c.groupMetadata.participants.length
+              : null),
+            unread: c.unreadCount || 0,
+          });
+        }
+        return out;
       });
-      log.info('read groups from the store directly', { count: groups.length });
-      return { groups, warning: null };
+
+      if (Array.isArray(raw)) {
+        log.info('listed groups from the page', { count: raw.length });
+        return { groups: shape(raw), warning: null };
+      }
+      log.warn('no usable way to read the chat list in this WhatsApp Web build');
     } catch (err) {
-      const message = err?.message || String(err);
-      log.error('could not list groups by any method', { error: message });
-      return {
-        groups: [],
-        warning:
-          'WhatsApp is connected, but this version of WhatsApp Web will not list groups. ' +
-          'Send any message in the group instead — it will appear as a discovered group.',
-      };
+      log.warn('reading the chat list from the page failed', {
+        error: err?.message || String(err),
+      });
     }
+
+    // 3. Nothing worked. Say so, and say what does work instead.
+    return {
+      groups: [],
+      warning:
+        "This version of WhatsApp Web won't list groups to the automation — " +
+        'a known mismatch with whatsapp-web.js that does not affect sending or ' +
+        'receiving. Send any message in the group and it will appear below ' +
+        'under groups we have heard from, ready to link.',
+    };
   }
 }
 
