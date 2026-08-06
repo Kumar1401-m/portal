@@ -61,6 +61,15 @@ export function EditVideoModal({
   const [service, setService] = useState<ServiceKey>(serviceOf(d));
   const isPoster = service === "poster_designing";
   const [genPending, startGen] = useTransition();
+  /*
+   * The caption the uploader is writing by itself.
+   *
+   * Shown on the same button as a manual generation because to the reader it
+   * is the same thing happening — a caption is being written. Two separate
+   * indicators for one activity would only invite pressing the button that
+   * looks idle.
+   */
+  const [autoCaptioning, setAutoCaptioning] = useState(false);
   const [delPending, startDel] = useTransition();
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -217,11 +226,19 @@ export function EditVideoModal({
                 <button
                   type="button"
                   onClick={generate}
-                  disabled={genPending}
+                  disabled={genPending || autoCaptioning}
                   className={buttonClasses({ variant: "secondary", size: "sm" })}
                 >
-                  {genPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                  {genPending ? "Generating…" : "Generate with AI"}
+                  {genPending || autoCaptioning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-4 w-4" />
+                  )}
+                  {autoCaptioning
+                    ? "Watching the video…"
+                    : genPending
+                      ? "Generating…"
+                      : "Generate with AI"}
                 </button>
               </div>
               <Textarea
@@ -276,6 +293,7 @@ export function EditVideoModal({
                 // Only fires when the task had no caption, so this can't
                 // discard something typed into the box a moment ago.
                 onCaption={setCaption}
+                onCaptioningChange={setAutoCaptioning}
               />
             </div>
             ) : null}

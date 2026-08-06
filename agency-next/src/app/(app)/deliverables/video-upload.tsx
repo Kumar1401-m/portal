@@ -36,12 +36,22 @@ export function VideoUpload({
   currentUrl,
   onUploaded,
   onCaption,
+  onCaptioningChange,
 }: {
   deliverableId: number;
   currentUrl?: string | null;
   onUploaded?: (url: string) => void;
   /** Fires when the AI has written a caption for the video just uploaded. */
   onCaption?: (caption: string) => void;
+  /**
+   * True while the AI is watching the freshly uploaded video.
+   *
+   * Surfaced so the Generate button next to this can show it is already
+   * working. Without it the caption arrives on its own a minute later and
+   * anyone watching the button assumes nothing is happening and presses it,
+   * paying for a second generation of the same video.
+   */
+  onCaptioningChange?: (busy: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -68,36 +78,49 @@ export function VideoUpload({
    */
   async function writeCaption() {
     setPhase("captioning");
+    onCaptioningChange?.(true);
     setCaptionNote("The AI is watching the video…");
 
-    for (let i = 0; i < CAPTION_POLLS; i++) {
-      let res;
-      try {
-        res = await finishAnalysisAfterUpload(deliverableId);
-      } catch {
-        setCaptionNote(null);
-        return;
+    /*
+     * try/finally rather than clearing the flag at each exit.
+     *
+     * This loop leaves in six places — done, failed, no more work, a thrown
+     * action, the poll ceiling. Anything left spinning forever would be worse
+     * than no indicator at all, because a permanently disabled Generate button
+     * looks like a broken page.
+     */
+    try {
+      for (let i = 0; i < CAPTION_POLLS; i++) {
+        let res;
+        try {
+          res = await finishAnalysisAfterUpload(deliverableId);
+        } catch {
+          setCaptionNote(null);
+          return;
+        }
+
+        if (!res.ok) {
+          // Worth showing: "the file is too big" is something to act on, and
+          // silence here reads as the feature simply not working.
+          setCaptionNote(res.error ?? null);
+          return;
+        }
+
+        if (res.state === "done") {
+          if (res.caption && res.applied) onCaption?.(res.caption);
+          setCaptionNote(res.message ?? "Caption written from the video.");
+          return;
+        }
+
+        setCaptionNote(res.message ?? "Writing the caption…");
+        if (!res.more) return;
+        await new Promise((r) => setTimeout(r, 2500));
       }
 
-      if (!res.ok) {
-        // Worth showing: "the file is too big" is something to act on, and
-        // silence here reads as the feature simply not working.
-        setCaptionNote(res.error ?? null);
-        return;
-      }
-
-      if (res.state === "done") {
-        if (res.caption && res.applied) onCaption?.(res.caption);
-        setCaptionNote(res.message ?? "Caption written from the video.");
-        return;
-      }
-
-      setCaptionNote(res.message ?? "Writing the caption…");
-      if (!res.more) return;
-      await new Promise((r) => setTimeout(r, 2500));
+      setCaptionNote("Still working — open the task to see the caption.");
+    } finally {
+      onCaptioningChange?.(false);
     }
-
-    setCaptionNote("Still working — open the task to see the caption.");
   }
 
   async function handleFile(file: File) {
