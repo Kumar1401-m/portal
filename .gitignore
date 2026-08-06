@@ -13,3 +13,6 @@ tmp/
 # Local throwaway verification scripts
 zz-*
 .tmp-*
+
+# Automation host secrets — never commit
+deploy/.env

@@ -15,7 +15,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Instagram Auto-Publisher\n\n**What it does**\nEvery 5 minutes: ask the portal what is due, claim it, push it to Instagram, report back, tell the client.\n\n**Why the portal decides, not this workflow**\nn8n can run two executions at once. If this workflow decided what was due, both would pick the same reel and post it twice. `/publish/claim` settles that in the database — exactly one execution wins.\n\n**Required environment variables**\n- `PORTAL_URL` — https://your-portal.vercel.app\n- `PORTAL_API_KEY` — matches N8N_API_KEY in the portal\n- `META_ACCESS_TOKEN` — long-lived page token\n- `META_API_VERSION` — e.g. v21.0\n- `WHATSAPP_PHONE_NUMBER_ID`\n- `WHATSAPP_ACCESS_TOKEN`\n\nSet `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` so `$env` resolves.",
+        "content": "## Instagram Auto-Publisher\n\n**What it does**\nEvery 5 minutes: ask the portal what is due, claim it, push it to Instagram, report back, tell the client.\n\n**Why the portal decides, not this workflow**\nn8n can run two executions at once. If this workflow decided what was due, both would pick the same reel and post it twice. `/publish/claim` settles that in the database — exactly one execution wins.\n\n**The client's message goes through our own WhatsApp service**\nNot Meta's Cloud API: that bills per business-initiated conversation and needs an approved template. whatsapp-service drives the agency's own account and costs nothing. The claim hands over `wa_chat_id` ready to use — the client's approval group when they have one, their number otherwise.\n\n**Required environment variables**\n- `PORTAL_URL` — https://nvkhub.vercel.app\n- `PORTAL_API_KEY` — matches N8N_API_KEY in the portal\n- `META_ACCESS_TOKEN` — long-lived page token, with instagram_content_publish\n- `META_API_VERSION` — e.g. v21.0\n- `WHATSAPP_SERVICE_URL` — http://whatsapp-service:4000 when both run in the same compose\n- `WHATSAPP_SERVICE_TOKEN` — matches SERVICE_API_KEY in whatsapp-service\n\nSet `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` so `$env` resolves.",
         "height": 560,
         "width": 460,
         "color": 4
@@ -24,7 +24,10 @@
       "name": "README",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [-1180, 120]
+      "position": [
+        -1180,
+        120
+      ]
     },
     {
       "parameters": {
@@ -37,7 +40,10 @@
       "name": "Section: find work",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [-660, 120]
+      "position": [
+        -660,
+        120
+      ]
     },
     {
       "parameters": {
@@ -50,7 +56,10 @@
       "name": "Section: claim",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [420, 120]
+      "position": [
+        420,
+        120
+      ]
     },
     {
       "parameters": {
@@ -63,7 +72,10 @@
       "name": "Section: publish",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [900, 100]
+      "position": [
+        900,
+        100
+      ]
     },
     {
       "parameters": {
@@ -76,7 +88,10 @@
       "name": "Section: report",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [1840, 60]
+      "position": [
+        1840,
+        60
+      ]
     },
     {
       "parameters": {
@@ -89,20 +104,30 @@
       "name": "Section: failure",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [900, 600]
+      "position": [
+        900,
+        600
+      ]
     },
-
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
         }
       },
       "id": "trigger-schedule",
       "name": "Every 5 minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-600, 300],
+      "position": [
+        -600,
+        300
+      ],
       "notes": "Polling beats a webhook here: a post is due at a wall-clock time, and a webhook fired at approval time would need its own scheduler anyway. 5 minutes is the worst-case lateness a post can suffer."
     },
     {
@@ -111,17 +136,33 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" },
-            { "name": "Accept", "value": "application/json" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
           ]
         },
-        "options": { "timeout": 30000, "response": { "response": { "neverError": false } } }
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
       },
       "id": "http-queue",
       "name": "Fetch publish queue",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-380, 300],
+      "position": [
+        -380,
+        300
+      ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -135,19 +176,30 @@
       "name": "Split queue into items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-160, 300],
+      "position": [
+        -160,
+        300
+      ],
       "notes": "Fans the items[] array out into n8n items and stamps a shared run id so every log line from this execution can be correlated."
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "has-items",
               "leftValue": "={{ $items().length }}",
               "rightValue": 0,
-              "operator": { "type": "number", "operation": "gt" }
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
             }
           ],
           "combinator": "and"
@@ -158,7 +210,10 @@
       "name": "Anything due?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [60, 300],
+      "position": [
+        60,
+        300
+      ],
       "notes": "Nothing due is the normal case — most of the 288 runs a day end here. The false branch stops quietly rather than logging noise."
     },
     {
@@ -167,56 +222,85 @@
       "name": "Nothing to post",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [280, 460],
+      "position": [
+        280,
+        460
+      ],
       "notes": "Deliberate dead end. An empty queue is success, not an error."
     },
     {
       "parameters": {
         "batchSize": 1,
-        "options": { "reset": false }
+        "options": {
+          "reset": false
+        }
       },
       "id": "loop-items",
       "name": "Post one at a time",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [280, 280],
+      "position": [
+        280,
+        280
+      ],
       "notes": "One post per iteration, on purpose. Publishing is stateful (claim → container → poll → publish) and each post waits on Meta's encoder; running them in parallel would interleave the waits and make a failure impossible to attribute. Output 0 = done, output 1 = next item."
     },
-
     {
       "parameters": {
         "method": "POST",
         "url": "={{ $env.PORTAL_URL }}/api/automation/publish/claim",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ deliverable_id: $json.deliverable_id, run_id: $json.run_id }) }}",
         "options": {
           "timeout": 30000,
-          "response": { "response": { "neverError": true, "fullResponse": false } }
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
         }
       },
       "id": "http-claim",
       "name": "Claim the deliverable",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [500, 280],
+      "position": [
+        500,
+        280
+      ],
       "onError": "continueRegularOutput",
       "notes": "The concurrency guard. Answers 409/410 when another run holds the item or it is already live — neverError:true keeps those as data so the IF below can skip cleanly instead of failing the whole batch. Moves the row to 'processing' and spends one attempt from its retry budget."
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "claim-ok",
               "leftValue": "={{ $json.ok }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -227,7 +311,10 @@
       "name": "Claim won?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [720, 280],
+      "position": [
+        720,
+        280
+      ],
       "notes": "Lost the race, already posted, or out of retries — all three mean 'not ours to publish'. Skip to the next item without touching the Graph API."
     },
     {
@@ -236,10 +323,12 @@
       "name": "Skip (claimed elsewhere)",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [720, 460],
+      "position": [
+        720,
+        460
+      ],
       "notes": "Not a failure. Loops straight back for the next item."
     },
-
     {
       "parameters": {
         "jsCode": "// Build the container request. Reels and stills take different fields, and\n// Meta rejects a container whose media_type doesn't match the file it is\n// given — so the shape is decided here, once, from what the portal said the\n// asset actually is.\n//\n// The token is picked here too: a client whose Instagram account sits outside\n// the agency's Business Manager carries its own page token, everyone else\n// uses the agency-wide one from n8n's environment.\nconst item = $('Claim the deliverable').item.json.item;\nconst apiVersion = $env.META_API_VERSION || 'v21.0';\nconst token = item.ig_access_token || $env.META_ACCESS_TOKEN;\n\nif (!token) {\n  throw new Error('No Meta access token: set META_ACCESS_TOKEN, or give the client its own ig_access_token.');\n}\nif (!item.video_url) {\n  throw new Error('The deliverable has no fetchable media URL — check Cloudflare R2 is configured.');\n}\n\n// Instagram fetches the file from this URL itself, so it has to be publicly\n// reachable for the life of the request. A signed R2 link is fine; a Google\n// Drive share link is not — it serves an HTML page, not video bytes.\nconst body = item.media_type === 'IMAGE'\n  ? { image_url: item.video_url, caption: item.caption }\n  : { media_type: 'REELS', video_url: item.video_url, caption: item.caption, share_to_feed: true };\n\nreturn [{\n  json: {\n    ...item,\n    run_id: $('Split queue into items').first().json.run_id,\n    api_version: apiVersion,\n    access_token: token,\n    container_url: `https://graph.facebook.com/${apiVersion}/${item.ig_user_id}/media`,\n    container_body: { ...body, access_token: token },\n    poll_count: 0,\n    publish_started_at: Date.now(),\n  },\n}];"
@@ -248,7 +337,10 @@
       "name": "Build Graph API request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 280],
+      "position": [
+        960,
+        280
+      ],
       "notes": "Chooses REELS vs IMAGE, picks the per-client token over the agency one, and fails fast with a readable message when either the token or the media URL is missing."
     },
     {
@@ -260,14 +352,21 @@
         "jsonBody": "={{ JSON.stringify($json.container_body) }}",
         "options": {
           "timeout": 60000,
-          "response": { "response": { "neverError": true } }
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         }
       },
       "id": "http-container",
       "name": "Create media container",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1180, 280],
+      "position": [
+        1180,
+        280
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 3,
@@ -277,13 +376,22 @@
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "has-container",
               "leftValue": "={{ $json.id }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "exists", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -294,7 +402,10 @@
       "name": "Container created?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1400, 280],
+      "position": [
+        1400,
+        280
+      ],
       "notes": "A Graph error body has no `id`. Most failures land here: expired token, unreachable media URL, account not eligible."
     },
     {
@@ -303,18 +414,33 @@
         "url": "={{ $env.PORTAL_URL }}/api/automation/publish/log",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ deliverable_id: $('Build Graph API request').item.json.deliverable_id, stage: 'container_created', status: 'processing', container_id: $json.id, run_id: $('Build Graph API request').item.json.run_id }) }}",
-        "options": { "timeout": 15000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-log-container",
       "name": "Log container created",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1620, 260],
+      "position": [
+        1620,
+        260
+      ],
       "onError": "continueRegularOutput",
       "notes": "Breadcrumb only. neverError + continue: a logging failure must never take down a publish that is otherwise going fine."
     },
@@ -327,20 +453,33 @@
       "name": "Wait for encoding",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [1180, 440],
+      "position": [
+        1180,
+        440
+      ],
       "webhookId": "ig-publisher-encode-wait",
       "notes": "Meta downloads and transcodes the video before the container is publishable. Polling instantly always returns IN_PROGRESS, so wait first, then check — 30s covers most reels on the first pass."
     },
     {
       "parameters": {
         "url": "=https://graph.facebook.com/{{ $('Build Graph API request').item.json.api_version }}/{{ $('Create media container').item.json.id }}?fields=status_code,status&access_token={{ $('Build Graph API request').item.json.access_token }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-status",
       "name": "Check container status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1400, 440],
+      "position": [
+        1400,
+        440
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 2,
@@ -355,19 +494,30 @@
       "name": "Interpret status",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1620, 440],
+      "position": [
+        1620,
+        440
+      ],
       "notes": "Turns the container status into ready / waiting / failed / timeout, and carries the poll counter that stops the wait loop running for ever."
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "is-ready",
               "leftValue": "={{ $json.outcome }}",
               "rightValue": "ready",
-              "operator": { "type": "string", "operation": "equals" }
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -378,19 +528,30 @@
       "name": "Encoding finished?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1840, 440],
+      "position": [
+        1840,
+        440
+      ],
       "notes": "True → publish. False → still waiting, or out of patience (sorted by the next node)."
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "still-waiting",
               "leftValue": "={{ $json.outcome }}",
               "rightValue": "waiting",
-              "operator": { "type": "string", "operation": "equals" }
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -401,10 +562,12 @@
       "name": "Still encoding?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1840, 620],
+      "position": [
+        1840,
+        620
+      ],
       "notes": "True → back to Wait for another 30 seconds. False → the container errored or timed out; report the failure."
     },
-
     {
       "parameters": {
         "method": "POST",
@@ -412,13 +575,23 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ creation_id: $json.container_id, access_token: $json.access_token }) }}",
-        "options": { "timeout": 60000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-publish",
       "name": "Publish to Instagram",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2060, 300],
+      "position": [
+        2060,
+        300
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 2,
@@ -428,13 +601,22 @@
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "published",
               "leftValue": "={{ $json.id }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "exists", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -445,19 +627,32 @@
       "name": "Published?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2280, 300],
+      "position": [
+        2280,
+        300
+      ],
       "notes": "A published media id, or a Graph error body."
     },
     {
       "parameters": {
         "url": "=https://graph.facebook.com/{{ $('Interpret status').item.json.api_version }}/{{ $json.id }}?fields=permalink,timestamp,media_product_type&access_token={{ $('Interpret status').item.json.access_token }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-permalink",
       "name": "Fetch permalink",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2500, 220],
+      "position": [
+        2500,
+        220
+      ],
       "onError": "continueRegularOutput",
       "notes": "The publish response only returns an id. The permalink is what the client actually wants in their WhatsApp message, so it costs one extra call. Optional: if this fails the post is still live and the id alone is reported."
     },
@@ -467,18 +662,28 @@
         "url": "={{ $env.PORTAL_URL }}/api/automation/publish/result",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ deliverable_id: $('Interpret status').item.json.deliverable_id, status: 'posted', media_id: $('Publish to Instagram').item.json.id, permalink: $json.permalink || null, posted_at: $json.timestamp || new Date().toISOString(), run_id: $('Interpret status').item.json.run_id, duration_ms: Date.now() - $('Interpret status').item.json.publish_started_at }) }}",
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "http-result-ok",
       "name": "Report success",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2720, 220],
+      "position": [
+        2720,
+        220
+      ],
       "retryOnFail": true,
       "maxTries": 5,
       "waitBetweenTries": 10000,
@@ -490,44 +695,75 @@
         "url": "={{ $env.PORTAL_URL }}/api/automation/notify",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ deliverable_id: $('Interpret status').item.json.deliverable_id, channels: ['email'] }) }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-notify-email",
       "name": "Email the client",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2940, 140],
+      "position": [
+        2940,
+        140
+      ],
       "onError": "continueRegularOutput",
       "notes": "The portal sends this, not n8n — it owns the branded template, the SMTP config and the client's address. Passing only the deliverable id means the workflow can't misaddress a client's mail."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/{{ $env.META_API_VERSION || 'v21.0' }}/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "url": "={{ $env.WHATSAPP_SERVICE_URL }}/api/send-text",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.WHATSAPP_ACCESS_TOKEN }}" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.WHATSAPP_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String($('Interpret status').item.json.client_whatsapp || '').replace(/\\D/g, '').replace(/^0+/, ''), type: 'text', text: { preview_url: true, body: `Hi ${$('Interpret status').item.json.contact_person || $('Interpret status').item.json.client_name},\\n\\nYour post \"${$('Interpret status').item.json.title}\" is now live on Instagram. 🎉` + ($('Fetch permalink').item.json.permalink ? `\\n\\n${$('Fetch permalink').item.json.permalink}` : '') } }) }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+        "jsonBody": "={{ JSON.stringify({ groupId: $('Interpret status').item.json.wa_chat_id, text: `Hi ${$('Interpret status').item.json.contact_person || $('Interpret status').item.json.client_name},\\n\\nYour post \"${$('Interpret status').item.json.title}\" is now live on Instagram. 🎉` + ($('Fetch permalink').item.json.permalink ? `\\n\\n${$('Fetch permalink').item.json.permalink}` : '') }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-notify-whatsapp",
       "name": "WhatsApp the client",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2940, 300],
+      "position": [
+        2940,
+        300
+      ],
       "onError": "continueRegularOutput",
-      "notes": "WhatsApp Cloud API. NOTE: free-form text only reaches a user within 24h of their last message to the business — outside that window Meta requires an approved template. For reliable delivery, register a template and switch type to 'template' (see n8n/README.md). Number is normalised to digits-only here because Meta rejects '+91 98765 43210'."
+      "notes": "Sends the 'your post is live' message through the agency's own WhatsApp service (whatsapp-web.js), not Meta's Cloud API: no per-message billing and no template approval. wa_chat_id comes from the claim and is already a usable chat id — the client's approval group when they have one, their number otherwise. Never errors the run: a post that went live is still a success even if the client wasn't told."
     },
     {
       "parameters": {},
@@ -535,10 +771,12 @@
       "name": "Next item",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [3180, 220],
+      "position": [
+        3180,
+        220
+      ],
       "notes": "Joins the branches back together and returns to the loop for the next post."
     },
-
     {
       "parameters": {
         "jsCode": "// Normalise every failure into one shape before reporting it.\n//\n// Failures arrive from four different places (container creation, encoding,\n// publishing, and this node's own callers) with four different bodies. The\n// portal wants one contract, and — importantly — Meta's numeric error code,\n// because that is what tells it whether retrying could ever help.\nconst sources = ['Build Graph API request', 'Interpret status'];\nlet context = {};\nfor (const name of sources) {\n  try {\n    context = { ...context, ...$(name).item.json };\n  } catch {\n    // The node didn't run on this path — expected, not an error.\n  }\n}\n\nconst body = $json || {};\nconst graphError = body.error || {};\n\n// A Graph error body looks like { error: { message, code, error_subcode } }.\nconst errorCode = graphError.code != null ? String(graphError.code) : null;\nconst message =\n  context.error_message ||\n  graphError.error_user_msg ||\n  graphError.message ||\n  body.message ||\n  'Instagram publishing failed for an unknown reason.';\n\nreturn [{\n  json: {\n    deliverable_id: context.deliverable_id,\n    run_id: context.run_id,\n    status: 'failed',\n    stage: context.container_id ? 'publish' : 'create_container',\n    error_code: errorCode,\n    error_message: message,\n    // The portal also knows Meta's permanent codes; this flag is for failures\n    // only the workflow can recognise, such as a missing media file.\n    permanent: /unsupported|invalid.*aspect|too long|not eligible/i.test(message),\n  },\n}];"
@@ -547,7 +785,10 @@
       "name": "Normalise the failure",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1180, 700],
+      "position": [
+        1180,
+        700
+      ],
       "notes": "Collapses four different failure shapes into one payload, pulling out Meta's numeric error code — the portal uses it to tell a retryable failure from a permanent one."
     },
     {
@@ -556,32 +797,49 @@
         "url": "={{ $env.PORTAL_URL }}/api/automation/publish/result",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-result-fail",
       "name": "Report failure",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1400, 700],
+      "position": [
+        1400,
+        700
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 10000,
       "notes": "Releases the claim and lets the portal decide: back to 'scheduled' for another attempt, or 'failed' with an admin notification. Reporting the failure matters as much as reporting success — without it the row stays claimed until its lease expires."
     },
-
     {
       "parameters": {},
       "id": "error-trigger",
       "name": "On workflow crash",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [-600, 800],
+      "position": [
+        -600,
+        800
+      ],
       "notes": "Catches anything the branches above missed — a Code node throwing, n8n running out of memory. Without this a crashed execution is silent and the deliverable sits claimed until its 20-minute lease expires."
     },
     {
@@ -590,134 +848,393 @@
         "url": "={{ $env.PORTAL_URL }}/api/automation/publish/log",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.PORTAL_API_KEY }}" }]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PORTAL_API_KEY }}"
+            }
+          ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ deliverable_id: $json.execution?.lastNodeExecuted ? 0 : 0, stage: 'workflow_error', status: 'failed', error_message: `${$json.workflow?.name || 'Publisher'} crashed at node \"${$json.execution?.lastNodeExecuted || 'unknown'}\": ${$json.execution?.error?.message || 'unknown error'}`, run_id: `n8n-${$json.execution?.id || 'unknown'}` }) }}",
-        "options": { "timeout": 15000, "response": { "response": { "neverError": true } } }
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "http-log-crash",
       "name": "Log the crash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-380, 800],
+      "position": [
+        -380,
+        800
+      ],
       "onError": "continueRegularOutput",
       "notes": "Best-effort record of a crashed execution. The lease on any claimed deliverable expires by itself after 20 minutes, so the queue recovers without intervention — this is the trail that explains why a post went out late."
     }
   ],
-
   "connections": {
     "Every 5 minutes": {
-      "main": [[{ "node": "Fetch publish queue", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Fetch publish queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Fetch publish queue": {
-      "main": [[{ "node": "Split queue into items", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Split queue into items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Split queue into items": {
-      "main": [[{ "node": "Anything due?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Anything due?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Anything due?": {
       "main": [
-        [{ "node": "Post one at a time", "type": "main", "index": 0 }],
-        [{ "node": "Nothing to post", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Post one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to post",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Post one at a time": {
       "main": [
         [],
-        [{ "node": "Claim the deliverable", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Claim the deliverable",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Claim the deliverable": {
-      "main": [[{ "node": "Claim won?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Claim won?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Claim won?": {
       "main": [
-        [{ "node": "Build Graph API request", "type": "main", "index": 0 }],
-        [{ "node": "Skip (claimed elsewhere)", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Build Graph API request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip (claimed elsewhere)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Skip (claimed elsewhere)": {
-      "main": [[{ "node": "Post one at a time", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Post one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Graph API request": {
-      "main": [[{ "node": "Create media container", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Create media container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create media container": {
-      "main": [[{ "node": "Container created?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Container created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Container created?": {
       "main": [
-        [{ "node": "Log container created", "type": "main", "index": 0 }],
-        [{ "node": "Normalise the failure", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Log container created",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalise the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Log container created": {
-      "main": [[{ "node": "Wait for encoding", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Wait for encoding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Wait for encoding": {
-      "main": [[{ "node": "Check container status", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check container status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check container status": {
-      "main": [[{ "node": "Interpret status", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Interpret status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Interpret status": {
-      "main": [[{ "node": "Encoding finished?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Encoding finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Encoding finished?": {
       "main": [
-        [{ "node": "Publish to Instagram", "type": "main", "index": 0 }],
-        [{ "node": "Still encoding?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Publish to Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still encoding?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Still encoding?": {
       "main": [
-        [{ "node": "Wait for encoding", "type": "main", "index": 0 }],
-        [{ "node": "Normalise the failure", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Wait for encoding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalise the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Publish to Instagram": {
-      "main": [[{ "node": "Published?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Published?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Published?": {
       "main": [
-        [{ "node": "Fetch permalink", "type": "main", "index": 0 }],
-        [{ "node": "Normalise the failure", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Fetch permalink",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalise the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch permalink": {
-      "main": [[{ "node": "Report success", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Report success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Report success": {
       "main": [
         [
-          { "node": "Email the client", "type": "main", "index": 0 },
-          { "node": "WhatsApp the client", "type": "main", "index": 0 }
+          {
+            "node": "Email the client",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp the client",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Email the client": {
-      "main": [[{ "node": "Next item", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Next item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "WhatsApp the client": {
-      "main": [[{ "node": "Next item", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Next item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Next item": {
-      "main": [[{ "node": "Post one at a time", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Post one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Normalise the failure": {
-      "main": [[{ "node": "Report failure", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Report failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Report failure": {
-      "main": [[{ "node": "Post one at a time", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Post one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "On workflow crash": {
-      "main": [[{ "node": "Log the crash", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Log the crash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "pinData": {},
   "active": false,
   "versionId": "1.0.0",
-  "tags": [{ "name": "instagram" }, { "name": "publishing" }]
+  "tags": [
+    {
+      "name": "instagram"
+    },
+    {
+      "name": "publishing"
+    }
+  ]
 }

@@ -65,6 +65,18 @@ export type PublishQueueItem = {
   attempt_no: number;
   client_email: string | null;
   client_whatsapp: string | null;
+  /**
+   * Where to send the "your post is live" message, as a WhatsApp chat id.
+   *
+   * The client's own group when they have one — that is where every other
+   * conversation about their videos already happens — otherwise their number
+   * as a direct chat. Sent ready to use so the automation never has to know
+   * that whatsapp-web.js wants `@g.us` for groups and `@c.us` for people.
+   *
+   * Null when there is no group and no usable number, which is the automation's
+   * cue to skip the message rather than guess at an address.
+   */
+  wa_chat_id: string | null;
   contact_person: string | null;
   campaign: string | null;
 };
@@ -124,6 +136,24 @@ export async function publishingReadiness(): Promise<{ ready: boolean; reason?: 
  * Read-only — nothing is reserved here. The workflow calls `claimForPublish`
  * per item, which is where the race is actually settled.
  */
+/**
+ * A WhatsApp chat id for the "your post is live" message.
+ *
+ * whatsapp-web.js addresses a group as `<id>@g.us` and a person as
+ * `<international digits>@c.us`. Resolved here rather than in the automation:
+ * the portal is what knows the client's group, and a formatting rule expressed
+ * in two places is a formatting rule that will disagree with itself.
+ */
+function waChatId(groupId: string | undefined, phone: string | null): string | null {
+  if (groupId) return groupId.includes("@") ? groupId : `${groupId}@g.us`;
+
+  const digits = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return null;
+  // A bare 10-digit number is Indian with the country code left implied.
+  const full = digits.length === 10 ? `91${digits}` : digits;
+  return full.length >= 11 && full.length <= 15 ? `${full}@c.us` : null;
+}
+
 export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
   const { ready } = await publishingReadiness();
   if (!ready) return [];
@@ -178,6 +208,25 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
     [MAX_POST_ATTEMPTS, CLAIM_LEASE_MINUTES]
   );
 
+  /*
+   * Each client's approval group, looked up once for the whole batch rather
+   * than once per row. The table arrived with the WhatsApp feature and may not
+   * exist on an older install, which is not an error — it just means nobody
+   * has a group and every message goes to a number instead.
+   */
+  const groups = new Map<number, string>();
+  const clientIds = [...new Set(rows.map((r) => r.client_id))];
+  if (clientIds.length && (await hasColumn("whatsapp_groups", "group_id"))) {
+    const found = await query<{ client_id: number; group_id: string }>(
+      `SELECT client_id, group_id FROM whatsapp_groups
+        WHERE is_active = 1 AND client_id IN (${clientIds.map(() => "?").join(",")})
+        ORDER BY is_default DESC, id ASC`,
+      clientIds
+    );
+    // First row per client wins — the ORDER BY puts the default one there.
+    for (const g of found) if (!groups.has(g.client_id)) groups.set(g.client_id, g.group_id);
+  }
+
   const items = await Promise.all(
     rows.map(async (r) => {
       // Prefer our own storage: Instagram must fetch real bytes, and a Drive
@@ -205,6 +254,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
         // WhatsApp falls back to the contact phone — most clients have one
         // number and never fill the dedicated field.
         client_whatsapp: r.whatsapp_number || r.phone,
+        wa_chat_id: waChatId(groups.get(r.client_id), r.whatsapp_number || r.phone),
         contact_person: r.contact_person,
         campaign: r.campaign,
       } satisfies PublishQueueItem;
@@ -280,6 +330,27 @@ export async function claimForPublish(
     );
     const r = (after as Record<string, string | number | null>[])[0];
 
+    /*
+     * The client's approval group, on the same connection as the claim.
+     *
+     * This is the copy the automation actually reads — the queue is only a
+     * shopping list, the claim is what gets published from — so the chat id
+     * has to be resolved here too or the "your post is live" message has
+     * nowhere to go.
+     */
+    let groupId: string | undefined;
+    try {
+      const [gRows] = await conn.execute(
+        `SELECT group_id FROM whatsapp_groups
+          WHERE client_id = ? AND is_active = 1
+          ORDER BY is_default DESC, id ASC LIMIT 1`,
+        [r.client_id]
+      );
+      groupId = (gRows as { group_id: string }[])[0]?.group_id;
+    } catch {
+      // Older install without the WhatsApp tables: fall through to the number.
+    }
+
     await conn.execute(
       `INSERT INTO publish_attempts
          (deliverable_id, client_id, attempt_no, stage, status, run_id)
@@ -316,6 +387,10 @@ export async function claimForPublish(
         attempt_no: Number(r.post_attempts),
         client_email: (r.email as string | null) ?? null,
         client_whatsapp: ((r.whatsapp_number as string | null) || (r.phone as string | null)) ?? null,
+        wa_chat_id: waChatId(
+          groupId,
+          ((r.whatsapp_number as string | null) || (r.phone as string | null)) ?? null
+        ),
         contact_person: (r.contact_person as string | null) ?? null,
         campaign: (r.campaign as string | null) ?? null,
       },

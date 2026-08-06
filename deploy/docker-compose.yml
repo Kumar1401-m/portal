@@ -1,0 +1,89 @@
+# Everything the portal cannot do on serverless, on one small always-on box.
+#
+#   cp .env.example .env      # fill it in first — nothing starts without it
+#   docker compose up -d
+#   docker compose logs -f whatsapp-service   # scan the QR on first run
+#
+# Two services, one job each:
+#   n8n               runs the publishing workflow on a schedule
+#   whatsapp-service  holds the logged-in WhatsApp session
+#
+# The portal itself is NOT here. It stays on Vercel; both of these call it
+# over HTTPS. What they provide is the one thing serverless cannot: a process
+# that is still running five minutes from now.
+
+name: nvkhub-automation
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Without this, $env is unreadable inside nodes and every credential in
+      # the workflow resolves to empty — the workflow is written to read them.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Both containers want a variable called PORTAL_API_KEY and they need
+      # DIFFERENT values — n8n authenticates as the automation, the WhatsApp
+      # service authenticates as itself, and the portal checks them against two
+      # separate secrets. Sharing one .env would silently give one of them the
+      # other's key, so each is mapped here from its own distinctly-named entry.
+      PORTAL_API_KEY: ${N8N_PORTAL_KEY}
+      # n8n refuses to start behind a proxy unless it knows its own address.
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: https://${N8N_HOST}/
+      GENERIC_TIMEZONE: ${TZ:-Asia/Kolkata}
+      TZ: ${TZ:-Asia/Kolkata}
+      # The editor is on the public internet. Basic auth is the minimum, and
+      # is not a substitute for the reverse proxy's TLS.
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD}
+      # Encrypts stored credentials. Change it after workflows exist and every
+      # saved credential becomes unreadable, so set it once and leave it.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      # Executions pile up forever otherwise and fill the disk on a small VM.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336" # hours — two weeks
+    ports:
+      # localhost only; the reverse proxy terminates TLS in front of it.
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    # So the workflow can reach the WhatsApp service by name rather than by IP.
+    depends_on:
+      - whatsapp-service
+
+  whatsapp-service:
+    build: ../whatsapp-service
+    container_name: whatsapp-approval-service
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # The other half of the pair described above: this is the key the portal
+      # knows as WHATSAPP_SERVICE_KEY, used when the service reports a client's
+      # APPROVE or CHANGE reply back to the portal.
+      PORTAL_API_KEY: ${WA_PORTAL_KEY}
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      # THE critical line. The logged-in WhatsApp session lives here; without
+      # it every restart silently logs the account out and needs a fresh QR
+      # scan, in person, on the phone that owns the number.
+      - wa-session:/app/.wwebjs_auth
+    # Chromium spawns a process tree and leaks zombies without an init.
+    init: true
+    # Chromium's default 64 MB /dev/shm is not enough for WhatsApp Web; it
+    # dies with an opaque "Target closed" once the page grows.
+    shm_size: "1gb"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+
+volumes:
+  n8n-data:
+  wa-session:
