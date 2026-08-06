@@ -103,7 +103,18 @@ export function GroupManager({
                   <tr key={g.group_id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 font-medium">{g.company_name}</td>
                     <td className="px-3 py-2">
-                      {g.group_name || <span className="text-muted-foreground">unnamed</span>}
+                      {g.group_name || (
+                        // Not "unnamed" — the group has a name, we just can't
+                        // read it on this WhatsApp Web version. Saying it has
+                        // none invites someone to go looking for the problem
+                        // in WhatsApp, where there isn't one.
+                        <span
+                          className="text-muted-foreground"
+                          title="WhatsApp doesn't expose group names to this version of the automation. The link works regardless — approvals are matched on the group id."
+                        >
+                          name not available
+                        </span>
+                      )}
                       <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">
                         {g.group_id}
                       </span>
@@ -146,13 +157,30 @@ export function GroupManager({
             <div className="space-y-2 rounded-md border border-dashed border-border p-4 text-sm">
               {listWarning ? (
                 <>
-                  <p className="flex items-start gap-2 text-warning">
-                    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{listWarning}</span>
-                  </p>
+                  {/*
+                    How loudly to say this depends on whether it is currently
+                    costing anything.
+
+                    With a group already linked, the message route plainly
+                    works and the reader has used it — so the limitation is a
+                    footnote and the instructions are the point. With nothing
+                    linked, an empty picker is inexplicable without it, and it
+                    goes first.
+                  */}
+                  {linked.length === 0 ? (
+                    <p className="flex items-start gap-2 text-warning">
+                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{listWarning}</span>
+                    </p>
+                  ) : null}
+
                   {/* The reliable path when WhatsApp won't enumerate: a message
                       that arrives carries its own group id. */}
-                  <p className="font-medium">To add a group:</p>
+                  <p className="font-medium">
+                    {linked.length
+                      ? "To add another group:"
+                      : "To add a group:"}
+                  </p>
                   <ol className="ml-4 list-decimal space-y-1 text-muted-foreground">
                     <li>Create the group in WhatsApp and add this number to it</li>
                     <li>
@@ -160,6 +188,14 @@ export function GroupManager({
                     </li>
                     <li>Reload this page; the group will appear in the list here</li>
                   </ol>
+
+                  {linked.length ? (
+                    <p className="text-xs text-muted-foreground">
+                      Groups appear here once they message us, rather than being
+                      listed by WhatsApp — this version of WhatsApp Web won&apos;t
+                      enumerate them. Sending and receiving are unaffected.
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <p className="text-muted-foreground">

@@ -123,12 +123,22 @@ export async function getGroupsForClient(clientId: number): Promise<WhatsAppGrou
   );
 }
 
-/** Every mapping, for the settings screen. */
+/**
+ * The live mappings, for the settings screen.
+ *
+ * Active only. Unlinking is a soft delete — `unlinkGroup` sets `is_active = 0`
+ * and keeps the row so the history of which client a group belonged to
+ * survives. Listing every row regardless meant an unlinked group stayed on
+ * screen looking linked, so the button appeared to do nothing; worse, the
+ * screen disagreed with `clientForGroup`, which has always required
+ * `is_active = 1` and is what actually decides whose approval counts.
+ */
 export async function getAllGroups(): Promise<WhatsAppGroup[]> {
   if (!(await approvalsReady())) return [];
   return query<WhatsAppGroup>(
     `SELECT g.*, c.company_name FROM whatsapp_groups g
        JOIN clients c ON c.id = g.client_id
+      WHERE g.is_active = 1
       ORDER BY c.company_name, g.is_default DESC`
   );
 }
