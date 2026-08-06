@@ -92,4 +92,20 @@ const reportSendStatus = (payload) => post('/api/whatsapp/send-status', payload)
 /** Session heartbeat, so the portal can render connection health. */
 const reportSession = (payload) => post('/api/whatsapp/session', payload);
 
-module.exports = { post, reportApproval, logMessage, reportSendStatus, reportSession };
+/**
+ * Ask the portal to turn a voice note into words.
+ *
+ * One attempt: a client is waiting on a reply in the group, and four retries
+ * over half a minute for something that already failed is worse than saying
+ * so quickly.
+ */
+const transcribeVoice = (payload) => post('/api/whatsapp/transcribe', payload, { attempts: 1 });
+
+module.exports = {
+  post,
+  reportApproval,
+  logMessage,
+  reportSendStatus,
+  reportSession,
+  transcribeVoice,
+};

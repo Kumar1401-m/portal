@@ -43,9 +43,20 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
   }
 
+  /*
+   * A missing code is normal now.
+   *
+   * The video message no longer shows one, so a client replying "ok" has
+   * nothing to quote. `recordApproval` works out which video they meant from
+   * the group, and refuses when it genuinely cannot tell. Requiring a code
+   * here would reject the reply everyone actually sends.
+   */
   const videoCode = str(body.videoId) || str(body.videoCode);
-  if (!videoCode) {
-    return Response.json({ ok: false, error: "videoId is required." }, { status: 400 });
+  if (!videoCode && !str(body.groupId)) {
+    return Response.json(
+      { ok: false, error: "Either videoId or groupId is required." },
+      { status: 400 }
+    );
   }
 
   const command = resolveCommand(body);

@@ -34,6 +34,19 @@ const CHANGE_RE = new RegExp(
   'i'
 );
 
+/**
+ * Plain agreement, and nothing else.
+ *
+ * Deliberately anchored to the whole message. "ok" on its own is an approval;
+ * "ok but change the music" is not, and must not be read as one — the check
+ * below runs after the change test for exactly that reason.
+ *
+ * Kept narrow: a thumbs-up or a tick is unambiguous, whereas "good" or "nice"
+ * is praise for the work and not permission to publish it.
+ */
+const PLAIN_OK_RE =
+  /^\s*(?:ok(?:ay)?|k|yes|yep|yup|sure|done|fine|approved?|👍|👌|✅|🆗|\u{1F44D}\u{1F3FB}?)[\s.!]*$/iu;
+
 const REJECT_RE = new RegExp(
   String.raw`^\s*(?:reject(?:ed)?|cancel(?:led)?|discard|drop)\b\s*(?:${CODE})?`,
   'i'
@@ -92,6 +105,12 @@ function parseCommand(rawText) {
       comment: text.slice(reject[0].length).trim() || null,
       needsContext: !code,
     };
+  }
+
+  // A bare "ok" with no code — the common case now that the message shows
+  // none. Which video it refers to is the portal's to decide, from the group.
+  if (!change && !reject && PLAIN_OK_RE.test(text)) {
+    return { command: 'approve', videoCode: null, comment: null, needsContext: true };
   }
 
   if (mentionsChange) {

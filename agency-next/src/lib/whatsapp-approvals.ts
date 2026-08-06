@@ -338,15 +338,29 @@ export function buildCaption(
   const caption = (postCaption || "").trim();
   const shown = caption.length > 700 ? `${caption.slice(0, 699)}…` : caption;
 
+  /*
+   * No video code on the message.
+   *
+   * It was there so a reply could be matched to a video, and clients did not
+   * use it — they answer the message in front of them, the way anyone answers
+   * a chat. Asking them to copy a reference first made the common case
+   * awkward and the reply fail when they didn't.
+   *
+   * What replaces it is the group: a reply is matched to whatever this group
+   * was last asked about, so "ok" is enough. `videoCode` is still accepted
+   * when typed, and is the tie-breaker on the rare occasion two videos are
+   * waiting in one group at once.
+   */
+  void videoCode;
+
   return (
     `📹 *Video Ready*\n\n` +
     (title ? `_${title}_\n\n` : "") +
-    `Video ID: *${videoCode}*\n\n` +
-    (shown ? `*Caption we'll post:*\n${shown}\n\n` : "") +
-    `Please review the video${shown ? " and caption" : ""} and reply:\n\n` +
-    `✅ *APPROVE ${videoCode}*\n` +
-    `📝 *CHANGE ${videoCode}* (then your notes)\n\n` +
-    `_You can also reply directly to this message._`
+    (shown ? `${shown}\n\n` : "") +
+    `Please review${shown ? " the video and caption" : ""} and reply:\n\n` +
+    `✅ *OK* to approve\n` +
+    `📝 *CHANGE* — then tell us what to adjust\n\n` +
+    `_A voice note works too._`
   );
 }
 
@@ -462,8 +476,54 @@ export async function recordSendStatus(input: {
 
 /* -------------------------------- Approvals -------------------------------- */
 
+/** Videos this group has been sent and hasn't answered yet, newest first. */
+export async function awaitingReplyInGroup(groupId: string): Promise<
+  { id: number; video_code: string | null; title: string }[]
+> {
+  if (!(await approvalsReady())) return [];
+  return query<{ id: number; video_code: string | null; title: string }>(
+    `SELECT id, video_code, title
+       FROM deliverables
+      WHERE wa_group_id = ?
+        AND wa_status IN ('queued','sending','sent','delivered','viewed')
+      ORDER BY wa_sent_at DESC, id DESC
+      LIMIT 10`,
+    [groupId]
+  );
+}
+
+/**
+ * Which video a bare "ok" means.
+ *
+ * Clients don't quote codes — they answer the message in front of them. So the
+ * message no longer shows one, and the reply is matched to whatever this group
+ * was actually asked about.
+ *
+ * The safety that used to come from the code now comes from the group: only
+ * videos sent to *this* group are candidates, so a reply can never reach
+ * another client's work. What it cannot resolve is two unanswered videos in
+ * one group, and there it asks rather than guesses — picking the newer one
+ * would publish the wrong video roughly half the time it mattered.
+ */
+export type Resolution =
+  | { ok: true; videoCode: string }
+  | { ok: false; reason: "none" }
+  | { ok: false; reason: "ambiguous"; choices: { code: string; title: string }[] };
+
+export async function resolveVideoForGroup(groupId: string): Promise<Resolution> {
+  const rows = (await awaitingReplyInGroup(groupId)).filter((r) => r.video_code);
+  if (rows.length === 0) return { ok: false, reason: "none" };
+  if (rows.length === 1) return { ok: true, videoCode: rows[0].video_code! };
+  return {
+    ok: false,
+    reason: "ambiguous",
+    choices: rows.map((r) => ({ code: r.video_code!, title: r.title })),
+  };
+}
+
 export type ApprovalInput = {
-  videoCode: string;
+  /** Null when the client replied without one — resolved from the group. */
+  videoCode: string | null;
   command: "approve" | "change" | "reject";
   approvedBy?: string | null;
   approvedNumber?: string | null;
@@ -478,6 +538,11 @@ export type ApprovalInput = {
 export type ApprovalResult = {
   ok: boolean;
   error?: string;
+  /** Two or more videos are waiting in that group; the client must say which. */
+  ambiguous?: boolean;
+  choices?: { code: string; title: string }[];
+  /** The code this reply was matched to — the client may not have typed one. */
+  videoCode?: string;
   alreadyRecorded?: boolean;
   deliverableId?: number;
   title?: string;
@@ -510,9 +575,40 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
     return { ok: false, error: "The WhatsApp approval tables are not set up yet." };
   }
 
-  const d = await findByVideoCode(input.videoCode);
+  /*
+   * No code given — work out what they were answering.
+   *
+   * Resolved here rather than in the WhatsApp service because this is where
+   * the record of what was sent to which group lives. The service knows a
+   * client said "ok"; only the portal knows what they said it about.
+   */
+  let videoCode = input.videoCode;
+  if (!videoCode) {
+    if (!input.groupId) {
+      return { ok: false, error: "No video code, and no group to work it out from." };
+    }
+    const resolved = await resolveVideoForGroup(input.groupId);
+    if (!resolved.ok) {
+      if (resolved.reason === "none") {
+        return { ok: false, error: "There's nothing waiting for approval in this group." };
+      }
+      return {
+        ok: false,
+        ambiguous: true,
+        choices: resolved.choices,
+        error:
+          "More than one video is waiting here, so I can't tell which you mean. " +
+          "Please reply with the code, for example APPROVE " +
+          resolved.choices[0].code +
+          ".",
+      };
+    }
+    videoCode = resolved.videoCode;
+  }
+
+  const d = await findByVideoCode(videoCode);
   if (!d) {
-    return { ok: false, error: `No video with the code ${input.videoCode}.` };
+    return { ok: false, error: `No video with the code ${videoCode}.` };
   }
 
   /*
@@ -531,7 +627,7 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
       if (input.groupId !== d.wa_group_id) {
         return {
           ok: false,
-          error: `${input.videoCode} was not sent to this WhatsApp group.`,
+          error: `${videoCode} was not sent to this WhatsApp group.`,
         };
       }
     } else {
@@ -547,7 +643,7 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
       if (owner !== d.client_id) {
         return {
           ok: false,
-          error: `${input.videoCode} does not belong to this WhatsApp group.`,
+          error: `${videoCode} does not belong to this WhatsApp group.`,
         };
       }
     }
@@ -650,6 +746,7 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
     ok: true,
     deliverableId: d.id,
     title: d.title,
+    videoCode: d.video_code,
     clientId: d.client_id,
     status: PORTAL_STATUS[input.command],
   };

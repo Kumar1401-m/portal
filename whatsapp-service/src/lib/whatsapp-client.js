@@ -343,6 +343,16 @@ class WhatsAppService extends EventEmitter {
       body: message.body || '',
       quotedText,
       hasMedia: Boolean(message.hasMedia),
+      /*
+       * Kept so the router can fetch the audio only when it needs to.
+       *
+       * Downloading here would pull every image and document a client ever
+       * posts through this process, to no purpose. 'ptt' is a recorded voice
+       * note; 'audio' is a music file someone attached, and both are worth
+       * hearing when they arrive as a reply.
+       */
+      isVoice: message.type === 'ptt' || message.type === 'audio',
+      downloadMedia: () => message.downloadMedia(),
       timestamp: message.timestamp ? new Date(message.timestamp * 1000) : new Date(),
     });
   }
