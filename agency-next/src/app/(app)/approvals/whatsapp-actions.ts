@@ -10,7 +10,10 @@ import {
   linkGroup,
   unlinkGroup,
 } from "@/lib/whatsapp-approvals";
-import { sendVideoToGroup, reconnectService } from "@/lib/whatsapp-service-client";
+import { sendVideoToGroup, reconnectService, sendTextToGroup } from "@/lib/whatsapp-service-client";
+import { queryOne } from "@/lib/db";
+import { getSettings } from "@/lib/settings";
+import { welcomeMessage } from "@/lib/whatsapp-ai";
 
 export type SendState = { ok: boolean; message?: string; error?: string };
 
@@ -100,8 +103,38 @@ export async function linkGroupAction(
   }
 
   await linkGroup(clientId, groupId, groupName);
+
+  /*
+   * Introduce ourselves, once, on linking.
+   *
+   * This is the first time the client's group hears from the agency's number,
+   * and it is the only chance to state the approval wording before a video
+   * turns up depending on it. Sent after the link is saved, so a WhatsApp
+   * hiccup costs the greeting rather than the mapping — the mapping is the
+   * part that matters and the part that is hard to notice missing.
+   */
+  let greeted = false;
+  try {
+    const client = await queryOne<{ company_name: string }>(
+      "SELECT company_name FROM clients WHERE id = ?",
+      [clientId]
+    );
+    if (client) {
+      const settings = await getSettings().catch(() => null);
+      const text = welcomeMessage(client.company_name, settings?.company_name || "our team");
+      greeted = (await sendTextToGroup(groupId, text)).ok;
+    }
+  } catch {
+    // Linked either way; the greeting can be sent by hand.
+  }
+
   revalidatePath("/settings/whatsapp");
-  return { ok: true, message: `Linked ${groupName || groupId}.` };
+  return {
+    ok: true,
+    message: greeted
+      ? `Linked ${groupName || groupId}, and said hello in the group.`
+      : `Linked ${groupName || groupId}. Couldn't send the welcome message — check the WhatsApp service.`,
+  };
 }
 
 export async function unlinkGroupAction(
