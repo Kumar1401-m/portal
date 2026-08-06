@@ -15,7 +15,7 @@ import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
-import { PLATFORMS, PRIORITIES, STATUS_LIST } from "@/lib/constants";
+import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey } from "@/lib/utils";
 import { localTimeToUtc } from "@/lib/zapier";
@@ -172,7 +172,8 @@ export async function generateCaptionAction(
   _prev: CaptionState,
   formData: FormData
 ): Promise<CaptionState> {
-  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  // Writing the caption is part of finishing the edit.
+  const user = await requireUser([...ADMIN_OR_CRM_ROLES, "video_editor"]);
   const id = Number(formData.get("deliverable_id"));
   if (!id) return { ok: false, error: "Missing deliverable." };
 
@@ -420,6 +421,11 @@ async function applyStatus(
     user.role !== "crm"
   ) {
     return { ok: false, error: "Only a super admin can send content to the client for review." };
+  }
+  // A video editor moves the edit along and nothing else. Enforced here rather
+  // than only in the buttons, because the buttons are not the security model.
+  if (user.role === "video_editor" && !(EDITOR_STATUSES as string[]).includes(status)) {
+    return { ok: false, error: "An editor can only move a task through the editing stages." };
   }
 
   // Gate 1: approving content_review approves the CONTENT → waiting_for_raw.

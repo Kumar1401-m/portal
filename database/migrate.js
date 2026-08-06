@@ -786,6 +786,41 @@ async function main() {
   await addColumn('video_analysis', 'context_used', 'context_used TEXT DEFAULT NULL');
   await addColumn('video_analysis', 'grounded', 'grounded TINYINT(1) NOT NULL DEFAULT 0');
 
+  /* ---- Cluster R: 'video_editor' team role ---- */
+  for (const spec of [
+    {
+      table: 'users',
+      column: 'role',
+      definition: `ENUM('super_admin','admin','poster_designer','video_editor','crm','client') NOT NULL DEFAULT 'admin'`,
+    },
+    // Comments and feedback stamp the author's role, so an editor leaving a
+    // note would otherwise be truncated to an empty string.
+    {
+      table: 'feedback',
+      column: 'author_role',
+      definition: `ENUM('super_admin','admin','poster_designer','video_editor','crm','client') DEFAULT NULL`,
+    },
+    {
+      table: 'task_comments',
+      column: 'author_role',
+      definition: `ENUM('super_admin','admin','poster_designer','video_editor','crm','client') DEFAULT NULL`,
+    },
+  ]) {
+    const [col] = await query(
+      `SELECT COLUMN_TYPE AS t FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = ? AND column_name = ? LIMIT 1`,
+      [env.db.database, spec.table, spec.column]
+    );
+    if (!col) {
+      console.log(`  = ${spec.table}.${spec.column} not present, skipping`);
+    } else if (String(col.t).includes("'video_editor'")) {
+      console.log(`  = ${spec.table}.${spec.column} already has video_editor`);
+    } else {
+      await query(`ALTER TABLE ${spec.table} MODIFY COLUMN ${spec.column} ${spec.definition}`);
+      console.log(`  + ${spec.table}.${spec.column} now includes video_editor`);
+    }
+  }
+
   // Which video the cached Gemini upload was made from.
   //
   // Without it, replacing a task's video left the old upload in place and the

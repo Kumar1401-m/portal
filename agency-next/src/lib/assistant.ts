@@ -41,9 +41,18 @@ export type Snapshot = {
 
 const n = (v: unknown) => Number(v ?? 0);
 
+/**
+ * Roles whose assistant answers cover their own worklist, not the agency.
+ *
+ * The fallback at the bottom of `scopeFor` is "the whole agency", so a role
+ * that isn't named here quietly gets client lists and per-client totals. That
+ * default is right for admins and wrong for everyone who does the work.
+ */
+const PERSONAL_SCOPE: SessionUser["role"][] = ["poster_designer", "video_editor"];
+
 /** What this user is allowed to see, expressed as SQL fragments. */
 async function scopeFor(user: SessionUser) {
-  if (user.role === "poster_designer") {
+  if (PERSONAL_SCOPE.includes(user.role)) {
     return { label: "your own assigned tasks", where: `d.assigned_to = ${Math.trunc(user.id)}` };
   }
   if (user.role === "crm") {
@@ -118,8 +127,9 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
     due: r.due_date ? String(r.due_date) : null,
   }));
 
-  // Per-client split: not meaningful for a designer's personal worklist.
-  if (user.role !== "poster_designer") {
+  // Per-client split: not meaningful for a personal worklist, and it would
+  // hand someone the agency's client list as a side effect.
+  if (!PERSONAL_SCOPE.includes(user.role)) {
     snap.by_client = (
       await query<Record<string, unknown>>(
         `SELECT c.company_name,
@@ -287,7 +297,7 @@ export async function answerQuestion(user: SessionUser, question: string): Promi
 
 /** The chips shown under the greeting, tailored to what the role can act on. */
 export function suggestionsFor(role: SessionUser["role"]): string[] {
-  if (role === "poster_designer") {
+  if (role === "poster_designer" || role === "video_editor") {
     return ["What's due today?", "How many are overdue?", "What's waiting on the client?"];
   }
   if (role === "crm") {

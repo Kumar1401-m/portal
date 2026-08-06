@@ -154,7 +154,7 @@ export type EditorOption = { id: number; name: string; role: string };
 export async function getEditors(): Promise<EditorOption[]> {
   return query<EditorOption>(
     `SELECT id, name, role FROM users
-      WHERE role IN ('super_admin','admin','poster_designer') AND is_active = 1
+      WHERE role IN ('super_admin','admin','poster_designer','video_editor') AND is_active = 1
       ORDER BY name`
   );
 }

@@ -194,7 +194,7 @@ export async function toggleCategory(_prev: ActionState, fd: FormData): Promise<
 
 /* ------------------------------- Team ------------------------------- */
 
-const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "crm", "super_admin"];
+const STAFF_ROLES_WRITABLE: Role[] = ["admin", "poster_designer", "video_editor", "crm", "super_admin"];
 
 export async function addTeamMember(_prev: ActionState, fd: FormData): Promise<ActionState> {
   await requireUser(SUPER_ADMIN_ROLES);

@@ -20,7 +20,7 @@ export default async function AppLayout({
   // What the assistant covers depends on the role, so the chips are chosen
   // server-side alongside the scope its answers will use.
   const scopeLabel =
-    user.role === "poster_designer"
+    user.role === "poster_designer" || user.role === "video_editor"
       ? "your own tasks"
       : user.role === "crm"
         ? "your assigned clients"

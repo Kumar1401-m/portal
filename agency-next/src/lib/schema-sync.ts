@@ -27,6 +27,18 @@ type ColumnSpec = {
   definition: string;
   /** What the column is for, shown in Settings. */
   purpose: string;
+  /**
+   * Set when the column already exists and it is an ENUM that needs another
+   * permitted value — a new role, say. "Missing" then means the value isn't
+   * in the enum, and applying runs MODIFY rather than ADD.
+   *
+   * Widening an enum is additive in effect: existing rows keep their values
+   * and nothing is dropped. The one way it could destroy data is a definition
+   * that omits a value some row is already using, which MySQL would truncate
+   * to an empty string — so `applyPendingColumns` refuses any MODIFY that
+   * would drop a value the column currently permits.
+   */
+  requiresEnumValue?: string;
 };
 
 const EXPECTED: ColumnSpec[] = [
@@ -244,6 +256,32 @@ const EXPECTED: ColumnSpec[] = [
     definition: "source_ref VARCHAR(600) DEFAULT NULL",
     purpose: "Which video the caption describes, so replacing it can't leave the old one's caption behind.",
   },
+  // The video_editor role. Three enums have to permit it: the one that decides
+  // what a user can be, and the two that stamp who wrote a comment.
+  {
+    table: "users",
+    column: "role",
+    requiresEnumValue: "video_editor",
+    definition:
+      "ENUM('super_admin','admin','poster_designer','video_editor','crm','client') NOT NULL DEFAULT 'admin'",
+    purpose: "Lets you create video editor accounts.",
+  },
+  {
+    table: "feedback",
+    column: "author_role",
+    requiresEnumValue: "video_editor",
+    definition:
+      "ENUM('super_admin','admin','poster_designer','video_editor','crm','client') DEFAULT NULL",
+    purpose: "So feedback from a video editor records who wrote it.",
+  },
+  {
+    table: "task_comments",
+    column: "author_role",
+    requiresEnumValue: "video_editor",
+    definition:
+      "ENUM('super_admin','admin','poster_designer','video_editor','crm','client') DEFAULT NULL",
+    purpose: "So a comment from a video editor records who wrote it.",
+  },
 ];
 
 /**
@@ -433,18 +471,32 @@ export async function schemaStatus(): Promise<SchemaColumnStatus[]> {
   // The tables to inspect come from EXPECTED itself, so adding a spec for a
   // new table above is all that's needed — no second list to keep in step.
   const tables = [...new Set(EXPECTED.map((c) => c.table.toLowerCase()))];
-  const rows = await query<{ t: string; c: string }>(
-    `SELECT LOWER(TABLE_NAME) AS t, LOWER(COLUMN_NAME) AS c
+  const rows = await query<{ t: string; c: string; ty: string }>(
+    `SELECT LOWER(TABLE_NAME) AS t, LOWER(COLUMN_NAME) AS c, COLUMN_TYPE AS ty
        FROM information_schema.columns
       WHERE TABLE_SCHEMA = DATABASE()
         AND TABLE_NAME IN (${tables.map(() => "?").join(",")})`,
     tables
   );
-  const have = new Set(rows.map((r) => `${r.t}.${r.c}`));
-  return EXPECTED.map((c) => ({
-    ...c,
-    present: have.has(`${c.table}.${c.column}`.toLowerCase()),
-  }));
+  const types = new Map(rows.map((r) => [`${r.t}.${r.c}`, String(r.ty)]));
+
+  return EXPECTED.map((c) => {
+    const key = `${c.table}.${c.column}`.toLowerCase();
+    const type = types.get(key);
+    return {
+      ...c,
+      // An enum spec is satisfied by the value being permitted, not by the
+      // column merely existing — it always exists.
+      present: c.requiresEnumValue
+        ? Boolean(type?.includes(`'${c.requiresEnumValue}'`))
+        : types.has(key),
+    };
+  });
+}
+
+/** The values an existing ENUM column currently permits. */
+function enumValues(columnType: string): string[] {
+  return [...columnType.matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
 }
 
 /** Which of the analytics/publishing tables already exist. */
@@ -501,6 +553,30 @@ export async function applyPendingColumns(): Promise<ApplyResult> {
   for (const c of await schemaStatus()) {
     if (c.present) continue;
     try {
+      if (c.requiresEnumValue) {
+        /*
+         * Widening an enum is the one statement here that touches something
+         * that already exists, so it is checked before it runs: MySQL turns a
+         * value dropped from an enum into an empty string on every row using
+         * it, silently. Refusing beats explaining afterwards.
+         */
+        const row = await query<{ ty: string }>(
+          `SELECT COLUMN_TYPE AS ty FROM information_schema.columns
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+          [c.table, c.column]
+        );
+        const current = enumValues(row[0]?.ty || "");
+        const lost = current.filter((v) => !c.definition.includes(`'${v}'`));
+        if (lost.length) {
+          throw new Error(
+            `would drop existing value(s) ${lost.join(", ")} — not applied`
+          );
+        }
+        await executeDdl(`ALTER TABLE \`${c.table}\` MODIFY COLUMN \`${c.column}\` ${c.definition}`);
+        added.push(`${c.table}.${c.column} (+${c.requiresEnumValue})`);
+        continue;
+      }
+
       // `definition` is a literal from the list above, never from input.
       await executeDdl(`ALTER TABLE \`${c.table}\` ADD COLUMN ${c.definition}`);
       forgetColumn(c.table, c.column);

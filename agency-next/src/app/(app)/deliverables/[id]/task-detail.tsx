@@ -40,7 +40,11 @@ function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
  * behind a 404 because a popup couldn't open.
  */
 export async function TaskDetail({ id, inModal = false }: { id: number; inModal?: boolean }) {
-  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  // A video editor reaches this page from the Editing queue and needs it to do
+  // the work — upload the cut, take the caption, move the task on. What they
+  // must not do is send to the client or publish; those are gated separately
+  // below, not by keeping them off the page.
+  const user = await requireUser([...ADMIN_OR_CRM_ROLES, "video_editor"]);
   const d = Number.isInteger(id) && id > 0 ? await getDeliverable(id) : null;
   const allowed = d ? await canAccessClient(user, d.client_id) : false;
   if (!d || !allowed) {
@@ -63,6 +67,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
+  const editingOnly = user.role === "video_editor";
   const isPoster = service === "poster_designing";
 
   return (
@@ -103,6 +108,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             deliverableId={d.id}
             status={d.status}
             canSendToClient={canSendToClient}
+            editingOnly={editingOnly}
           />
 
           {aiOn && !isPoster ? (

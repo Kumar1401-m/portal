@@ -36,6 +36,22 @@ export type Status = (typeof STATUS_LIST)[number];
 /** Statuses counted as "done" (client-approved and everything after). */
 export const DONE_STATUSES: Status[] = ["approved", "scheduled", "posted", "completed"];
 
+/**
+ * The only statuses a video editor may set.
+ *
+ * Everything here is the edit itself — footage received, cutting, caption
+ * done, changes addressed. Deliberately excludes the rest of the board:
+ * "approved" means the client signed off, "posted" means it went live. An
+ * editor setting either would record something that never happened, and the
+ * monthly report counts both.
+ */
+export const EDITOR_STATUSES: Status[] = [
+  "raw_uploaded",
+  "editing",
+  "caption_ready",
+  "resolved",
+];
+
 /** A tidy subset for the list-page status filter. */
 export const FILTER_STATUSES: Status[] = [
   "pending",

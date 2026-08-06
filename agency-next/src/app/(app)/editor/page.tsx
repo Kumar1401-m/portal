@@ -90,9 +90,13 @@ export default async function EditorPage({
             {aiReady ? " Upload a cut and the AI writes the caption from what it sees." : ""}
           </p>
         </div>
-        <Link href="/deliverables/new" className={buttonClasses({ variant: "secondary", size: "sm" })}>
-          New task
-        </Link>
+        {/* Creating work is the account team's job — the form behind this
+            would bounce an editor straight back here. */}
+        {user.role === "video_editor" ? null : (
+          <Link href="/deliverables/new" className={buttonClasses({ variant: "secondary", size: "sm" })}>
+            New task
+          </Link>
+        )}
       </div>
 
       {/* Stage tabs — the pipeline, in the order work actually moves. */}

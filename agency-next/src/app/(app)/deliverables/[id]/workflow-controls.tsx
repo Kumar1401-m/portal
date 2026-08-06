@@ -8,6 +8,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { label } from "@/lib/utils";
+import { EDITOR_STATUSES } from "@/lib/constants";
 import { buttonClasses } from "@/components/ui/button";
 
 type Variant = "default" | "outline" | "destructive";
@@ -37,7 +38,7 @@ const NEXT: Record<string, Action[]> = {
 /** Sending content to the client (either gate) is restricted to super_admin and crm. */
 const SEND_TO_CLIENT_STATUSES = ["content_review", "review"];
 
-function actionsFor(status: string, canSendToClient: boolean): Action[] {
+function actionsFor(status: string, canSendToClient: boolean, editingOnly: boolean): Action[] {
   const out = [...(NEXT[status] || [])].filter(
     (a) => canSendToClient || !SEND_TO_CLIENT_STATUSES.includes(a.status)
   );
@@ -48,23 +49,31 @@ function actionsFor(status: string, canSendToClient: boolean): Action[] {
     out.push({ label: "Reject", status: "rejected", variant: "destructive", reason: true });
     out.push({ label: "Cancel", status: "cancelled", variant: "outline", reason: true });
   }
-  return out;
+  // An editor sees only the buttons that would actually work. The server
+  // refuses the rest either way; showing them would just be a promise the
+  // portal breaks on click.
+  return editingOnly
+    ? out.filter((a) => (EDITOR_STATUSES as string[]).includes(a.status))
+    : out;
 }
 
 export function WorkflowControls({
   deliverableId,
   status,
   canSendToClient,
+  editingOnly = false,
 }: {
   deliverableId: number;
   status: string;
   canSendToClient: boolean;
+  /** True for a video editor: the edit's own stages, nothing beyond them. */
+  editingOnly?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<StatusState, FormData>(
     changeStatusAction,
     { ok: false }
   );
-  const actions = actionsFor(status, canSendToClient);
+  const actions = actionsFor(status, canSendToClient, editingOnly);
   const needsReason = actions.some((a) => a.reason);
 
   return (

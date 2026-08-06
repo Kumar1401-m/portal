@@ -5,7 +5,7 @@ import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, SUPER_ADMIN_ROLES, type Role } from "@/lib/auth";
 
 /** Uploading the finished video is editing work — deliberately excludes crm. */
-const VIDEO_UPLOAD_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
+const VIDEO_UPLOAD_ROLES: Role[] = ["super_admin", "admin", "poster_designer", "video_editor"];
 import { canAccessClient } from "@/lib/crm";
 import {
   presignUpload,

@@ -16,7 +16,14 @@ import { env } from "./env";
 
 export const COOKIE_NAME = "erp_session";
 
-export type Role = "super_admin" | "admin" | "poster_designer" | "crm" | "client";
+export type Role =
+  | "super_admin"
+  | "admin"
+  | "poster_designer"
+  /** Cuts the videos. Lives in the Editing queue and nowhere else. */
+  | "video_editor"
+  | "crm"
+  | "client";
 
 export type SessionUser = {
   id: number;
@@ -105,6 +112,7 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 export function homeForRole(role: Role): string {
   if (role === "client") return "/portal";
   if (role === "poster_designer") return "/poster";
+  if (role === "video_editor") return "/editor";
   if (role === "crm") return "/dashboard";
   return "/dashboard";
 }
@@ -122,9 +130,23 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
 }
 
 /** Staff = anyone who isn't a client. */
-export const STAFF_ROLES: Role[] = ["super_admin", "admin", "poster_designer", "crm"];
+export const STAFF_ROLES: Role[] = [
+  "super_admin",
+  "admin",
+  "poster_designer",
+  "video_editor",
+  "crm",
+];
 /** Staff for the Posters module, which has no per-client scoping. */
 export const POSTER_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
+/**
+ * The Editing module, and the parts of a task an editor has to touch to do the
+ * work: upload the cut, write the caption, move it along. No per-client
+ * scoping, the same as Posters — a small agency's editors work the whole
+ * board, and inventing a second scoping model would only be a way to lock
+ * someone out of a video they were asked to cut.
+ */
+export const EDITOR_ROLES: Role[] = ["super_admin", "admin", "video_editor"];
 export const ADMIN_ROLES: Role[] = ["super_admin", "admin"];
 /**
  * Modules a scoped "crm" user can also reach (Clients, Tasks, Today,

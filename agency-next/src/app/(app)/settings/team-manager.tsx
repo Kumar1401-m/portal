@@ -166,6 +166,7 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
               <label className="text-xs font-medium text-muted-foreground">Role</label>
               <Select name="role" defaultValue="poster_designer">
                 <option value="poster_designer">Poster designer</option>
+                <option value="video_editor">Video editor</option>
                 <option value="crm">CRM</option>
                 <option value="admin">Admin</option>
                 <option value="super_admin">Super admin</option>
