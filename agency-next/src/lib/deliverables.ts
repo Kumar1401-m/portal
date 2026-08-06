@@ -255,12 +255,13 @@ export type ApprovalCounts = {
   final: number;
   changes: number;
   approved: number;
+  scheduled: number;
 };
 
 /** Counts for the Approvals worklist tabs (churned clients excluded). */
 export async function getApprovalCounts(crmClientIds?: number[] | null): Promise<ApprovalCounts> {
   if (crmClientIds && crmClientIds.length === 0) {
-    return { content: 0, final: 0, changes: 0, approved: 0 };
+    return { content: 0, final: 0, changes: 0, approved: 0, scheduled: 0 };
   }
   const scope =
     crmClientIds && crmClientIds.length
@@ -271,7 +272,8 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
        COALESCE(SUM(d.status = 'content_review'),0)     AS content,
        COALESCE(SUM(d.status = 'review'),0)             AS final,
        COALESCE(SUM(d.status = 'changes_requested'),0)  AS changes,
-       COALESCE(SUM(d.status = 'approved'),0)           AS approved
+       COALESCE(SUM(d.status = 'approved'),0)           AS approved,
+       COALESCE(SUM(d.status = 'scheduled'),0)          AS scheduled
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status != 'churned' ${scope}`,
     crmClientIds && crmClientIds.length ? crmClientIds : []
@@ -281,6 +283,7 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
     final: n(row?.final),
     changes: n(row?.changes),
     approved: n(row?.approved),
+    scheduled: n(row?.scheduled),
   };
 }
 

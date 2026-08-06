@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
+import { CaptionCatchUp } from "@/components/admin/caption-catch-up";
 import {
   getDeliverables,
   getServiceCounts,

@@ -40,7 +40,6 @@ export const NAV: NavItem[] = [
   { label: "Today's Tasks", href: "/today", icon: CalendarCheck, roles: [...ALL_STAFF, ...EDITOR, "crm"], ready: true },
   { label: "Clients", href: "/clients", icon: Users, roles: ADMIN_OR_CRM, ready: true },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true },
-  { label: "Editing", href: "/editor", icon: Clapperboard, roles: [...ALL_STAFF, ...EDITOR, "crm"], ready: true },
   { label: "Approvals", href: "/approvals", icon: CheckCircle2, roles: ADMIN_OR_CRM, ready: true },
   { label: "Posters", href: "/poster", icon: ImageIcon, roles: ALL_STAFF, ready: true },
   { label: "Payments", href: "/payments", icon: CreditCard, roles: ADMIN, ready: true },

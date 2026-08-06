@@ -21,7 +21,7 @@ import { fmtDate, cn } from "@/lib/utils";
 export const metadata = { title: "Approvals · NVK Hub" };
 export const dynamic = "force-dynamic";
 
-type TabKey = "content" | "final" | "changes" | "approved";
+type TabKey = "content" | "final" | "changes" | "approved" | "scheduled";
 
 const TABS: {
   key: TabKey;
@@ -33,6 +33,10 @@ const TABS: {
   { key: "final", label: "Final review", status: "review", action: { label: "Approve", status: "approved" } },
   { key: "changes", label: "Changes requested", status: "changes_requested", action: { label: "Mark resolved", status: "resolved" } },
   { key: "approved", label: "Recently approved", status: "approved", action: { label: "Schedule", status: "scheduled" } },
+  // Where the Schedule button above sends things — otherwise a scheduled video
+  // left the board entirely and there was nowhere to see what is queued to go
+  // out.
+  { key: "scheduled", label: "Scheduled", status: "scheduled", action: { label: "Mark posted", status: "posted" } },
 ];
 
 export default async function ApprovalsPage({

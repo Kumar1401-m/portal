@@ -26,22 +26,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useWhatsAppSocket, type VideoUpdate } from "@/components/admin/use-whatsapp-socket";
 import type { ApprovalRow, ApprovalCounts } from "@/lib/whatsapp-approvals";
-
-const TONE: Record<string, { label: string; badge: "success" | "warning" | "danger" | "info" | "muted" }> = {
-  queued: { label: "Queued", badge: "muted" },
-  sending: { label: "Sending", badge: "muted" },
-  sent: { label: "Sent", badge: "info" },
-  delivered: { label: "Delivered", badge: "info" },
-  viewed: { label: "Viewed", badge: "warning" },
-  approved: { label: "Approved", badge: "success" },
-  changes_requested: { label: "Changes requested", badge: "warning" },
-  rejected: { label: "Rejected", badge: "danger" },
-  failed: { label: "Failed to send", badge: "danger" },
-};
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -218,14 +205,12 @@ export function ApprovalBoard({
                     <th className="px-4 py-2 text-left font-medium">Code</th>
                     <th className="px-3 py-2 text-left font-medium">Video</th>
                     <th className="px-3 py-2 text-left font-medium">Client</th>
-                    <th className="px-3 py-2 text-left font-medium">Status</th>
                     <th className="px-3 py-2 text-left font-medium">Who replied</th>
                     <th className="px-3 py-2 text-left font-medium">When</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => {
-                    const tone = TONE[r.wa_status] ?? { label: r.wa_status, badge: "muted" as const };
                     return (
                       <tr
                         key={r.id}
@@ -255,9 +240,6 @@ export function ApprovalBoard({
                           ) : null}
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">{r.company_name}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={tone.badge}>{tone.label}</Badge>
-                        </td>
                         <td className="px-3 py-2 text-muted-foreground">
                           {r.wa_approved_by ?? "—"}
                         </td>

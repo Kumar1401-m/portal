@@ -20,6 +20,7 @@ import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/servic
 import { monthKey } from "@/lib/utils";
 import { localTimeToUtc } from "@/lib/zapier";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
+import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
 
@@ -258,7 +259,13 @@ export async function saveCaptionAction(
 
 /* --------------------- Quick-edit "Update Video Details" --------------------- */
 
-export type VideoDetailsState = { ok: boolean; error?: string; mode?: "draft" | "approval" };
+export type VideoDetailsState = {
+  ok: boolean;
+  error?: string;
+  mode?: "draft" | "approval";
+  /** What happened on WhatsApp, when sending for approval. */
+  message?: string;
+};
 
 /**
  * Tell someone work has landed on their plate.
@@ -404,6 +411,29 @@ export async function updateVideoDetails(
     );
   }
 
+  /*
+   * Send it where the client actually replies.
+   *
+   * This button used only to set the status and email them; WhatsApp needed
+   * someone to open the task page afterwards and press a second button, also
+   * called send for approval. One of the two didn't reach the place clients
+   * answer from, and nothing said which.
+   *
+   * Best-effort on purpose: a client with no linked group approves by email
+   * and the save must still succeed, so a skip is silent and only a real
+   * failure is reported.
+   */
+  let waNote: string | null = null;
+  if (mode === "approval") {
+    try {
+      const sent = await deliverForApproval(id);
+      if (sent.ok) waNote = describeDelivery(sent);
+      else if (!sent.skipped) waNote = `Saved, but WhatsApp failed: ${sent.error}`;
+    } catch (err) {
+      waNote = `Saved, but WhatsApp failed: ${err instanceof Error ? err.message : "unknown error"}`;
+    }
+  }
+
   if (mode === "approval") {
     // Use the just-saved type, so re-tagging in the same submit is respected.
     const effectiveType = updates.video_type ?? d.video_type;
@@ -422,7 +452,7 @@ export async function updateVideoDetails(
   revalidatePath("/today");
   revalidatePath("/approvals");
   revalidatePath("/poster");
-  return { ok: true, mode };
+  return { ok: true, mode, ...(waNote ? { message: waNote } : {}) };
 }
 
 /* ------------------------- Workflow transitions ------------------------- */

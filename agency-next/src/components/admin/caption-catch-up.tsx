@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { advanceStalledAnalyses } from "./actions";
+import { advanceStalledAnalyses } from "@/app/(app)/editor/actions";
 
 /**
  * Quietly finishes captions that were left mid-flight.
@@ -12,8 +12,9 @@ import { advanceStalledAnalyses } from "./actions";
  * collects those, but only once a day on this hosting plan — long enough that
  * an editor would reasonably conclude the feature was broken.
  *
- * This page is the right place to make up the difference: it is where videos
- * waiting on something are listed, so it is where a stuck one gets noticed.
+ * Today is the right place to make up the difference: it is the page staff
+ * actually open, and the one that lists what needs attention — so a stuck
+ * caption is noticed there rather than nowhere.
  * Renders nothing, blocks nothing, and refreshes only if it actually moved
  * something — a refresh that changes no pixels is just a flicker.
  */

@@ -3,14 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { requireUser, ADMIN_OR_CRM_ROLES, ADMIN_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
-import {
-  prepareSend,
-  markQueued,
-  recordSendStatus,
-  linkGroup,
-  unlinkGroup,
-} from "@/lib/whatsapp-approvals";
-import { sendVideoToGroup, reconnectService, sendTextToGroup } from "@/lib/whatsapp-service-client";
+import { prepareSend, linkGroup, unlinkGroup } from "@/lib/whatsapp-approvals";
+import { reconnectService, sendTextToGroup } from "@/lib/whatsapp-service-client";
+import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 import { queryOne } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { welcomeMessage } from "@/lib/whatsapp-ai";
@@ -32,39 +27,20 @@ export async function sendForApprovalAction(
   const deliverableId = Number(formData.get("deliverable_id"));
   if (!deliverableId) return { ok: false, error: "Missing task." };
 
+  // Prepared first so an access refusal can name the client.
   const prepared = await prepareSend(deliverableId);
   if (!prepared.ok) return { ok: false, error: prepared.error };
-
-  const { video } = prepared;
-
-  // Checked after prepareSend so the scoping error can name the client.
-  if (!(await canAccessClient(user, video.clientId))) {
+  if (!(await canAccessClient(user, prepared.video.clientId))) {
     return { ok: false, error: "You don't have access to this client." };
   }
 
-  await markQueued(deliverableId, video.groupId);
+  const result = await deliverForApproval(deliverableId);
 
-  const result = await sendVideoToGroup({
-    videoCode: video.videoCode,
-    deliverableId: video.deliverableId,
-    groupId: video.groupId,
-    videoUrl: video.videoUrl,
-    watchUrl: video.watchUrl,
-    caption: video.caption,
-    filename: `${video.videoCode}.mp4`,
-  });
+  revalidatePath("/approvals");
+  revalidatePath(`/deliverables/${deliverableId}`);
 
   if (!result.ok) {
-    // The service already logs its own attempts; this records the portal-side
-    // failure for the cases where the service was never reached at all.
-    await recordSendStatus({
-      deliverableId,
-      videoCode: video.videoCode,
-      groupId: video.groupId,
-      status: "failed",
-      errorMessage: result.error,
-    });
-    revalidatePath("/approvals");
+    if (result.skipped) return { ok: false, error: result.reason };
     return {
       ok: false,
       error: result.unreachable
@@ -73,15 +49,7 @@ export async function sendForApprovalAction(
     };
   }
 
-  revalidatePath("/approvals");
-  revalidatePath(`/deliverables/${deliverableId}`);
-
-  return {
-    ok: true,
-    message: result.sentAsLink
-      ? `${video.videoCode} was too large for WhatsApp, so ${video.clientName} got the caption and a link to watch it. They can still reply APPROVE ${video.videoCode}.`
-      : `${video.videoCode} sent to ${video.clientName} on WhatsApp. They'll reply APPROVE ${video.videoCode} or CHANGE ${video.videoCode}.`,
-  };
+  return { ok: true, message: describeDelivery(result) };
 }
 
 export type GroupState = { ok: boolean; message?: string; error?: string };
