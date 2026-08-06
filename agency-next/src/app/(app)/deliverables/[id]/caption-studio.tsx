@@ -162,6 +162,14 @@ export function CaptionStudio({
                   {providerLabel[genState.provider]}
                 </Badge>
               ) : null}
+              {/* Which source the copy came from. Worth its own badge: a
+                  caption written from the brief alone can read perfectly and
+                  still describe a video that was never made. */}
+              {genState.ok ? (
+                <Badge tone={genState.fromVideo ? "success" : "muted"}>
+                  {genState.fromVideo ? "From the video" : "From the brief only"}
+                </Badge>
+              ) : null}
               {isPoster ? <Badge tone="info">Poster — clean caption</Badge> : null}
               <Button type="button" variant="ghost" size="sm" onClick={copy}>
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}

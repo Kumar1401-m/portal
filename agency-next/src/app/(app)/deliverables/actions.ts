@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, type SessionUser } from "@/lib/auth";
-import { generateCaption, type ComposedCaption, type CaptionSource } from "@/lib/ai";
+import {
+  generateCaption,
+  type ComposedCaption,
+  type CaptionSource,
+  type WatchedVideo,
+} from "@/lib/ai";
+import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
@@ -127,7 +133,40 @@ export type CaptionState = {
   hashtags?: string;
   alternates?: string[];
   isPoster?: boolean;
+  /** Whether the copy came from the footage or only from the typed brief. */
+  fromVideo?: boolean;
 };
+
+/**
+ * The finished analysis for a video, in the shape the caption studio wants.
+ *
+ * Only a completed one counts. A job still uploading has a half-filled row,
+ * and a caption written from half an observation is worse than one written
+ * from the brief, because it reads just as confident.
+ */
+async function watchedVideoFor(deliverableId: number): Promise<WatchedVideo | null> {
+  try {
+    const a = await getAnalysis(deliverableId);
+    if (!a || a.state !== "done") return null;
+
+    // The structured branding block, straight from the model's own JSON —
+    // parsed from the source rather than from the display text built off it.
+    const raw = a.raw_json;
+    const obj = typeof raw === "string" ? JSON.parse(raw || "{}") : raw || {};
+    const branding = (obj as { branding?: WatchedVideo["branding"] })?.branding ?? null;
+
+    return {
+      summary: a.summary,
+      spokenLanguage: a.spoken_language,
+      topic: a.topic,
+      onScreenText: a.on_screen_text,
+      branding,
+    };
+  } catch {
+    // No analysis table, or unreadable JSON. The brief still works.
+    return null;
+  }
+}
 
 export async function generateCaptionAction(
   _prev: CaptionState,
@@ -149,9 +188,18 @@ export async function generateCaptionAction(
     include_contact: formData.get("include_contact") !== "off",
   };
 
+  /*
+   * Hand over what the AI saw when it watched the finished cut.
+   *
+   * Best-effort: a video nobody has analysed yet, or an install without the
+   * analysis table, simply falls back to the typed brief — the studio worked
+   * that way before and must keep working that way.
+   */
+  const seen = await watchedVideoFor(id);
+
   let out: ComposedCaption;
   try {
-    out = await generateCaption(d as CaptionSource, opts);
+    out = await generateCaption(d as CaptionSource, opts, seen);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Generation failed." };
   }

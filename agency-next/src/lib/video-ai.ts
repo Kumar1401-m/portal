@@ -73,6 +73,8 @@ export type VideoAnalysis = {
   brand_seen: string | null;
   context_used: string | null;
   grounded: number;
+  /** The model's own reply, kept whole — the structured branding lives here. */
+  raw_json: unknown;
   tokens_used: number | null;
   duration_ms: number | null;
   attempts: number;

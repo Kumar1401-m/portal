@@ -51,6 +51,31 @@ export type CaptionSource = {
   placeholder_values: unknown;
 };
 
+/**
+ * What the AI saw when it watched the finished video.
+ *
+ * The caption studio's brief is otherwise assembled from fields a human typed
+ * before the video existed — the title, the hook, the description. Those
+ * describe what the video was *meant* to be. This describes what it became,
+ * and when the two disagree the footage is the one the audience will see.
+ */
+export type WatchedVideo = {
+  summary: string | null;
+  spokenLanguage: string | null;
+  topic: string | null;
+  onScreenText: string | null;
+  /** Branding read off the frame: logo, footer, phone, website, handle. */
+  branding: {
+    logo_text?: string | null;
+    footer_text?: string | null;
+    phone?: string | null;
+    website?: string | null;
+    handle?: string | null;
+    tagline?: string | null;
+    business_name_seen?: string | null;
+  } | null;
+};
+
 type V3Result = {
   detected_business: string;
   detected_owner: string;
@@ -77,6 +102,8 @@ export type ComposedCaption = {
   alternate_captions: string[];
   seo_keywords: string[];
   is_poster: boolean;
+  /** True when the copy was written from the footage, not just the brief. */
+  from_video: boolean;
 };
 
 /* --------------------------- JSON helpers --------------------------- */
@@ -195,17 +222,53 @@ export async function callJSON(
 /* ------------------------- Brief building -------------------------- */
 
 /** Rich brief context from a deliverable + client, honouring caption settings. */
-function v3Brief(d: CaptionSource, opts: CaptionOptions = {}) {
+function v3Brief(d: CaptionSource, opts: CaptionOptions = {}, seen?: WatchedVideo | null) {
   const cs = asObj(d.caption_settings);
   const ph = asObj(d.placeholder_values);
   const name = d.company_name || "";
+  const b = seen?.branding || null;
 
-  const videoScript = str(d.content_hook || d.description || d.title);
-  const videoSummary = str(d.description || d.content_hook || d.title);
+  /*
+   * What the video actually contains, when we've watched it.
+   *
+   * Handed to the model as the script because the alternative — the hook and
+   * description typed at briefing time — routinely describes a different
+   * video. That is how a caption studio ends up writing dental copy over
+   * footage about stomach cancer: the brief was never wrong, it was just
+   * written before the edit.
+   */
+  const watched =
+    seen && (seen.summary || seen.onScreenText)
+      ? [
+          seen.summary ? `What happens in the video: ${seen.summary}` : null,
+          seen.topic ? `Subject: ${seen.topic}` : null,
+          seen.onScreenText ? `Text shown on screen: ${seen.onScreenText}` : null,
+          b?.business_name_seen ? `Business shown on screen: ${b.business_name_seen}` : null,
+          b?.tagline ? `Their stated speciality: ${b.tagline}` : null,
+          b?.footer_text ? `Footer bar: ${b.footer_text}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : null;
+
+  const typedBrief = str(d.content_hook || d.description || d.title);
+
+  // The brief is kept alongside rather than discarded — it carries intent the
+  // footage can't show, like which campaign a video belongs to.
+  const videoScript = watched ? [watched, typedBrief && `Original brief: ${typedBrief}`].filter(Boolean).join("\n\n") : typedBrief;
+  const videoSummary = seen?.summary || str(d.description || d.content_hook || d.title);
+
+  const s = (v: unknown) => {
+    const x = v == null ? "" : String(v).trim();
+    return x && x.toLowerCase() !== "null" ? x : "";
+  };
 
   return {
     video_script: videoScript,
     video_summary: videoSummary,
+    /** Informational: the caption language is the operator's choice, not this. */
+    spoken_language: s(seen?.spokenLanguage),
+    watched_the_video: Boolean(watched),
     business_name: name,
     business_type: str(d.business_type),
     owner_name: str(d.contact_person),
@@ -218,13 +281,21 @@ function v3Brief(d: CaptionSource, opts: CaptionOptions = {}) {
     goal: str(opts.goal || d.promotion_type || "Engagement"),
     business_category: str(d.business_type),
     caption_length: str(opts.length || "Medium"),
-    logo_detected: Boolean(d.company_logo_url),
-    logo_text: name,
-    website: str(d.website || ph.website || ""),
-    phone: str(d.phone || ph.phone || ""),
+    logo_detected: Boolean(d.company_logo_url) || Boolean(s(b?.logo_text)),
+    logo_text: name || s(b?.logo_text) || s(b?.business_name_seen),
+    /*
+     * The client record wins on contact details; the video only fills gaps.
+     *
+     * Deliberately this way round. What the record holds was entered by the
+     * agency and is checked; what's on screen was read off a frame and may be
+     * a stale number from an old template. But when the record has nothing, a
+     * number the business itself put on the video beats no number at all.
+     */
+    website: str(d.website || ph.website || "") || s(b?.website),
+    phone: str(d.phone || ph.phone || "") || s(b?.phone),
     whatsapp: str(ph.whatsapp || ""),
     email: str(d.email || ""),
-    instagram: str(d.instagram_link || ""),
+    instagram: str(d.instagram_link || "") || s(b?.handle),
     facebook: str(d.facebook_link || ""),
     youtube: str(d.youtube_link || ""),
     special_notes: str(d.custom_instructions || d.ai_prompt || ""),
@@ -234,7 +305,8 @@ function v3Brief(d: CaptionSource, opts: CaptionOptions = {}) {
 const CAPTION_V3_SYSTEM = `You are a Professional Social Media Caption Generator for Instagram, Facebook, YouTube Shorts, Threads and LinkedIn. Write HIGH-QUALITY captions like an experienced Social Media Manager, for ANY business category (doctors, dental, hospitals, restaurants, real estate, loans/finance, gyms, salons, jewellery, education, automobile, startups, personal brands, etc.). Automatically understand the industry from the script.
 
 You receive a JSON brief. Then:
-1. READ and fully understand video_script. NEVER copy it — write ORIGINAL marketing copy that MATCHES the video's message (it is shown to the client, so it must fit the video). Grab attention in the first 2 lines. Use storytelling, conversational language and line breaks for readability. No clickbait, no fake promises, no fake statistics or awards.
+1. READ and fully understand video_script. NEVER copy it — write ORIGINAL marketing copy that MATCHES the video's message (it is shown to the client, so it must fit the video). Grab attention in the first 2 lines.
+1a. When watched_the_video is true, video_script is a description of the FINISHED footage — what is said, what is written on screen, and the branding shown. Treat it as fact and write about THAT subject. If an "Original brief" line disagrees with it, the footage wins: the brief was written before the edit. Use the on-screen text (a doctor's name and qualifications, a hospital name, a speciality) as real detail, but never restate a phone number or website inside the caption body. Use storytelling, conversational language and line breaks for readability. No clickbait, no fake promises, no fake statistics or awards.
 2. DETECT the business and industry from the script + brief. If business_name is empty, use logo_text.
 3. WRITE in the requested language (Telugu, English or Tenglish = Telugu in English letters) and respect caption_length (Short / Medium / Long). Localise spelling, phrasing and references to the brief's country.
 4. EMOJIS: natural, MAX 1-2 per sentence, chosen to FIT the business category (dental 🦷😁✨, doctor/hospital 🩺❤️🏥, finance/loan 💰🏦💳, gym 💪🏋️, restaurant 🍽️😋, cafe ☕, real estate 🏠🔑, interior 🏡🛋️, jewellery 💎✨, beauty 💄✨, education 📚🎓, automobile 🚗, general ⭐✨). Never random emojis.
@@ -454,9 +526,10 @@ function composeCaption(
 /** Generate + compose a ready-to-post caption for a deliverable. */
 export async function generateCaption(
   d: CaptionSource,
-  opts: CaptionOptions = {}
+  opts: CaptionOptions = {},
+  seen?: WatchedVideo | null
 ): Promise<ComposedCaption> {
-  const brief = v3Brief(d, opts);
+  const brief = v3Brief(d, opts, seen);
   const { result, provider } = await generateCaptionV3(brief);
   const isPoster = str(d.video_type).toLowerCase() === "poster";
   const includeContact = opts.include_contact !== false;
@@ -473,5 +546,6 @@ export async function generateCaption(
     alternate_captions: isPoster ? [] : result.alternate_captions,
     seo_keywords: result.seo_keywords,
     is_poster: isPoster,
+    from_video: brief.watched_the_video,
   };
 }
