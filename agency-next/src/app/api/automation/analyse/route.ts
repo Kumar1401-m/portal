@@ -17,6 +17,7 @@
  *   or  { "pending": true, "limit"?: 5 }   — advance whatever is in flight
  */
 import { readAuthorized, ok, fail, asInt } from "@/lib/automation-api";
+import { isAuthorizedCronRequest, unauthorized } from "@/lib/api-auth";
 import { queueAnalysis, runAnalysis, getPendingAnalyses, videoAiReady } from "@/lib/video-ai";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,40 @@ export const dynamic = "force-dynamic";
  * comfortably inside even the smallest, at the cost of the caller polling.
  */
 export const maxDuration = 60;
+
+/**
+ * GET — the scheduled catch-up. Advances whatever analysis is in flight.
+ *
+ * The uploader drives a caption to completion from the browser, which works
+ * right up until the tab is closed halfway through. Before this, such a job
+ * simply stopped: the row sat in `uploading` or `processing` and the caption
+ * arrived only when somebody happened to open that task again.
+ *
+ * A GET with no body because that is all Vercel Cron sends. Each run advances
+ * every pending job by one step, so a job needing three steps finishes within
+ * three runs rather than holding one request open for all of them.
+ */
+export async function GET(request: Request) {
+  if (!isAuthorizedCronRequest(request)) return unauthorized();
+  if (!(await videoAiReady())) return ok({ advanced: 0, skipped: "video AI not configured" });
+
+  const jobs = await getPendingAnalyses(5);
+  const results = [];
+  for (const job of jobs) {
+    try {
+      const r = await runAnalysis(job.deliverable_id);
+      results.push({ deliverable_id: job.deliverable_id, state: r.state, more: r.more ?? false });
+    } catch (err) {
+      // One bad video must not stop the others from being picked up.
+      results.push({
+        deliverable_id: job.deliverable_id,
+        state: "error",
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  }
+  return ok({ advanced: results.length, results });
+}
 
 export async function POST(request: Request) {
   const { response, body } = await readAuthorized(request);

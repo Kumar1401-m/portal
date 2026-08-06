@@ -37,6 +37,27 @@ export function isAuthorizedAutomationRequest(req: Request): boolean {
 }
 
 /**
+ * Auth for Vercel's scheduled invocations.
+ *
+ * Vercel Cron sends `Authorization: Bearer $CRON_SECRET` and nothing else —
+ * no body, no custom headers — so a cron route can't use the automation guard
+ * as it stands. The automation key is still accepted, which is what makes
+ * these endpoints testable by hand and callable from n8n if the schedule ever
+ * moves there.
+ *
+ * With neither secret configured this returns false, so an unconfigured
+ * deployment exposes nothing rather than defaulting to open.
+ */
+export function isAuthorizedCronRequest(req: Request): boolean {
+  const header = req.headers.get("authorization") || "";
+  const bearer = header.startsWith("Bearer ") ? header.slice(7) : header;
+  const key = bearer || req.headers.get("x-api-key") || "";
+  if (!key) return false;
+  if (env.automation.cronSecret && timingSafeEqual(key, env.automation.cronSecret)) return true;
+  return isAuthorizedAutomationRequest(req);
+}
+
+/**
  * Auth for callbacks from the WhatsApp approval service (src/app/api/whatsapp/*).
  *
  * Its own key again, not shared with n8n or Zapier: this one is held by a

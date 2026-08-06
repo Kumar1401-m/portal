@@ -86,6 +86,8 @@ export const env = {
   automation: {
     apiKey: process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY || "",
     enabled: Boolean(process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY),
+    /** Vercel Cron's shared secret, for the scheduled catch-up jobs. */
+    cronSecret: process.env.CRON_SECRET || "",
   },
 
   /**

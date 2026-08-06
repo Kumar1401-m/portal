@@ -149,6 +149,18 @@ export default async function EditorPage({
         <button type="submit" className={buttonClasses({ variant: "secondary", size: "sm" })}>
           Apply
         </button>
+        {/* One click to the only question most people open this page to ask.
+            The dropdown could already do it, but it means finding your own
+            name in a list of everyone. */}
+        <Link
+          href={qs({ editor: editorId === user.id ? null : user.id })}
+          className={buttonClasses({
+            variant: editorId === user.id ? "default" : "ghost",
+            size: "sm",
+          })}
+        >
+          My tasks
+        </Link>
         {editorId || clientId ? (
           <Link href={qs({ editor: null, client: null })} className={buttonClasses({ variant: "ghost", size: "sm" })}>
             Clear

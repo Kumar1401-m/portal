@@ -13,7 +13,7 @@ import {
 import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
-import { notifyClientById } from "@/lib/notify";
+import { notifyClientById, notifyUser } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
@@ -260,6 +260,39 @@ export async function saveCaptionAction(
 
 export type VideoDetailsState = { ok: boolean; error?: string; mode?: "draft" | "approval" };
 
+/**
+ * Tell someone work has landed on their plate.
+ *
+ * Assignment was silent until now, which was survivable while only admins used
+ * the portal and could see the whole board. It stops being survivable with a
+ * role whose entire workflow starts with being handed a video: an editor had
+ * no way to learn a task was theirs except by re-reading the queue.
+ *
+ * Never fires for assigning something to yourself — you already know — and
+ * never throws, because failing to send a notification must not fail the save
+ * that triggered it.
+ */
+async function notifyAssignee(
+  userId: number | null,
+  previous: number | null,
+  actorId: number,
+  deliverableId: number,
+  title: string
+): Promise<void> {
+  if (!userId || userId === previous || userId === actorId) return;
+  const u = await queryOne<{ email: string | null }>("SELECT email FROM users WHERE id = ?", [
+    userId,
+  ]);
+  await notifyUser(
+    userId,
+    "task_assigned",
+    "A task was assigned to you",
+    `"${title}" is now yours.`,
+    `/deliverables/${deliverableId}`,
+    u?.email ?? null
+  );
+}
+
 /** Save the video/content details modal — Save Draft or Send To Approval. */
 export async function updateVideoDetails(
   _prev: VideoDetailsState,
@@ -270,8 +303,16 @@ export async function updateVideoDetails(
   const mode = formData.get("mode") === "approval" ? "approval" : "draft";
   if (!id) return { ok: false, error: "Missing deliverable." };
 
-  const d = await queryOne<{ id: number; client_id: number; title: string; video_type: string | null }>(
-    "SELECT id, client_id, title, video_type FROM deliverables WHERE id = ?",
+  // `assigned_to` comes along so a reassignment can be told apart from a save
+  // that merely re-submitted the same assignee.
+  const d = await queryOne<{
+    id: number;
+    client_id: number;
+    title: string;
+    video_type: string | null;
+    assigned_to: number | null;
+  }>(
+    "SELECT id, client_id, title, video_type, assigned_to FROM deliverables WHERE id = ?",
     [id]
   );
   if (!d) return { ok: false, error: "Deliverable not found." };
@@ -350,6 +391,18 @@ export async function updateVideoDetails(
     ...keys.map((k) => updates[k]),
     id,
   ]);
+
+  // After the save, never before: nobody should be told about work that then
+  // failed to persist.
+  if (formData.has("assigned_to")) {
+    await notifyAssignee(
+      updates.assigned_to ? Number(updates.assigned_to) : null,
+      d.assigned_to,
+      me.id,
+      id,
+      title || d.title
+    );
+  }
 
   if (mode === "approval") {
     // Use the just-saved type, so re-tagging in the same submit is respected.
