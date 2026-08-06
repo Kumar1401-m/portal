@@ -107,10 +107,15 @@ export function SendApproval({
           </p>
         ) : null}
 
+        {/* Clamped: this text is written by whatever failed, not by us, so its
+            length is not something the panel can rely on. The full text stays
+            available on hover. */}
         {panel.lastError ? (
           <p className="flex items-start gap-2 text-xs text-destructive">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{panel.lastError}</span>
+            <span className="line-clamp-3" title={panel.lastError}>
+              {panel.lastError}
+            </span>
           </p>
         ) : null}
 

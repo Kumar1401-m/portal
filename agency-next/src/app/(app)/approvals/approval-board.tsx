@@ -235,8 +235,18 @@ export function ApprovalBoard({
                               “{r.wa_comment}”
                             </p>
                           ) : null}
+                          {/* Clamped and title-attributed: an error is written
+                              by whatever failed, not by us, so its length is
+                              not something this table can rely on. One row's
+                              failure must not push every other row off the
+                              screen. */}
                           {r.wa_last_error ? (
-                            <p className="mt-0.5 text-xs text-destructive">{r.wa_last_error}</p>
+                            <p
+                              className="mt-0.5 line-clamp-2 text-xs text-destructive"
+                              title={r.wa_last_error}
+                            >
+                              {r.wa_last_error}
+                            </p>
                           ) : null}
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">{r.company_name}</td>

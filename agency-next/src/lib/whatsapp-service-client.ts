@@ -52,7 +52,21 @@ async function call<T>(
     try {
       body = text ? JSON.parse(text) : {};
     } catch {
-      body = { error: text.slice(0, 300) };
+      /*
+       * Not JSON, so it did not come from the service.
+       *
+       * Something in front of it answered — the tunnel, a proxy, a CDN — and
+       * those reply with an HTML error page. Keeping the first 300 characters
+       * of that put a slab of `<!DOCTYPE html>` on the approvals board as the
+       * reason a send failed: unreadable, and it buried the one fact that
+       * mattered, which is that the service was never reached at all.
+       */
+      const isHtml = /^\s*<(?:!doctype|html|\?xml)/i.test(text);
+      body = {
+        error: isHtml
+          ? `The WhatsApp service didn't answer — something in front of it returned an error page (HTTP ${res.status}). Check the service is running and reachable.`
+          : text.replace(/\s+/g, " ").trim().slice(0, 200) || `HTTP ${res.status}`,
+      };
     }
 
     if (!res.ok) {
