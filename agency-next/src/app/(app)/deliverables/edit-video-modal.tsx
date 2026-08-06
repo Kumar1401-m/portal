@@ -273,6 +273,9 @@ export function EditVideoModal({
                 deliverableId={d.id}
                 currentUrl={d.cloud_video_link}
                 onUploaded={setEditedLink}
+                // Only fires when the task had no caption, so this can't
+                // discard something typed into the box a moment ago.
+                onCaption={setCaption}
               />
             </div>
             ) : null}

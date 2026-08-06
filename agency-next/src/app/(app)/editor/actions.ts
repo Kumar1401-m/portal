@@ -75,6 +75,68 @@ export async function analyseVideoAction(
   };
 }
 
+/**
+ * Carry an upload's analysis through to a finished caption on the task.
+ *
+ * Called by the uploader in a loop while the browser is still open, which is
+ * the only place the whole job can safely run: it takes about half a minute
+ * across four steps, and a server action that tried to sit through all of it
+ * would be killed by the platform somewhere in the middle.
+ *
+ * The caption is written onto the task only when there isn't one. That
+ * restraint is the whole reason this can be automatic — an editor who has
+ * already written or tweaked a caption never has it overwritten by a video
+ * they uploaded afterwards, so nobody has to remember to turn it off.
+ */
+export async function finishAnalysisAfterUpload(
+  deliverableId: number
+): Promise<AnalyseState & { applied?: boolean }> {
+  if (!deliverableId) return { ok: false, error: "Missing task." };
+
+  const access = await assertAccess(deliverableId);
+  if (!access.ok) return { ok: false, error: access.error };
+
+  const result = await runAnalysis(deliverableId);
+
+  let applied = false;
+  if (result.state === "done") {
+    const d = await queryOne<{ caption: string | null }>(
+      "SELECT caption FROM deliverables WHERE id = ?",
+      [deliverableId]
+    );
+    if (!d?.caption?.trim()) {
+      const out = await applyCaption(deliverableId);
+      applied = out.ok;
+    }
+  }
+
+  revalidatePath(`/deliverables/${deliverableId}`);
+  revalidatePath("/deliverables");
+  revalidatePath("/editor");
+
+  if (!result.ok && result.state === "failed") {
+    return { ok: false, state: result.state, error: result.error };
+  }
+
+  return {
+    ok: true,
+    state: result.state,
+    more: result.more,
+    caption: result.caption ?? null,
+    applied,
+    message:
+      result.state === "done"
+        ? applied
+          ? "Caption written from the video."
+          : "Caption ready — the task already has one, so it wasn't replaced."
+        : result.state === "uploading"
+          ? "Sending the video to the AI…"
+          : result.state === "processing"
+            ? "The AI is watching the video…"
+            : "Writing the caption…",
+  };
+}
+
 /** Copy the AI draft onto the task, replacing whatever caption is there. */
 export async function applyCaptionAction(
   _prev: AnalyseState,

@@ -1,11 +1,30 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { UploadCloud, Paperclip, Repeat, Check, Copy, Loader2, TriangleAlert } from "lucide-react";
+import {
+  UploadCloud,
+  Paperclip,
+  Repeat,
+  Check,
+  Copy,
+  Loader2,
+  TriangleAlert,
+  Sparkles,
+} from "lucide-react";
 import { getVideoUploadUrl, attachUploadedVideo } from "./upload-actions";
+import { finishAnalysisAfterUpload } from "../editor/actions";
 import { buttonClasses } from "@/components/ui/button";
 
-type Phase = "idle" | "signing" | "uploading" | "saving" | "done" | "error";
+type Phase = "idle" | "signing" | "uploading" | "saving" | "captioning" | "done" | "error";
+
+/**
+ * How many times the browser will nudge the analysis along before giving up.
+ *
+ * Roughly two minutes, comfortably longer than any video within the size cap
+ * has taken. The ceiling matters: a job that keeps reporting "more" without
+ * progressing would otherwise poll for as long as the tab stayed open.
+ */
+const CAPTION_POLLS = 12;
 
 /**
  * Uploads the finished video straight from the browser to Cloudflare R2 using a
@@ -16,10 +35,13 @@ export function VideoUpload({
   deliverableId,
   currentUrl,
   onUploaded,
+  onCaption,
 }: {
   deliverableId: number;
   currentUrl?: string | null;
   onUploaded?: (url: string) => void;
+  /** Fires when the AI has written a caption for the video just uploaded. */
+  onCaption?: (caption: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -28,13 +50,63 @@ export function VideoUpload({
   const [url, setUrl] = useState<string | null>(currentUrl ?? null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [captionNote, setCaptionNote] = useState<string | null>(null);
 
-  const busy = phase === "signing" || phase === "uploading" || phase === "saving";
+  const busy =
+    phase === "signing" || phase === "uploading" || phase === "saving" || phase === "captioning";
+
+  /**
+   * Drive the analysis to a finished caption from the browser.
+   *
+   * The work is four steps across roughly half a minute and a server action
+   * that sat through all of it would be killed partway, so the tab does the
+   * waiting instead: each call advances the job and says whether more remains.
+   *
+   * Entirely best-effort. A caption that doesn't arrive must never make a
+   * successful upload look like a failure — the video is safely stored either
+   * way, and the AI panel on the task page can always finish the job later.
+   */
+  async function writeCaption() {
+    setPhase("captioning");
+    setCaptionNote("The AI is watching the video…");
+
+    for (let i = 0; i < CAPTION_POLLS; i++) {
+      let res;
+      try {
+        res = await finishAnalysisAfterUpload(deliverableId);
+      } catch {
+        setCaptionNote(null);
+        return;
+      }
+
+      if (!res.ok) {
+        // Worth showing: "the file is too big" is something to act on, and
+        // silence here reads as the feature simply not working.
+        setCaptionNote(res.error ?? null);
+        return;
+      }
+
+      if (res.state === "done") {
+        if (res.caption && res.applied) onCaption?.(res.caption);
+        setCaptionNote(res.message ?? "Caption written from the video.");
+        return;
+      }
+
+      setCaptionNote(res.message ?? "Writing the caption…");
+      if (!res.more) return;
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+
+    setCaptionNote("Still working — open the task to see the caption.");
+  }
 
   async function handleFile(file: File) {
     setError(null);
     setProgress(0);
     setFilename(file.name);
+    // A replacement gets its own caption; the previous one's note would be
+    // read as progress on this upload.
+    setCaptionNote(null);
 
     if (!file.type.startsWith("video/")) {
       setPhase("error");
@@ -113,6 +185,11 @@ export function VideoUpload({
     setUrl(shown);
     setPhase("done");
     if (shown) onUploaded?.(shown);
+
+    // The upload is complete and reported as such before this starts, so a
+    // slow or failing caption can't hold up the thing that actually mattered.
+    await writeCaption();
+    setPhase("done");
   }
 
   /**
@@ -189,6 +266,19 @@ export function VideoUpload({
 
       {phase === "saving" ? (
         <p className="text-xs text-muted-foreground">Attaching to the task…</p>
+      ) : null}
+
+      {/* The caption runs after the upload has already succeeded, so this is
+          progress on a bonus — never framed as part of the upload failing. */}
+      {captionNote ? (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {phase === "captioning" ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+          )}
+          <span>{captionNote}</span>
+        </p>
       ) : null}
 
       {url ? (
