@@ -29,10 +29,31 @@ const STATE_LABEL: Record<string, { text: string; tone: "success" | "warning" | 
   disconnected: { text: "Disconnected", tone: "danger" },
   failed: { text: "Failed", tone: "danger" },
   unknown: { text: "Unknown", tone: "muted" },
+  /**
+   * Nothing can currently reach the service, so whatever it last told us is a
+   * memory rather than a fact. Deliberately not "Disconnected": the phone may
+   * well still be paired — what has failed is our ability to ask.
+   */
+  unreachable: { text: "Can't be reached", tone: "danger" },
 };
 
 /** How stale a heartbeat has to be before the service is presumed dead. */
 const STALE_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * A rough age, in words. Rough on purpose — the difference between a service
+ * that stopped four days ago and one that stopped five is not a difference
+ * anyone acts on, but "a few minutes" versus "days" very much is.
+ */
+function ago(ms: number): string {
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
 
 /**
  * WhatsApp session health, with the QR code when a login is needed.
@@ -81,16 +102,20 @@ export function SessionPanel({
    * would leave a page left open showing "healthy" long after the service died.
    */
   const [stale, setStale] = useState(false);
+  /** How long ago the service last checked in, in words. Empty if never. */
+  const [lastSeen, setLastSeen] = useState("");
   useEffect(() => {
     const check = () => {
       if (!snapshot.heartbeatAt) {
         setStale(true);
+        setLastSeen("");
         return;
       }
       const beat = new Date(
         snapshot.heartbeatAt.replace(" ", "T") + (snapshot.heartbeatAt.includes("Z") ? "" : "Z")
       ).getTime();
       setStale(Number.isNaN(beat) || Date.now() - beat > STALE_AFTER_MS);
+      setLastSeen(Number.isNaN(beat) ? "" : ago(Date.now() - beat));
     };
 
     // Deferred so the first evaluation happens after hydration, not during it.
@@ -102,8 +127,24 @@ export function SessionPanel({
     };
   }, [snapshot.heartbeatAt]);
 
-  const label = STATE_LABEL[state] ?? STATE_LABEL.unknown;
-  const isConnected = state === "connected";
+  /*
+   * Is anything actually in touch with the service right now?
+   *
+   * `state` is the last thing the service told us, which the database keeps
+   * long after the process it describes has gone. Either channel being open —
+   * the server's probe when the page rendered, or a live socket since — makes
+   * that state current; neither, and it is only a memory.
+   */
+  const inTouch = snapshot.liveReachable || socketConnected;
+
+  /*
+   * A remembered "connected" must never be shown as a green Connected badge.
+   * Doing so put a contradiction on one line — "Connected" beside "Can't reach
+   * the WhatsApp service" — and of the two, the badge is the one people read.
+   * Someone would reasonably conclude approvals were working.
+   */
+  const label = inTouch ? (STATE_LABEL[state] ?? STATE_LABEL.unknown) : STATE_LABEL.unreachable;
+  const isConnected = inTouch && state === "connected";
 
   return (
     <Card>
@@ -125,7 +166,16 @@ export function SessionPanel({
           <p className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-destructive">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              Can&apos;t reach the WhatsApp service. Check it&apos;s running
+              Can&apos;t reach the WhatsApp service, so approvals and sends
+              aren&apos;t working right now.
+              {lastSeen ? (
+                <>
+                  {" "}
+                  It last checked in <strong>{lastSeen}</strong>
+                  {STATE_LABEL[state] ? <> saying &ldquo;{STATE_LABEL[state].text}&rdquo;</> : null}.
+                </>
+              ) : null}{" "}
+              Check it&apos;s running
               (<code className="rounded bg-muted px-1">docker compose ps</code>) and that
               WHATSAPP_SERVICE_URL points at it.
             </span>
