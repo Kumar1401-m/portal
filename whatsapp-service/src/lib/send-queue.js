@@ -55,7 +55,7 @@ class SendQueue {
   }
 
   async run(job) {
-    const { videoCode, deliverableId, groupId, videoUrl, caption, filename } = job;
+    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename } = job;
     const maxAttempts = config.send.maxAttempts;
     let lastError = null;
 
@@ -72,6 +72,10 @@ class SendQueue {
         const result = await this.whatsapp.enqueueSend({
           groupId,
           videoUrl,
+          // Carried through so an oversized video can fall back to a link
+          // rather than failing. Rebuilding this object field by field is how
+          // it went missing the first time.
+          watchUrl,
           caption,
           filename,
         });
@@ -96,7 +100,15 @@ class SendQueue {
           at: new Date().toISOString(),
         });
 
-        return { ok: true, messageId: result.messageId, attempts: attempt };
+        // sentAsLink is carried out so the portal can say the client got a
+        // link rather than the file — the same rebuild-by-field that lost
+        // watchUrl on the way in would otherwise lose this on the way out.
+        return {
+          ok: true,
+          messageId: result.messageId,
+          attempts: attempt,
+          ...(result.sentAsLink ? { sentAsLink: true } : {}),
+        };
       } catch (err) {
         lastError = err;
         const permanent = err.permanent === true || PERMANENT_CODES.has(err.code);

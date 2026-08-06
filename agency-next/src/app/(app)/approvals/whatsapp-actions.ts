@@ -78,7 +78,9 @@ export async function sendForApprovalAction(
 
   return {
     ok: true,
-    message: `${video.videoCode} sent to ${video.clientName} on WhatsApp. They'll reply APPROVE ${video.videoCode} or CHANGE ${video.videoCode}.`,
+    message: result.sentAsLink
+      ? `${video.videoCode} was too large for WhatsApp, so ${video.clientName} got the caption and a link to watch it. They can still reply APPROVE ${video.videoCode}.`
+      : `${video.videoCode} sent to ${video.clientName} on WhatsApp. They'll reply APPROVE ${video.videoCode} or CHANGE ${video.videoCode}.`,
   };
 }
 
