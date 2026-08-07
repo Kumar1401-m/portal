@@ -4,9 +4,36 @@ import { query, queryOne, hasColumn } from "./db";
 
 const n = (v: unknown) => Number(v ?? 0);
 
+/**
+ * Statuses a client may still attach footage to.
+ *
+ * `waiting_for_raw` is the case where we asked for it. `pending` is a slot on
+ * the month's plan that nobody has asked about yet — and a client who already
+ * has the footage should not have to wait to be asked before sending the link.
+ *
+ * Lives here rather than beside the action because the dashboard query that
+ * decides what to offer and the action that accepts it must agree; a button
+ * offered and then refused is the worst version of this.
+ */
+export const ACCEPTS_RAW = ["waiting_for_raw", "pending"] as const;
+
+const ACCEPTS_RAW_SQL = ACCEPTS_RAW.map((s) => `'${s}'`).join(",");
+
+export type PortalPostedItem = {
+  id: number;
+  title: string;
+  service: string | null;
+  video_type: string | null;
+  content_category: string | null;
+  /** When it went live, or when it is due to. */
+  when: string | null;
+  /** The post itself, when Instagram gave us one back. */
+  permalink: string | null;
+};
+
 export type PortalOverview = {
   company_name: string;
-  month: { total: number; approved: number; awaiting: number };
+  month: { total: number; approved: number; awaiting: number; posted: number };
   invoices: { pending_total: number; pending_count: number };
   awaiting_items: {
     id: number;
@@ -19,10 +46,16 @@ export type PortalOverview = {
   raw_needed_items: {
     id: number;
     title: string;
+    /** Which kind: one we asked for, or an unstarted slot on the plan. */
+    status: string;
     service: string | null;
     video_type: string | null;
     content_category: string | null;
   }[];
+  /** Already live. */
+  posted_items: PortalPostedItem[];
+  /** Approved and dated, but not out yet. */
+  scheduled_items: PortalPostedItem[];
 };
 
 export async function getPortalOverview(clientId: number): Promise<PortalOverview | null> {
@@ -32,11 +65,18 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
   );
   if (!client) return null;
 
-  const [month, invoices, awaiting, rawNeeded] = await Promise.all([
+  // The Instagram columns arrive with a later migration, so a database that
+  // has not run it still gets a working dashboard — just without permalinks.
+  const hasIg = await hasColumn("deliverables", "instagram_permalink");
+  const permalink = hasIg ? "d.instagram_permalink" : "NULL";
+  const igPosted = hasIg ? "d.instagram_posted_at" : "NULL";
+
+  const [month, invoices, awaiting, rawNeeded, posted, scheduled] = await Promise.all([
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS total,
         SUM(status IN ('approved','scheduled','posted','completed')) AS approved,
-        SUM(status IN ('content_review','review')) AS awaiting
+        SUM(status IN ('content_review','review')) AS awaiting,
+        SUM(status IN ('posted','completed')) AS posted
        FROM deliverables WHERE client_id = ? AND month_key = DATE_FORMAT(CURDATE(),'%Y-%m')`,
       [clientId]
     ),
@@ -53,22 +93,55 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
       [clientId]
     ),
     query<PortalOverview["raw_needed_items"][number]>(
-      `SELECT id, title, service, video_type, content_category FROM deliverables
-       WHERE client_id = ? AND status = 'waiting_for_raw'
-       ORDER BY id DESC`,
+      // Anything not yet being cut and with no link on it. A slot on the
+      // month's plan counts: the client having the footage is not a reason to
+      // wait until somebody asks for it.
+      `SELECT id, title, status, service, video_type, content_category FROM deliverables
+       WHERE client_id = ? AND status IN (${ACCEPTS_RAW_SQL})
+         AND (raw_drive_link IS NULL OR raw_drive_link = '')
+       ORDER BY due_date IS NULL, due_date ASC, id ASC`,
+      [clientId]
+    ),
+    query<PortalPostedItem>(
+      `SELECT d.id, d.title, d.service, d.video_type, d.content_category,
+              COALESCE(${igPosted}, d.posted_at) AS \`when\`,
+              ${permalink} AS permalink
+         FROM deliverables d
+        WHERE d.client_id = ? AND d.status IN ('posted','completed')
+        ORDER BY COALESCE(${igPosted}, d.posted_at) IS NULL,
+                 COALESCE(${igPosted}, d.posted_at) DESC, d.id DESC
+        LIMIT 12`,
+      [clientId]
+    ),
+    query<PortalPostedItem>(
+      // Approved and dated but not out yet — the answer to "when is mine going
+      // up", which is the question the posted list raises.
+      `SELECT d.id, d.title, d.service, d.video_type, d.content_category,
+              d.scheduled_at AS \`when\`, NULL AS permalink
+         FROM deliverables d
+        WHERE d.client_id = ? AND d.status IN ('approved','scheduled')
+        ORDER BY d.scheduled_at IS NULL, d.scheduled_at ASC, d.id DESC
+        LIMIT 12`,
       [clientId]
     ),
   ]);
 
   return {
     company_name: client.company_name,
-    month: { total: n(month?.total), approved: n(month?.approved), awaiting: n(month?.awaiting) },
+    month: {
+      total: n(month?.total),
+      approved: n(month?.approved),
+      awaiting: n(month?.awaiting),
+      posted: n(month?.posted),
+    },
     invoices: {
       pending_total: n(invoices?.pending_total),
       pending_count: n(invoices?.pending_count),
     },
     awaiting_items: awaiting,
     raw_needed_items: rawNeeded,
+    posted_items: posted,
+    scheduled_items: scheduled,
   };
 }
 

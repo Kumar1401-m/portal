@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, MessageSquareWarning } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { getPortalDeliverable } from "@/lib/portal";
+import { getPortalDeliverable, ACCEPTS_RAW } from "@/lib/portal";
 import { resolveVideoUrl } from "@/lib/storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -32,7 +32,9 @@ export default async function PortalContentDetail({
   const videoUrl = await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url);
 
   const needsReview = ["content_review", "review"].includes(d.status);
-  const needsRawFootage = d.status === "waiting_for_raw";
+  // The same list the dashboard offers the link on and the action accepts, so
+  // a "Add Drive link" button can never lead to a page with no form on it.
+  const needsRawFootage = (ACCEPTS_RAW as readonly string[]).includes(d.status);
   const gate = d.status === "content_review" ? "content" : d.status === "review" ? "final" : null;
 
   // Null on a database that predates the WhatsApp approval feature, in which

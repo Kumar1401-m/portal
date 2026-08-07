@@ -8,6 +8,7 @@ import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
 import { sendPaidInvoiceEmail } from "@/lib/email";
+import { ACCEPTS_RAW } from "@/lib/portal";
 import { getAgencyInbox } from "@/lib/settings";
 
 export type PortalActionState = { ok: boolean; error?: string; message?: string };
@@ -338,8 +339,12 @@ export async function submitRawFootage(
     [id, user.clientId]
   );
   if (!d) return { ok: false, error: "Not found." };
-  if (d.status !== "waiting_for_raw") {
-    return { ok: false, error: "This item isn't waiting for raw footage." };
+  // Anything the agency has not started cutting yet. `waiting_for_raw` is the
+  // case where we asked; `pending` is a slot on the month's plan that nobody
+  // has asked about — and a client who already has the footage should not have
+  // to wait to be asked for it before sending the link.
+  if (!(ACCEPTS_RAW as readonly string[]).includes(d.status)) {
+    return { ok: false, error: "We're already working on this one — send changes in the chat instead." };
   }
 
   await execute(
