@@ -26,15 +26,19 @@ function monthLabel(mk: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 }
 
-/** "2026-08" → "1 Aug 2026" — the day the generated tasks land on. */
-function firstDayLabel(mk: string): string {
+/**
+ * The day generated tasks land on: the first of the month, or today if that
+ * month is already underway — matching what the generator writes, so the
+ * sentence on screen is not a different promise from the one kept.
+ */
+function startDayLabel(mk: string): string {
   const [y, m] = mk.split("-").map(Number);
   if (!y || !m) return mk;
-  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  const first = new Date(y, m - 1, 1);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = first > today ? first : today.getMonth() === m - 1 && today.getFullYear() === y ? today : first;
+  return day.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** The months worth offering: half a year either side, plus any that already have work. */
@@ -216,7 +220,7 @@ export function MonthlyPlan({
               </button>
               {toAdd > 0 ? (
                 <span className="text-xs text-muted-foreground">
-                  All due {firstDayLabel(plan.month)} — move them below.
+                  All due {startDayLabel(plan.month)} — move them below.
                 </span>
               ) : null}
             </form>

@@ -56,6 +56,26 @@ export function firstOfMonth(month: string): string {
   return `${month}-01`;
 }
 
+/**
+ * The day generated tasks are due: the first of the month, or today if that
+ * month is already underway.
+ *
+ * Filling August on the seventh used to date all sixteen tasks the first —
+ * born six days overdue, counted as late on the dashboard the instant they
+ * were created, and sorted into history rather than onto Today's board, which
+ * is where work created today belongs.
+ *
+ * Decided by the database rather than in JavaScript so that "today" means the
+ * same thing here as it does in the `due_date <= CURDATE()` the Today board
+ * filters on. A server an hour either side of the database's midnight would
+ * otherwise generate tasks that disagree with the board about what day it is.
+ *
+ * Only the current month is clamped. A future month keeps its first, and a
+ * past month is left alone entirely: dragging old tasks onto today would move
+ * them out of the month their month_key says they belong to.
+ */
+const DUE_DATE_SQL = "IF(DATE_FORMAT(CURDATE(),'%Y-%m') = ?, GREATEST(?, CURDATE()), ?)";
+
 /** YYYY-MM, validated — anything else falls back to the current month. */
 export function safeMonth(month: string | null | undefined): string {
   const m = String(month || "");
@@ -165,6 +185,10 @@ export async function generateMonthTasks(
         service,
         category,
         videoType,
+        // The three DUE_DATE_SQL placeholders: the month being filled, then
+        // the first of it twice — once for the clamp, once for the fallback.
+        plan.month,
+        due,
         due,
         plan.month,
         createdBy,
@@ -181,7 +205,9 @@ export async function generateMonthTasks(
       `INSERT INTO deliverables
          (client_id, title, service, content_category, video_type,
           due_date, month_key, created_by, assigned_to, platform, priority, status)
-       VALUES ${rows.map(() => "(?,?,?,?,?,?,?,?,?,'instagram','medium','pending')").join(",")}`,
+       VALUES ${rows
+         .map(() => `(?,?,?,?,?,${DUE_DATE_SQL},?,?,?,'instagram','medium','pending')`)
+         .join(",")}`,
       rows.flat()
     );
   }
