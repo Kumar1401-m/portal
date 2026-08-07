@@ -154,14 +154,34 @@ export type PortalContentRow = {
   content_category: string | null;
   platform: string | null;
   due_date: string | null;
+  /** The day it is set to go out — the scheduled slot, else the due date. */
+  post_date: string | null;
+  promotion_type: string | null;
+  description: string | null;
+  raw_drive_link: string | null;
+  edited_link: string | null;
+  thumbnail_url: string | null;
 };
 
+/**
+ * A client's content, in the order it goes out.
+ *
+ * By date ascending, because the list is a schedule: the client reads it to
+ * see what is coming and when, and a schedule that starts at the end of the
+ * month and works backwards has to be re-read to be understood. Undated rows
+ * sit at the end, where "no date yet" belongs.
+ *
+ * The post date is the scheduled slot where one exists and the due date
+ * otherwise, so a row never shows a blank where a day has in fact been fixed.
+ */
 export async function getPortalContent(clientId: number): Promise<PortalContentRow[]> {
   return query<PortalContentRow>(
-    `SELECT id, title, status, service, video_type, content_category, platform, due_date
+    `SELECT id, title, status, service, video_type, content_category, platform, due_date,
+            DATE(COALESCE(scheduled_at, due_date)) AS post_date,
+            promotion_type, description, raw_drive_link, edited_link, thumbnail_url
      FROM deliverables WHERE client_id = ?
-     ORDER BY FIELD(status,'content_review','review','changes_requested') DESC, id DESC
-     LIMIT 100`,
+     ORDER BY post_date IS NULL, post_date ASC, id ASC
+     LIMIT 200`,
     [clientId]
   );
 }

@@ -91,6 +91,22 @@ export function contentStatusLabel(status: string): string {
 
 export type BadgeTone = "default" | "success" | "warning" | "danger" | "info" | "muted";
 
+/**
+ * Colour for the content track, matching how contentStatusLabel folds it.
+ *
+ * Signed off is green, waiting on someone is amber, a change asked for is a
+ * warning rather than a failure, and not-started is quiet — the point is that
+ * a client can read a column of these without reading the words.
+ */
+export function contentStatusTone(status: string): BadgeTone {
+  if (["approved", "scheduled", "posted", "completed"].includes(status)) return "success";
+  if (["content_review", "review"].includes(status)) return "warning";
+  if (status === "changes_requested") return "danger";
+  if (["waiting_for_raw", "raw_uploaded", "editing", "caption_ready", "resolved"].includes(status))
+    return "info";
+  return "muted";
+}
+
 export function editorStatusTone(status: string): BadgeTone {
   if (["posted", "completed"].includes(status)) return "success";
   if (["editing", "raw_uploaded"].includes(status)) return "warning";

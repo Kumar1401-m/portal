@@ -38,13 +38,10 @@ export default async function PortalDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Only the ones we actually asked for interrupt on arrival. The rest
-          are slots on this month's plan, and a popup listing twelve of them on
-          every visit is nagging, not a prompt — they are listed in the card
-          below where the client can get to them when they have the footage. */}
-      <RawFootagePopup
-        items={overview.raw_needed_items.filter((i) => i.status === "waiting_for_raw")}
-      />
+      {/* Opens on arrival for everything still missing footage, planned slots
+          included — asked for explicitly, so that collecting links is the
+          first thing the dashboard does rather than something to find. */}
+      <RawFootagePopup items={overview.raw_needed_items} />
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Hi {overview.company_name} 👋</h1>
