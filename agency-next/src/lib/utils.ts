@@ -41,3 +41,25 @@ export function fmtDate(d: string | Date | null | undefined): string {
 export function monthKey(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+
+/**
+ * What a task is called when nobody typed a name for it.
+ *
+ * The title is not optional as far as the rest of the portal is concerned —
+ * it is what the list shows, what the approval message says and what the
+ * client reads in WhatsApp — so a blank one becomes a name built from what
+ * the form does know: the category, and the day it is due.
+ *
+ * Category and date, in that order, because the lists sort by date and the
+ * category is what tells two of a client's tasks apart at a glance.
+ */
+export function autoTaskTitle(category: string, dueDate?: string | null): string {
+  // The column is VARCHAR(255) and the category comes off a form, so trim the
+  // category rather than the finished title — cutting the whole string would
+  // lose the date, which is the half that tells two tasks apart.
+  const cat = label(category).trim().slice(0, 200) || "Task";
+  const day = dueDate ? new Date(dueDate) : new Date();
+  if (Number.isNaN(day.getTime())) return cat;
+  const when = day.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  return `${cat} · ${when}`;
+}

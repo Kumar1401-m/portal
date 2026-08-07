@@ -17,7 +17,7 @@ import { notifyClientById, notifyUser } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
-import { monthKey } from "@/lib/utils";
+import { monthKey, autoTaskTitle } from "@/lib/utils";
 import { localTimeToUtc } from "@/lib/zapier";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
@@ -30,8 +30,12 @@ export async function createDeliverable(formData: FormData): Promise<void> {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
 
   const clientId = Number(formData.get("client_id"));
-  const title = String(formData.get("title") || "").trim();
-  if (!clientId || title.length < 2) {
+  // The title is the one brief field you can leave alone: most tasks are "the
+  // next reel for this client" and typing a name for each of them is work that
+  // tells nobody anything. A blank one gets named further down, once the
+  // category and due date are known.
+  const typedTitle = String(formData.get("title") || "").trim();
+  if (!clientId) {
     redirect("/deliverables/new?error=1");
   }
 
@@ -78,18 +82,30 @@ export async function createDeliverable(formData: FormData): Promise<void> {
 
   const mk = dueDate ? dueDate.slice(0, 7) : monthKey();
 
+  const title = typedTitle || autoTaskTitle(category, dueDate);
+
   // Guard against the same task landing twice. A double-click on the submit
   // button (or a request the browser retries) fires this action twice, and
   // both runs used to insert. The disabled button covers the common case;
   // this covers what it can't — a click before hydration, or a retry.
-  const dupe = await queryOne<{ id: number }>(
-    `SELECT id FROM deliverables
-      WHERE client_id = ? AND title = ? AND created_by = ?
-        AND created_at > (NOW() - INTERVAL 20 SECOND)
-      ORDER BY id DESC LIMIT 1`,
-    [clientId, title, user.id]
-  );
-  if (dupe) redirect("/deliverables");
+  //
+  // Only for a title someone typed. Two tasks named alike within twenty
+  // seconds is good evidence of a double submit when a person chose that name
+  // twice, and no evidence at all when the name was generated: adding three
+  // reels for one client in the same category produces three identical
+  // generated names, and refusing the second and third would throw away work
+  // that was asked for, silently. A duplicate can be seen and deleted; a task
+  // that never appeared cannot.
+  if (typedTitle) {
+    const dupe = await queryOne<{ id: number }>(
+      `SELECT id FROM deliverables
+        WHERE client_id = ? AND title = ? AND created_by = ?
+          AND created_at > (NOW() - INTERVAL 20 SECOND)
+        ORDER BY id DESC LIMIT 1`,
+      [clientId, title, user.id]
+    );
+    if (dupe) redirect("/deliverables");
+  }
 
   await execute(
     `INSERT INTO deliverables

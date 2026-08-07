@@ -76,7 +76,7 @@ export async function NewTaskForm({
             ? "That client no longer exists."
             : sp.error === "category"
               ? "Please choose a service and a category for this task."
-              : "Please pick a client and enter a title (min 2 characters)."}
+              : "Please pick a client."}
         </p>
       ) : null}
 
@@ -110,8 +110,11 @@ export async function NewTaskForm({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="title">Title *</Label>
-                <Input id="title" name="title" required placeholder="e.g. Diwali offer reel" />
+                <Label htmlFor="title">Title</Label>
+                <Input id="title" name="title" placeholder="e.g. Diwali offer reel" />
+                <p className="text-xs text-muted-foreground">
+                  Optional — left blank, it&apos;s named after the category and the due date.
+                </p>
               </div>
 
               <div className="space-y-1.5">
