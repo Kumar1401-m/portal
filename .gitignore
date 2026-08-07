@@ -16,3 +16,6 @@ zz-*
 
 # Automation host secrets — never commit
 deploy/.env
+
+# Scratch copies of secrets, for pasting into n8n without mis-selecting them.
+deploy/*.secret.txt
