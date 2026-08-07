@@ -26,6 +26,17 @@ function monthLabel(mk: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 }
 
+/** "2026-08" → "1 Aug 2026" — the day the generated tasks land on. */
+function firstDayLabel(mk: string): string {
+  const [y, m] = mk.split("-").map(Number);
+  if (!y || !m) return mk;
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 /** The months worth offering: half a year either side, plus any that already have work. */
 function monthOptions(current: string, used: string[]): string[] {
   const out = new Set<string>(used);
@@ -160,25 +171,32 @@ export function MonthlyPlan({
           </p>
         ) : (
           <>
+            {/* Only what the client actually buys. "Posters 0 of 0" on a
+                video-only client is a row that says nothing and still has to
+                be read past every time. */}
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-md border border-border bg-muted/30 p-3">
-                <p className="text-xs text-muted-foreground">Videos</p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {plan.videosExisting}{" "}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    of {plan.videoTarget}
-                  </span>
-                </p>
-              </div>
-              <div className="rounded-md border border-border bg-muted/30 p-3">
-                <p className="text-xs text-muted-foreground">Posters</p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {plan.postersExisting}{" "}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    of {plan.posterTarget}
-                  </span>
-                </p>
-              </div>
+              {plan.videoTarget > 0 ? (
+                <div className="rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Videos</p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {plan.videosExisting}{" "}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      of {plan.videoTarget}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
+              {plan.posterTarget > 0 ? (
+                <div className="rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Posters</p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {plan.postersExisting}{" "}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      of {plan.posterTarget}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             <form action={generate} className="flex flex-wrap items-center gap-2">
@@ -198,7 +216,7 @@ export function MonthlyPlan({
               </button>
               {toAdd > 0 ? (
                 <span className="text-xs text-muted-foreground">
-                  All on {monthLabel(plan.month)} 1 — move them below.
+                  All due {firstDayLabel(plan.month)} — move them below.
                 </span>
               ) : null}
             </form>
