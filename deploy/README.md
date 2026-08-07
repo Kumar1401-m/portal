@@ -42,6 +42,23 @@ whatsapp-web.js only — the Cloud API cannot read a group.
 
 ## Setup
 
+### The short version
+
+Everything below is automated by `setup.sh`. On a fresh Ubuntu VM:
+
+```bash
+git clone <your repo> nvkhub && cd nvkhub
+# copy deploy/.env across from your PC — it already holds the right keys
+bash deploy/setup.sh n8n.your-domain.com
+```
+
+It installs Docker, opens the ports Oracle's image blocks, starts both
+containers, and configures Caddy for TLS. Run it again any time; every step
+checks before it acts.
+
+The rest of this file explains what it does and why, for when something needs
+unpicking.
+
 ### 1. The machine
 
 Create an **Ampere (ARM) Always Free** instance on Oracle Cloud running Ubuntu
