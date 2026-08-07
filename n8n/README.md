@@ -26,12 +26,19 @@ restart.
 
 ## Importing
 
-1. n8n → **Workflows** → **Import from File** → pick a file from `workflows/`.
-2. Create the credential once (below), then open each node marked with a key icon and
-   select it.
-3. Set `PORTAL_URL` as an environment variable on the n8n container, or replace
-   `{{ $env.PORTAL_URL }}` in the URL field with `https://nvkhub.vercel.app`.
-4. Toggle the workflow **Active**.
+Easiest route: open the `.json` file, select all, copy — then click on an empty n8n
+canvas and press **Ctrl+V**. n8n builds the workflow from the clipboard. The
+**Workflows → Import from File** menu does the same thing if you prefer.
+
+Then:
+
+1. Create the credential once (below).
+2. Open the HTTP node and select it there.
+3. Toggle the workflow **Active**.
+
+The portal URL is written into the nodes as `https://nvkhub.vercel.app` rather than
+read from an environment variable, so importing needs no configuration on the n8n
+container. If the portal ever moves, it is one field in one node per workflow.
 
 ## The credential
 

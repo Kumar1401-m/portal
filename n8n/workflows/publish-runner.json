@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.PORTAL_URL }}/api/automation/publish/run",
+        "url": "https://nvkhub.vercel.app/api/automation/publish/run",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
