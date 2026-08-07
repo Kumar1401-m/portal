@@ -49,6 +49,17 @@ export type AdminDashboard = {
   }[];
 };
 
+/**
+ * The dashboard an admin sees.
+ *
+ * Every deliverable count joins clients and drops the churned ones. Removing a
+ * client archives it rather than deleting it — the invoices and the history of
+ * what was agreed have to survive — so a count taken straight from the
+ * deliverables table keeps showing work for clients that are, as far as anyone
+ * using the portal is concerned, gone. The list and the approvals board have
+ * always filtered this way; the join is what makes the dashboard agree with
+ * them, and it is not redundant.
+ */
 export async function getAdminDashboard(): Promise<AdminDashboard> {
   const [clients, deliverables, payments, approvals, upcoming, progress] =
     await Promise.all([
@@ -60,17 +71,18 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
       ),
       queryOne<Record<string, unknown>>(
         `SELECT
-          SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')) AS month_total,
-          SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
-              AND status IN ('approved','scheduled','posted','completed')) AS month_completed,
-          SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
-              AND status NOT IN ('approved','scheduled','posted','completed','cancelled','rejected')) AS month_pending,
-          SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
-              AND status IN ('cancelled','rejected')) AS month_dropped,
-          SUM(due_date = CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS today,
-          SUM(due_date > CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
-          SUM(due_date < CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
-         FROM deliverables`
+          SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')) AS month_total,
+          SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
+              AND d.status IN ('approved','scheduled','posted','completed')) AS month_completed,
+          SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
+              AND d.status NOT IN ('approved','scheduled','posted','completed','cancelled','rejected')) AS month_pending,
+          SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
+              AND d.status IN ('cancelled','rejected')) AS month_dropped,
+          SUM(d.due_date = CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS today,
+          SUM(d.due_date > CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
+          SUM(d.due_date < CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+         WHERE c.status != 'churned'`
       ),
       queryOne<Record<string, unknown>>(
         `SELECT
@@ -83,15 +95,17 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
       ),
       queryOne<Record<string, unknown>>(
         `SELECT
-          COALESCE(SUM(status IN ('content_review','review')),0) AS awaiting,
-          COALESCE(SUM(status = 'changes_requested'),0) AS changes
-         FROM deliverables`
+          COALESCE(SUM(d.status IN ('content_review','review')),0) AS awaiting,
+          COALESCE(SUM(d.status = 'changes_requested'),0) AS changes
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+         WHERE c.status != 'churned'`
       ),
       query<AdminDashboard["upcoming_tasks"][number]>(
         `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
                 d.video_type, d.content_category, c.company_name
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-         WHERE d.due_date >= CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')
+         WHERE c.status != 'churned'
+           AND d.due_date >= CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')
          ORDER BY d.due_date ASC LIMIT 8`
       ),
       query<AdminDashboard["client_progress"][number]>(
@@ -322,7 +336,6 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
   // ids come from client_crm_access, but coerce anyway before interpolating.
   const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
   const cScope = ids ? `AND id IN (${ids.join(",")})` : "";
-  const dScope = ids ? `AND client_id IN (${ids.join(",")})` : "";
   const jScope = ids ? `AND d.client_id IN (${ids.join(",")})` : "";
 
   const [clients, deliverables, approvals, upcoming] = await Promise.all([
@@ -332,23 +345,27 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
     ),
     queryOne<Record<string, unknown>>(
       `SELECT
-         SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')) AS month_total,
-         SUM(month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
-             AND status IN ('approved','scheduled','posted','completed')) AS month_completed,
-         SUM(due_date = CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS today,
-         SUM(due_date > CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
-         SUM(due_date < CURDATE() AND status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
-       FROM deliverables WHERE 1=1 ${dScope}`
+         SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')) AS month_total,
+         SUM(d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
+             AND d.status IN ('approved','scheduled','posted','completed')) AS month_completed,
+         SUM(d.due_date = CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS today,
+         SUM(d.due_date > CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
+         SUM(d.due_date < CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+       WHERE c.status != 'churned' ${jScope}`
     ),
     queryOne<Record<string, unknown>>(
-      `SELECT COUNT(*) AS awaiting FROM deliverables
-        WHERE status IN ('content_review','review') ${dScope}`
+      `SELECT COUNT(*) AS awaiting
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE d.status IN ('content_review','review')
+          AND c.status != 'churned' ${jScope}`
     ),
     query<AdminDashboard["upcoming_tasks"][number]>(
       `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
               d.video_type, d.content_category, c.company_name
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-        WHERE d.due_date >= CURDATE()
+        WHERE c.status != 'churned'
+          AND d.due_date >= CURDATE()
           AND d.status NOT IN ('posted','completed','cancelled','rejected') ${jScope}
         ORDER BY d.due_date ASC LIMIT 8`
     ),
