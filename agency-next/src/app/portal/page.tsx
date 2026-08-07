@@ -17,7 +17,6 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceDot } from "@/components/ui/service-badge";
 import { buttonClasses } from "@/components/ui/button";
 import { money, label, fmtDate } from "@/lib/utils";
-import { RawFootagePopup } from "./raw-footage-popup";
 
 export const metadata = { title: "NVK Media" };
 export const dynamic = "force-dynamic";
@@ -38,11 +37,6 @@ export default async function PortalDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Opens on arrival for everything still missing footage, planned slots
-          included — asked for explicitly, so that collecting links is the
-          first thing the dashboard does rather than something to find. */}
-      <RawFootagePopup items={overview.raw_needed_items} />
-
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Hi {overview.company_name} 👋</h1>
         <p className="text-sm text-muted-foreground">Here&apos;s where your content stands.</p>
