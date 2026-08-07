@@ -4,6 +4,10 @@
     {
       "path": "/api/automation/analyse",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/automation/publish/run",
+      "schedule": "0 3 * * *"
     }
   ]
 }

@@ -439,6 +439,34 @@ export async function claimForPublish(
 }
 
 /** A step the workflow reached, logged whether or not it succeeded. */
+/**
+ * Hand a still-encoding video back to the queue.
+ *
+ * The claim exists to stop two runs publishing the same reel, and its lease is
+ * twenty minutes — long enough that a run killed mid-publish doesn't strand
+ * the video for ever. But a container Instagram is still encoding is not a
+ * stranded video, and waiting out that lease would delay every post by twenty
+ * minutes when the encode usually takes well under one.
+ *
+ * The attempt is given back too. Attempts are a budget for things that fail,
+ * and encoding taking a moment is not a failure; counting it would exhaust the
+ * budget on a video that never had a problem.
+ *
+ * Releasing is safe because the container id is already in the audit trail: a
+ * later run — including a concurrent one — resumes that container rather than
+ * creating a second, which is the thing that would actually publish twice.
+ */
+export async function releaseStillEncoding(deliverableId: number): Promise<void> {
+  await execute(
+    `UPDATE deliverables
+        SET instagram_status = 'scheduled',
+            post_locked_at   = NULL,
+            post_attempts    = GREATEST(post_attempts - 1, 0)
+      WHERE id = ? AND instagram_status = 'processing'`,
+    [deliverableId]
+  );
+}
+
 export async function logPublishStage(input: {
   deliverableId: number;
   clientId?: number | null;

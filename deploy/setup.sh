@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# One command to stand the automation host up on a fresh Ubuntu VM.
+# One command to stand the WhatsApp service up on a fresh Ubuntu VM.
 #
-#   bash deploy/setup.sh n8n.your-domain.com
+#   bash deploy/setup.sh wa.your-domain.com
 #
 # Installs Docker, opens the ports Oracle's images block by default, starts
-# n8n and the WhatsApp service, and puts Caddy in front for TLS. Safe to run
+# the WhatsApp service, and puts Caddy in front for TLS. Safe to run
 # again: every step checks before it acts, so a half-finished run is fixed by
 # running it a second time rather than by unpicking it.
 set -euo pipefail
@@ -18,7 +18,7 @@ warn() { printf '\033[33m    %s\033[0m\n' "$*"; }
 
 if [[ -z "$HOST" ]]; then
   echo "Usage: bash deploy/setup.sh <hostname>"
-  echo "  e.g. bash deploy/setup.sh n8n.nvkhub.com"
+  echo "  e.g. bash deploy/setup.sh wa.nvkhub.com"
   echo
   echo "The hostname must already point at this machine's public IP."
   exit 1
@@ -38,21 +38,21 @@ if [[ ! -f "$HERE/.env" ]]; then
 fi
 
 # Fill in the hostname rather than making someone edit the file twice.
-if grep -q '^N8N_HOST=' "$HERE/.env"; then
-  sed -i "s|^N8N_HOST=.*|N8N_HOST=$HOST|" "$HERE/.env"
+if grep -q '^WA_HOST=' "$HERE/.env"; then
+  sed -i "s|^WA_HOST=.*|WA_HOST=$HOST|" "$HERE/.env"
 else
-  echo "N8N_HOST=$HOST" >> "$HERE/.env"
+  echo "WA_HOST=$HOST" >> "$HERE/.env"
 fi
 
 missing=()
-for key in PORTAL_URL N8N_PORTAL_KEY WA_PORTAL_KEY SERVICE_API_KEY WHATSAPP_SERVICE_TOKEN N8N_PASSWORD N8N_ENCRYPTION_KEY; do
+for key in PORTAL_URL WA_PORTAL_KEY SERVICE_API_KEY WHATSAPP_SERVICE_TOKEN; do
   grep -qE "^${key}=.+" "$HERE/.env" || missing+=("$key")
 done
 if (( ${#missing[@]} )); then
   echo "These are still blank in $HERE/.env: ${missing[*]}"
   exit 1
 fi
-echo "    .env looks complete; N8N_HOST set to $HOST"
+echo "    .env looks complete; WA_HOST set to $HOST"
 
 # ---------------------------------------------------------------------------
 say "Docker"
@@ -101,7 +101,7 @@ say "WhatsApp session"
 echo "    you'll scan a QR once — see the logs command printed at the end"
 
 # ---------------------------------------------------------------------------
-say "Starting n8n and the WhatsApp service"
+say "Starting the WhatsApp service"
 # ---------------------------------------------------------------------------
 cd "$HERE"
 docker compose up -d --build
@@ -119,14 +119,10 @@ if ! command -v caddy >/dev/null 2>&1; then
   sudo apt-get update >/dev/null && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y caddy >/dev/null
 fi
 
-# n8n's editor and the WhatsApp service both sit on localhost; only these two
-# names are exposed, and Caddy gets the certificates by itself.
+# The service listens on localhost only; Caddy is what the internet reaches,
+# and it obtains and renews the certificate by itself.
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDY
 $HOST {
-    reverse_proxy 127.0.0.1:5678
-}
-
-wa.$HOST {
     reverse_proxy 127.0.0.1:4000
 }
 CADDY
@@ -137,23 +133,25 @@ say "Done"
 # ---------------------------------------------------------------------------
 cat <<NEXT
 
-    n8n editor          https://$HOST
-    WhatsApp service    https://wa.$HOST
+    WhatsApp service    https://$HOST
 
 Two things left, both in Vercel:
 
-    WHATSAPP_SERVICE_URL             = https://wa.$HOST
-    NEXT_PUBLIC_WHATSAPP_SOCKET_URL  = https://wa.$HOST
+    WHATSAPP_SERVICE_URL             = https://$HOST
+    NEXT_PUBLIC_WHATSAPP_SOCKET_URL  = https://$HOST
 
-then redeploy. The other keys already match what this box is using.
+then redeploy. The keys already match what this box is using.
 
-Watch the WhatsApp service come up with:
+Watch it come up with:
 
-    docker compose logs -f whatsapp-service
+    docker compose logs -f
 
-If no session was restored, the QR appears in those logs and on the portal's
-Settings -> WhatsApp page. Scan it once and it persists across restarts.
+The QR appears in those logs and on the portal's Settings -> WhatsApp page.
+Scan it once; it persists across restarts and reboots.
 
-Finally, import n8n/01-instagram-auto-publisher.json in the n8n editor and
-activate it.
+Instagram publishing needs nothing here — the portal does it itself. Point a
+scheduler at:
+
+    GET https://nvkhub.vercel.app/api/automation/publish/run
+    Authorization: Bearer <CRON_SECRET>
 NEXT
