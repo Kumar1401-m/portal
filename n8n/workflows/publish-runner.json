@@ -78,8 +78,8 @@
     },
     {
       "parameters": {
-        "message": "=Portal publisher returned {{ $json.statusCode }}: {{ JSON.stringify($json.body) }}",
-        "options": {}
+        "errorType": "errorMessage",
+        "errorMessage": "=Portal publisher returned {{ $json.statusCode }}: {{ JSON.stringify($json.body) }}"
       },
       "id": "d0a1b2c3-0004-4000-8000-000000000004",
       "name": "Stop and report",
