@@ -41,7 +41,7 @@ export function EditVideoModal({
   canDelete?: boolean;
   assignees?: { id: number; name: string; role: string }[];
   canUploadVideo?: boolean;
-  postCountries?: { key: string; label: string }[];
+  postCountries?: { key: string; label: string; hour?: number }[];
   scheduledAtLocal?: string;
   postCountry?: string;
 }) {
@@ -53,6 +53,14 @@ export function EditVideoModal({
     submitRawOrReference,
     { ok: false }
   );
+
+  // The country decides the evening slot, so the two move together on screen:
+  // change the country and the time named underneath changes with it.
+  const [country, setCountry] = useState(postCountry);
+  const postingTime = (() => {
+    const hour = postCountries.find((c) => c.key === country)?.hour ?? 18;
+    return `${hour % 12 === 0 ? 12 : hour % 12}:00 ${hour >= 12 ? "PM" : "AM"}`;
+  })();
 
   const [caption, setCaption] = useState(d.caption ?? "");
   const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
@@ -260,13 +268,18 @@ export function EditVideoModal({
 
             {postCountries.length ? (
               <div className="space-y-1.5 rounded-lg border border-border p-3">
-                <Label htmlFor={`pc-${d.id}`}>Posting time</Label>
+                <Label htmlFor={`pc-${d.id}`}>Posting day</Label>
                 <p className="text-xs text-muted-foreground">
-                  Leave blank to post at that country&apos;s best engagement time once the client
-                  approves. Set a time to override it.
+                  Pick the day. It goes out that evening at {postingTime}, the client&apos;s
+                  time. Leave it blank to post as soon as they approve.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Select id={`pc-${d.id}`} name="post_country" defaultValue={postCountry}>
+                  <Select
+                    id={`pc-${d.id}`}
+                    name="post_country"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                  >
                     {postCountries.map((c) => (
                       <option key={c.key} value={c.key}>
                         {c.label}
@@ -274,10 +287,10 @@ export function EditVideoModal({
                     ))}
                   </Select>
                   <Input
-                    type="datetime-local"
+                    type="date"
                     name="post_at"
-                    defaultValue={scheduledAtLocal}
-                    aria-label="Scheduled posting time"
+                    defaultValue={scheduledAtLocal.slice(0, 10)}
+                    aria-label="Posting day"
                   />
                 </div>
               </div>

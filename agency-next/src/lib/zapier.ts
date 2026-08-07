@@ -129,6 +129,46 @@ export function localTimeToUtc(localValue: string, country: string | null | unde
   return new Date(utcMs).toISOString().slice(0, 19).replace("T", " ");
 }
 
+/**
+ * The evening window every post lands in: 6 PM to 8 PM, the client's clock.
+ *
+ * Scheduling is by date, not by date and time. Nobody was choosing a minute —
+ * they were choosing a day and then typing an evening time onto it, which is a
+ * decision already made and made the same way every time. The hour comes from
+ * the country table above, and every entry in it (18:00 India, 19:00 UK and
+ * US, 20:00 Gulf) already falls inside that window.
+ */
+export const POSTING_WINDOW = { fromHour: 18, toHour: 20 } as const;
+
+/** A picked date plus that country's evening slot, as a MySQL DATETIME in UTC. */
+export function scheduleDateToUtc(
+  date: string,
+  country: string | null | undefined
+): string | null {
+  const m = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d] = m.map(Number) as unknown as number[];
+  const t = bestPostingTimeFor(country);
+  const utcMs = Date.UTC(y, mo - 1, d, t.hour, t.minute ?? 0) - t.utcOffsetMinutes * 60000;
+  return new Date(utcMs).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** A stored UTC time as the date it falls on in the client's clock, for the date input. */
+export function utcToLocalDateInput(
+  utc: string | null,
+  country: string | null | undefined
+): string {
+  return utcToLocalInput(utc, country).slice(0, 10);
+}
+
+/** "6:00 PM" — the slot a country's posts go out in, for saying so on screen. */
+export function postingTimeLabel(country: string | null | undefined): string {
+  const t = bestPostingTimeFor(country);
+  const h = t.hour % 12 === 0 ? 12 : t.hour % 12;
+  const suffix = t.hour >= 12 ? "PM" : "AM";
+  return `${h}:${String(t.minute ?? 0).padStart(2, "0")} ${suffix}`;
+}
+
 /** The reverse, for showing a stored UTC time back in the country's clock. */
 export function utcToLocalInput(utc: string | null, country: string | null | undefined): string {
   if (!utc) return "";

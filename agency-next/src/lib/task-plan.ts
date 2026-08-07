@@ -241,6 +241,69 @@ export async function setTaskDate(taskId: number, date: string | null): Promise<
   return (res.affectedRows ?? 0) > 0;
 }
 
+/**
+ * Fill the month for every active client at once.
+ *
+ * Generating on client creation only helps the clients added after it existed.
+ * Everyone already on the books, and every month after the first, still needs
+ * a person to ask — and asking client by client is the same tedium one level
+ * up. This is the same top-up, run across the book.
+ *
+ * Churned clients are skipped: they are gone as far as the portal is
+ * concerned, and generating work for them is how a removed client reappears
+ * on the dashboard.
+ *
+ * One client failing does not stop the rest. A month half-filled is fixable
+ * from the client's own page; a run that abandons the remaining clients
+ * because the third one had a bad row is not obviously fixable at all.
+ */
+export async function generateForAllClients(
+  month: string,
+  createdBy: number
+): Promise<{ month: string; clients: number; videos: number; posters: number; failed: number }> {
+  const mk = safeMonth(month);
+  const clients = await query<{ id: number }>(
+    `SELECT id FROM clients
+      WHERE status <> 'churned'
+        AND (COALESCE(monthly_deliverables,0) > 0 OR COALESCE(monthly_posters,0) > 0)
+      ORDER BY id`
+  );
+
+  let touched = 0, videos = 0, posters = 0, failed = 0;
+  for (const c of clients) {
+    try {
+      const made = await generateMonthTasks(c.id, mk, createdBy);
+      if (made.videos || made.posters) touched++;
+      videos += made.videos;
+      posters += made.posters;
+    } catch {
+      failed++;
+    }
+  }
+  return { month: mk, clients: touched, videos, posters, failed };
+}
+
+/** What a run across the book would create, before anyone presses anything. */
+export async function pendingAcrossClients(
+  month: string
+): Promise<{ clients: number; videos: number; posters: number }> {
+  const mk = safeMonth(month);
+  const clients = await query<{ id: number }>(
+    `SELECT id FROM clients
+      WHERE status <> 'churned'
+        AND (COALESCE(monthly_deliverables,0) > 0 OR COALESCE(monthly_posters,0) > 0)`
+  );
+  let n = 0, videos = 0, posters = 0;
+  for (const c of clients) {
+    const p = await monthPlan(c.id, mk);
+    if (!p) continue;
+    if (p.videosToAdd || p.postersToAdd) n++;
+    videos += p.videosToAdd;
+    posters += p.postersToAdd;
+  }
+  return { clients: n, videos, posters };
+}
+
 export type PlannedTask = {
   id: number;
   title: string;

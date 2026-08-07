@@ -18,7 +18,7 @@ import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey, autoTaskTitle } from "@/lib/utils";
-import { localTimeToUtc } from "@/lib/zapier";
+import { localTimeToUtc, scheduleDateToUtc } from "@/lib/zapier";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 
@@ -378,12 +378,19 @@ export async function updateVideoDetails(
   const title = val("title");
   if (title) updates.title = title; // title is required — don't null it out
 
-  // Manual posting time: an explicit slot overrides the automatic best-time
-  // calculation done at client approval. Blank clears it and hands control back.
+  // Posting day: the date is chosen, the time is the client's evening slot —
+  // 6 to 8 PM depending on the country. Blank clears it, which hands the timing
+  // back to the automatic calculation made at client approval.
+  //
+  // Still accepts a date with a time on it, because a task scheduled before
+  // this became a date-only field has one stored, and a browser that renders
+  // the input its own way should not be able to wipe a scheduled post.
   if (formData.has("post_at") && me.role === "super_admin") {
-    const localValue = val("post_at");
+    const picked = val("post_at");
     const country = val("post_country") || null;
-    updates.scheduled_at = localValue ? localTimeToUtc(localValue, country) : null;
+    updates.scheduled_at = picked
+      ? scheduleDateToUtc(picked.slice(0, 10), country) ?? localTimeToUtc(picked, country)
+      : null;
   }
 
   // Reassignment, including clearing it: the field is only present when the

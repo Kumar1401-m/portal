@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { Users, Plus } from "lucide-react";
-import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { requireUser, ADMIN_OR_CRM_ROLES, ADMIN_ROLES } from "@/lib/auth";
+import { pendingAcrossClients } from "@/lib/task-plan";
+import { monthKey } from "@/lib/utils";
+import { BulkPlanButton } from "./bulk-plan";
 import { getClients } from "@/lib/queries";
 import { crmClientIds } from "@/lib/crm";
 import { resolveAvatarUrl } from "@/lib/storage";
@@ -28,6 +31,13 @@ export default async function ClientsPage() {
   );
   const active = clients.filter((c) => c.status === "active").length;
 
+  // What a run across the book would create this month — only for the roles
+  // that may actually run it, so nobody else pays for the counting.
+  const month = monthKey();
+  const pending = ADMIN_ROLES.includes(user.role)
+    ? await pendingAcrossClients(month)
+    : null;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -40,11 +50,19 @@ export default async function ClientsPage() {
             {clients.length} total · {active} active
           </p>
         </div>
-        {true ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {pending ? (
+            <BulkPlanButton
+              month={month}
+              clients={pending.clients}
+              videos={pending.videos}
+              posters={pending.posters}
+            />
+          ) : null}
           <Link href="/clients/new" className={buttonClasses()}>
             <Plus className="h-4 w-4" /> New client
           </Link>
-        ) : null}
+        </div>
       </div>
 
       <Card className="overflow-hidden">
