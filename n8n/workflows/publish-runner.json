@@ -16,14 +16,21 @@
       "name": "Every 15 minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-220, 0],
+      "position": [-240, 0],
       "notes": "Vercel's Hobby plan allows one cron run a day, which cannot serve a 6-8 PM posting window. This is the whole reason n8n is here."
     },
     {
       "parameters": {
         "url": "https://nvkhub.vercel.app/api/automation/publish/run",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
         "options": {
           "timeout": 90000,
           "response": {
@@ -38,14 +45,8 @@
       "name": "Run the publisher",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [0, 0],
-      "notes": "GET, no body. Safe to call as often as you like: each video is claimed before anything is sent to Instagram, so two overlapping runs cannot post the same reel. neverError is on so a bad response reaches the check below instead of failing the node silently.",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "portal-cron-secret",
-          "name": "Portal CRON_SECRET"
-        }
-      }
+      "position": [-20, 0],
+      "notes": "The key goes straight in the header rather than through an n8n credential — one field to fill, and no credential to create or attach. Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env. GET, no body. Safe at any frequency: each video is claimed before anything is sent to Instagram, so overlapping runs cannot post the same reel twice."
     },
     {
       "parameters": {
@@ -73,8 +74,8 @@
       "name": "Did it fail?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [220, 0],
-      "notes": "401 means the header credential does not match CRON_SECRET on Vercel. 404 means PORTAL_URL is wrong."
+      "position": [200, 0],
+      "notes": "401 means the header value is not the CRON_SECRET. Point the URL at /api/automation/whoami to be told exactly which way it is wrong."
     },
     {
       "parameters": {
@@ -85,17 +86,8 @@
       "name": "Stop and report",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
-      "position": [440, -100],
-      "notes": "Fails the execution so it shows red in n8n's list. A publisher that quietly stopped working is the failure worth catching."
-    },
-    {
-      "parameters": {},
-      "id": "d0a1b2c3-0005-4000-8000-000000000005",
-      "name": "Nothing to do",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [440, 100],
-      "notes": "A normal run: the response says how many were posted, and zero is the usual answer outside the evening window."
+      "position": [420, -100],
+      "notes": "Fails the execution so it shows red in the Executions list. A publisher that quietly stopped working is the failure worth catching."
     }
   ],
   "connections": {
@@ -106,10 +98,7 @@
       "main": [[{ "node": "Did it fail?", "type": "main", "index": 0 }]]
     },
     "Did it fail?": {
-      "main": [
-        [{ "node": "Stop and report", "type": "main", "index": 0 }],
-        [{ "node": "Nothing to do", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Stop and report", "type": "main", "index": 0 }], []]
     }
   },
   "settings": {

@@ -26,35 +26,29 @@ restart.
 
 ## Importing
 
-Easiest route: open the `.json` file, select all, copy — then click on an empty n8n
-canvas and press **Ctrl+V**. n8n builds the workflow from the clipboard. The
-**Workflows → Import from File** menu does the same thing if you prefer.
+Open the `.json` file, select all, copy — then click an empty n8n canvas and press
+**Ctrl+V**. n8n builds the workflow from the clipboard. **Workflows → Import from
+File** does the same thing.
 
-Then:
+Then **one edit**, and it runs:
 
-1. Create the credential once (below).
-2. Open the HTTP node and select it there.
-3. Toggle the workflow **Active**.
+1. Double-click the HTTP node.
+2. Under **Headers**, replace `PASTE_CRON_SECRET_HERE` with the `CRON_SECRET` value
+   from `deploy/.env`. Nothing in front of it — no `Bearer`, no quotes.
+3. Save, then **Publish** (older n8n calls it Active).
 
-The portal URL is written into the nodes as `https://nvkhub.vercel.app` rather than
-read from an environment variable, so importing needs no configuration on the n8n
-container. If the portal ever moves, it is one field in one node per workflow.
+There is no credential to create. The key travels as a plain header, which is one
+field in one obvious place instead of a separate object to build, name and attach —
+and the mismatch between those was the only thing that ever went wrong here.
 
-## The credential
+The trade-off, stated plainly: n8n encrypts credentials at rest and does not encrypt
+workflow parameters, so the key sits in the workflow on your own VPS. Everything that
+key unlocks is a scheduled job on your own portal, and anyone who can read your n8n
+workflows can already run those jobs from inside n8n. If that ever stops being true,
+move it back to a Header Auth credential — `Authorization` as the name, the same value.
 
-**Credentials → New → Header Auth**
-
-| Field | Value |
-|---|---|
-| Name | `Portal CRON_SECRET` |
-| Header name | `Authorization` |
-| Header value | `Bearer <the CRON_SECRET>` |
-
-The secret itself is in `deploy/.env` and in the Vercel project's environment variables.
-It is not written down here, and it should not be pasted into a chat window or a commit.
-
-The word `Bearer` and one space must be in front of it. Without them the portal returns
-401 and the workflow stops with the response body visible in the execution log.
+The portal URL is written into the nodes, so nothing needs configuring on the n8n
+container. If the portal moves, it is one field per workflow.
 
 ## The workflows
 
