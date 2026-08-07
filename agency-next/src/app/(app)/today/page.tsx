@@ -7,7 +7,9 @@ import {
   getServiceCounts,
   getClientsMini,
   getAssignees,
+  boardEmptyReason,
 } from "@/lib/deliverables";
+import { EmptyBoard } from "@/components/admin/empty-board";
 import { crmClientIds } from "@/lib/crm";
 import { getCategoryMap, getUsedCategories } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
@@ -93,9 +95,10 @@ export default async function TodayPage({
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
-          <p className="p-10 text-center text-sm text-muted-foreground">
-            Nothing due{hasFilters || service ? " in this view" : ""} — you&apos;re all caught up. 🎉
-          </p>
+          <EmptyBoard
+            reason={await boardEmptyReason(scopeIds)}
+            filtered={hasFilters || Boolean(service)}
+          />
         ) : (
           <Table>
             <THead>

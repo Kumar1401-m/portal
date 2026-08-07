@@ -287,6 +287,73 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
   };
 }
 
+export type BoardEmptyReason = {
+  /** Tasks that exist and belong to a client still on the books. */
+  live: number;
+  /** Of those, why each is not on a "due today or overdue" board. */
+  later: number;
+  undated: number;
+  finished: number;
+  /** Tasks hidden by something other than their own date. */
+  archivedClient: number;
+  noClient: number;
+};
+
+/**
+ * Why a board is empty, when it is.
+ *
+ * "Nothing due — you're all caught up" is the right message when there is
+ * genuinely nothing, and a lie when there are sixteen tasks that the board's
+ * filter happens to exclude. The difference matters: one means rest, the other
+ * means something is wrong and gives no clue what.
+ *
+ * Every count here is a reason a task can exist and still not appear — dated
+ * later, never dated, already finished, or belonging to a client who has been
+ * archived or deleted outright. Only queried when the board came back empty,
+ * so a busy day never pays for it.
+ */
+export async function boardEmptyReason(
+  crmClientIds?: number[] | null
+): Promise<BoardEmptyReason> {
+  const empty: BoardEmptyReason = {
+    live: 0, later: 0, undated: 0, finished: 0, archivedClient: 0, noClient: 0,
+  };
+  if (crmClientIds && crmClientIds.length === 0) return empty;
+  const scope =
+    crmClientIds && crmClientIds.length
+      ? `AND d.client_id IN (${crmClientIds.map(() => "?").join(",")})`
+      : "";
+  const params = crmClientIds && crmClientIds.length ? crmClientIds : [];
+
+  const [live, hidden] = await Promise.all([
+    queryOne<Record<string, unknown>>(
+      `SELECT COUNT(*) AS live,
+              COALESCE(SUM(d.due_date > CURDATE()),0) AS later,
+              COALESCE(SUM(d.due_date IS NULL),0) AS undated,
+              COALESCE(SUM(d.status IN ('posted','completed','cancelled','rejected')),0) AS finished
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status != 'churned' ${scope}`,
+      params
+    ),
+    queryOne<Record<string, unknown>>(
+      `SELECT COALESCE(SUM(c.id IS NOT NULL AND c.status = 'churned'),0) AS archived,
+              COALESCE(SUM(c.id IS NULL),0) AS orphaned
+         FROM deliverables d LEFT JOIN clients c ON c.id = d.client_id
+        WHERE 1=1 ${scope}`,
+      params
+    ),
+  ]);
+
+  return {
+    live: n(live?.live),
+    later: n(live?.later),
+    undated: n(live?.undated),
+    finished: n(live?.finished),
+    archivedClient: n(hidden?.archived),
+    noClient: n(hidden?.orphaned),
+  };
+}
+
 export type ClientMini = { id: number; company_name: string };
 
 /** Active/non-churned clients for dropdowns. */
