@@ -24,6 +24,8 @@ import { ActionForm } from "./action-form";
 import { CategoryManager } from "./category-manager";
 import { TeamManager } from "./team-manager";
 import { SchemaPanel } from "./schema-panel";
+import { ClearVideoDataPanel } from "./clear-panel";
+import { countVideoData } from "@/lib/clear-video-data";
 import { StorageCheck } from "./storage-check";
 import { saveAgencyProfile, saveBillingSettings, saveStorageSettings } from "./actions";
 
@@ -57,13 +59,14 @@ export default async function SettingsPage() {
   // renders) and in the server actions themselves (what's allowed to run).
   const user = await requireUser(ADMIN_ROLES);
   const isSuperAdmin = user.role === "super_admin";
-  const [settings, categories, team, schema, schemaTables] = await Promise.all([
+  const [settings, categories, team, schema, schemaTables, videoCounts] = await Promise.all([
     getPublicSettings(),
     getCategoryMap(true), // include hidden ones so they can be re-enabled
     getTeam(),
     // Only a super admin can apply these, so only they need the status.
     isSuperAdmin ? schemaStatus() : Promise.resolve([]),
     isSuperAdmin ? tableStatus() : Promise.resolve([]),
+    isSuperAdmin ? countVideoData() : Promise.resolve({ videos: 0, files: 0 }),
   ]);
 
   return (
@@ -331,6 +334,12 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Last on the page on purpose: nobody should meet this on the way to
+          something else. */}
+      {isSuperAdmin ? (
+        <ClearVideoDataPanel videos={videoCounts.videos} files={videoCounts.files} />
+      ) : null}
 
       {/* --------------------------- System status --------------------------- */}
       <Card>
