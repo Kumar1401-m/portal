@@ -15,6 +15,8 @@ import { getClientDetail } from "@/lib/clients";
 import { canAccessClient } from "@/lib/crm";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
+import { MonthlyPlan } from "./monthly-plan";
+import { monthPlan, monthTasks, clientMonths, safeMonth } from "@/lib/task-plan";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge, ServiceChip } from "@/components/ui/service-badge";
@@ -33,14 +35,26 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ClientDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const { id } = await params;
   if (!(await canAccessClient(user, Number(id)))) notFound();
   const c = await getClientDetail(Number(id));
   if (!c) notFound();
+
+  // The month the plan panel is showing — the current one unless the picker
+  // has asked for another.
+  const sp = await searchParams;
+  const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
+  const [plan, planTasks, usedMonths] = await Promise.all([
+    monthPlan(c.id, month),
+    monthTasks(c.id, month),
+    clientMonths(c.id),
+  ]);
 
   const ph = (c.placeholder_values && typeof c.placeholder_values === "object"
     ? c.placeholder_values
@@ -226,6 +240,15 @@ export default async function ClientDetailPage({
               ) : null}
             </Card>
           </div>
+
+          {plan ? (
+            <MonthlyPlan
+              clientId={c.id}
+              plan={plan}
+              tasks={planTasks}
+              usedMonths={usedMonths}
+            />
+          ) : null}
 
           <Card className="overflow-hidden">
             <CardHeader>

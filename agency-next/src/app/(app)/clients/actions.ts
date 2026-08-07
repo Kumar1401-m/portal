@@ -10,6 +10,8 @@ import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
 import { setClientCrmAccess } from "@/lib/crm";
+import { generateMonthTasks } from "@/lib/task-plan";
+import { monthKey } from "@/lib/utils";
 
 const PAYMENT_PLANS = ["monthly", "quarterly", "half_yearly", "yearly", "one_time"];
 const STATUSES = ["active", "inactive", "paused", "churned"];
@@ -167,6 +169,17 @@ export async function createClient(formData: FormData): Promise<void> {
   }
 
   await normalizeInstagramId(clientId, columns.ig_user_id);
+
+  // The month's work, from the numbers just entered. Best-effort: a client who
+  // is saved but whose tasks failed to generate is a nuisance you can fix with
+  // the button on their page, while losing the whole client record over it is
+  // not. Nothing is generated when both counts are zero.
+  try {
+    await generateMonthTasks(clientId, monthKey(), user.id);
+    revalidatePath("/deliverables");
+  } catch (err) {
+    console.warn("could not generate the first month's tasks:", err instanceof Error ? err.message : err);
+  }
 
   revalidatePath("/clients");
   redirect(`/clients/${clientId}`);
