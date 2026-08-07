@@ -1,0 +1,60 @@
+{
+  "name": "Portal — nightly caption analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e0a1b2c3-0001-4000-8000-000000000001",
+      "name": "02:30 every night",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-220, 0],
+      "notes": "Server time. Overnight because analysing a video costs an AI call per video and nobody is waiting on it."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PORTAL_URL }}/api/automation/analyse",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e0a1b2c3-0002-4000-8000-000000000002",
+      "name": "Analyse new videos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "portal-cron-secret",
+          "name": "Portal CRON_SECRET"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "02:30 every night": {
+      "main": [[{ "node": "Analyse new videos", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {}
+}
