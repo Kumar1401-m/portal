@@ -33,7 +33,15 @@ export type Snapshot = {
     scheduled: number;
     posted_this_month: number;
     not_posted: number;
+    /** Waiting on the client to send footage — blocked on them, not on us. */
+    no_footage: number;
+    /** Went out on the 24-hour rule, with no word from the client. */
+    auto_approved: number;
+    /** Publishing was attempted and failed, as opposed to not yet tried. */
+    posting_failed: number;
   };
+  /** Clients the agency can actually message. The rest are outside every reminder. */
+  whatsapp?: { clients: number; reachable: number };
   money?: { received_this_month: number; pending: number };
   by_client?: { client: string; planned: number; approved: number }[];
   today_list?: { title: string; client: string; status: string; due: string | null }[];
@@ -70,6 +78,10 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
   const isAdmin = user.role === "super_admin" || user.role === "admin";
 
   const cloudOk = await hasColumn("deliverables", "cloud_video_key");
+  // Added by the WhatsApp migration. Without the guard a database that has not
+  // run it loses the whole snapshot — one missing column would take out every
+  // answer the assistant gives, not just the auto-approval count.
+  const waOk = await hasColumn("deliverables", "wa_approved_by");
 
   const content = await queryOne<Record<string, unknown>>(
     `SELECT
@@ -87,10 +99,35 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
            AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m')) AS posted_this_month,
        SUM(d.status = 'scheduled' AND d.scheduled_at IS NOT NULL
            AND d.scheduled_at < NOW() - INTERVAL 30 MINUTE
-           AND d.instagram_status <> 'posted') AS not_posted
+           AND d.instagram_status <> 'posted') AS not_posted,
+       /* The three the assistant could not see, and so answered wrongly or
+          not at all: work blocked on the client rather than on us, work that
+          went out without anyone approving it, and work whose posting
+          actually failed as opposed to merely not having happened yet. */
+       SUM(d.status IN ('pending','waiting_for_raw')
+           AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')) AS no_footage,
+       ${waOk ? `SUM(d.wa_approved_by = 'Auto-approved after 24h'
+           AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m'))` : "0"} AS auto_approved,
+       SUM(d.instagram_status = 'failed') AS posting_failed
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status <> 'churned' AND ${where}`
   );
+
+  /*
+   * How many clients the agency can actually reach on WhatsApp.
+   *
+   * Every reminder built this week goes through a linked group, so a client
+   * without one is silently outside all of it. The assistant was confidently
+   * reporting "3 waiting for approval" with no way to know that two of those
+   * clients could not be chased at all.
+   */
+  const reach = await queryOne<{ total: number; linked: number }>(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(EXISTS(
+              SELECT 1 FROM whatsapp_groups g
+               WHERE g.client_id = c.id AND g.is_active = 1)),0) AS linked
+       FROM clients c WHERE c.status <> 'churned'`
+  ).catch(() => null);
 
   const snap: Snapshot = {
     scope: label,
@@ -107,8 +144,12 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
       scheduled: n(content?.scheduled),
       posted_this_month: n(content?.posted_this_month),
       not_posted: n(content?.not_posted),
+      no_footage: n(content?.no_footage),
+      auto_approved: n(content?.auto_approved),
+      posting_failed: n(content?.posting_failed),
     },
   };
+  if (reach) snap.whatsapp = { clients: n(reach.total), reachable: n(reach.linked) };
 
   // Today's worklist — small enough to quote back verbatim.
   snap.today_list = (
