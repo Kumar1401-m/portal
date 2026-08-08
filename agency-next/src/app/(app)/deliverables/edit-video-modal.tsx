@@ -20,6 +20,7 @@ import {
 } from "@/components/admin/service-category-picker";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -286,8 +287,7 @@ export function EditVideoModal({
                       </option>
                     ))}
                   </Select>
-                  <Input
-                    type="date"
+                  <DateField
                     name="post_at"
                     defaultValue={scheduledAtLocal.slice(0, 10)}
                     aria-label="Posting day"
