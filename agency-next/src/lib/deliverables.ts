@@ -52,6 +52,8 @@ export type DeliverableFilters = {
   month?: string;
   q?: string;
   today?: boolean; // due today or overdue, still open
+  /** Dated after today and still open — what the Today board falls back to. */
+  upcoming?: boolean;
   assignedTo?: number; // scope to one owner (poster designers)
   service?: ServiceKey; // task organisation: one service per tab
   category?: string;
@@ -118,6 +120,11 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
   if (f.today) {
     conds.push(
       "d.due_date <= CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')"
+    );
+  }
+  if (f.upcoming) {
+    conds.push(
+      "d.due_date > CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')"
     );
   }
   if (f.service) {

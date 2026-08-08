@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, CalendarClock } from "lucide-react";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import { CaptionCatchUp } from "@/components/admin/caption-catch-up";
 import {
@@ -52,7 +52,7 @@ export default async function TodayPage({
     crmClientIds: scopeIds,
   };
 
-  const [rows, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
+  const [due, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
     getDeliverables(scoped),
     getServiceCounts(scoped),
     getClientsMini(scopeIds),
@@ -60,6 +60,16 @@ export default async function TodayPage({
     getCategoryMap(),
     getUsedCategories(),
   ]);
+
+  // With nothing due, show what is coming instead of an empty board. A board
+  // that says "nothing to do" while twenty tasks sit a few days out is
+  // technically right and useless — you still have to go somewhere else to
+  // see the work. Capped, because this is a glance at what is next, not the
+  // whole list; that is what Tasks is for.
+  const ahead =
+    due.length === 0 ? (await getDeliverables({ ...scoped, today: false, upcoming: true })).slice(0, 20) : [];
+  const rows = due.length ? due : ahead;
+  const showingAhead = due.length === 0 && ahead.length > 0;
 
   const categories = service
     ? Array.from(new Set([...categoryMap[service].map((c) => c.name), ...usedCategories]))
@@ -76,8 +86,11 @@ export default async function TodayPage({
           ) : null}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {rows.length} item{rows.length === 1 ? "" : "s"} due today or overdue
-          {hasFilters ? " (filtered)" : ""}.
+          {showingAhead
+            ? `Nothing due today — showing the next ${rows.length} coming up.`
+            : `${rows.length} item${rows.length === 1 ? "" : "s"} due today or overdue`}
+          {hasFilters ? " (filtered)" : ""}
+          {showingAhead ? "" : "."}
         </p>
       </div>
 
@@ -100,6 +113,16 @@ export default async function TodayPage({
             filtered={hasFilters || Boolean(service)}
           />
         ) : (
+          <>
+            {/* Said once, above the rows, so nobody reads a list of future
+                work as a list of things that are late. */}
+            {showingAhead ? (
+              <p className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+                <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                Nothing is due today. These are the next {rows.length} coming up — none of
+                them is late.
+              </p>
+            ) : null}
           <Table>
             <THead>
               <tr>
@@ -183,6 +206,7 @@ export default async function TodayPage({
               })}
             </TBody>
           </Table>
+          </>
         )}
       </Card>
     </div>
