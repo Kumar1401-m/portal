@@ -62,15 +62,43 @@ const REJECT_RE = new RegExp(
 const STATUS_RE = /^\s*(?:status|update|progress)[\s?.!]*$/i;
 
 /**
- * A shared link, which for a client group almost always means footage.
+ * A link to a file-sharing service — which in a client group means footage.
  *
  * Matched anywhere in the message, because people write "here you go <link>".
- * Deliberately any http(s) URL rather than Drive specifically — clients use
- * WeTransfer, Dropbox and iCloud too, and the portal stores whatever arrives.
- * What it is attached to is decided there, and a link with nothing waiting on
- * footage is answered with silence rather than a wrong guess.
+ *
+ * Restricted to hosts people actually send files with, rather than any URL.
+ * A client group carries links all day — a competitor's reel, an article, a
+ * location on Maps — and any of those silently becoming the raw footage on a
+ * task is a worse failure than missing an unusual host, because nobody finds
+ * out until an editor opens it. Anyone can send it: the group identifies the
+ * client, and footage legitimately arrives from a videographer or a manager
+ * as often as from the person who signed the contract.
+ *
+ * An unlisted host is not lost — it stays in the transcript, and the team can
+ * paste it into the task themselves.
  */
-const LINK_RE = /\bhttps?:\/\/[^\s<>"']+/i;
+const FILE_HOSTS = [
+  'drive\\.google\\.com',
+  'docs\\.google\\.com',
+  'photos\\.app\\.goo\\.gl',
+  'dropbox\\.com',
+  'we\\.tl',
+  'wetransfer\\.com',
+  'icloud\\.com',
+  'onedrive\\.live\\.com',
+  '1drv\\.ms',
+  'mega\\.nz',
+  'frame\\.io',
+  'box\\.com',
+  'terabox\\.com',
+  'send-anywhere\\.com',
+  'pcloud\\.link',
+].join('|');
+
+const LINK_RE = new RegExp(
+  String.raw`\bhttps?:\/\/[^\s<>"']*(?:${FILE_HOSTS})[^\s<>"']*`,
+  'i'
+);
 
 const normalizeCode = (prefix, digits) =>
   prefix && digits ? `${prefix.toUpperCase()}${digits}` : null;
