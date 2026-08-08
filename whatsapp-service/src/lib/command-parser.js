@@ -95,10 +95,27 @@ const FILE_HOSTS = [
   'pcloud\\.link',
 ].join('|');
 
-const LINK_RE = new RegExp(
+const KNOWN_HOST_LINK_RE = new RegExp(
   String.raw`\bhttps?:\/\/[^\s<>"']*(?:${FILE_HOSTS})[^\s<>"']*`,
   'i'
 );
+
+/** Any link at all, once something in the message has said what it is. */
+const ANY_LINK_RE = /\bhttps?:\/\/[^\s<>"']+/i;
+
+/**
+ * A word that says "this link is the footage".
+ *
+ * With one of these present the host no longer matters, which is the point:
+ * a client on a service nobody predicted can still send us their files, and
+ * anyone in the group can do it. Without one, only a known file host counts,
+ * so an article or a competitor's reel dropped into the chat stays a link in
+ * a chat.
+ *
+ * Kept to words that are unambiguous in this context. "video" is deliberately
+ * absent — half the conversation in a client group is about videos.
+ */
+const FOOTAGE_WORD_RE = /\b(raw|footage|shoot|clips?|rushes|files?)\b/i;
 
 const normalizeCode = (prefix, digits) =>
   prefix && digits ? `${prefix.toUpperCase()}${digits}` : null;
@@ -222,7 +239,11 @@ function parseCommand(rawText) {
     return { command: 'status', videoCode: null, comment: null, needsContext: false };
   }
 
-  const link = LINK_RE.exec(text);
+  // A known file host speaks for itself; any other link needs a word saying
+  // what it is.
+  const link =
+    KNOWN_HOST_LINK_RE.exec(text) ||
+    (FOOTAGE_WORD_RE.test(text) ? ANY_LINK_RE.exec(text) : null);
   if (link) {
     return { command: 'footage', videoCode: null, comment: null, link: link[0], needsContext: false };
   }

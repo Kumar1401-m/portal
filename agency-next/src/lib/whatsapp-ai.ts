@@ -300,6 +300,8 @@ export function welcomeMessage(companyName: string, agencyName: string): string 
     "",
     "_A voice note works too._",
     "",
-    "You can also send us footage by pasting a Google Drive link here, or type *status* any time to see where everything stands.",
+    "To send us footage, paste the link here — a Drive or WeTransfer link on its own is enough, or write *raw* in front of any other link.",
+    "",
+    "Type *status* any time to see where everything stands.",
   ].join("\n");
 }

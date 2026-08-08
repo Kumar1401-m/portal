@@ -325,7 +325,8 @@ async function requestFootage(): Promise<{ sent: number; failed: number }> {
     const text =
       `We're due to start editing on *${fmtDate(r.due_date)}* and we don't have your footage yet.\n\n` +
       `${n === 1 ? "This one" : `These ${n}`}:\n${list}\n\n` +
-      `Just reply with a Google Drive link and we'll take it from there.`;
+      `Just reply with the link — a Drive or WeTransfer link on its own is enough, ` +
+      `or write *raw* in front of any other link.`;
     (await deliver("footage_due", key, r.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
