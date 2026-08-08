@@ -228,8 +228,19 @@ services:
       - "traefik.http.routers.wa.entrypoints=$ENTRY"
       - "traefik.http.routers.wa.tls.certresolver=$RESOLVER"
       - "traefik.http.services.wa.loadbalancer.server.port=$PORT"
+      # Which of the container's networks Traefik should dial.
+      #
+      # Without this, a container on more than one network leaves Traefik to
+      # choose, and it can choose the one Traefik is not itself on. The route
+      # then exists and resolves to an address Traefik cannot reach, which
+      # presents as a healthy container that answers on localhost and times
+      # out through the proxy — indistinguishable from a dead service, and
+      # the cause of an afternoon spent restarting a container that was fine.
+      - "traefik.docker.network=$NET"
+    # Only the proxy network. The compose default earns nothing here — this
+    # service talks to Traefik and to the internet, and its absence removes
+    # the ambiguity above rather than relying on the label to resolve it.
     networks:
-      - default
       - proxy
 networks:
   proxy:
