@@ -53,6 +53,21 @@ function buildRoutes({ whatsapp, sendQueue }) {
       state: status.state,
       connected: status.connected,
       uptimeSeconds: Math.round(process.uptime()),
+      /*
+       * Which build this is.
+       *
+       * Added after an afternoon spent debugging a feature that was simply
+       * not deployed: a client sent a footage link, the parser did not know
+       * the word, and it looked like a parsing bug rather than an old
+       * container. Uptime cannot tell you that — a stale build restarts just
+       * as happily as a fresh one.
+       *
+       * Set by deploy/hostinger.sh from the checked-out commit. "unknown"
+       * means the container was started some other way.
+       */
+      build: process.env.BUILD_SHA || 'unknown',
+      /** What a client can send that this build understands. */
+      handles: ['approve', 'change', 'reject', 'status', 'footage'],
     });
   });
 

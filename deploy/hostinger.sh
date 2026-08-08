@@ -164,6 +164,17 @@ bold "Starting the WhatsApp service"
 # ---------------------------------------------------------------------------
 sed -i "s|^WA_HOST=.*|WA_HOST=$WA_HOST|" "$HERE/.env" 2>/dev/null || echo "WA_HOST=$WA_HOST" >> "$HERE/.env"
 
+# Stamp the build so /health can say which commit is running. Without it, a
+# feature that was never deployed is indistinguishable from one that is
+# broken — which cost an afternoon.
+SHA="$(git -C "$HERE/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if grep -q "^BUILD_SHA=" "$HERE/.env"; then
+  sed -i "s|^BUILD_SHA=.*|BUILD_SHA=$SHA|" "$HERE/.env"
+else
+  echo "BUILD_SHA=$SHA" >> "$HERE/.env"
+fi
+info "build: $SHA"
+
 # Traefik needs labels and a second network, and neither can be added to a
 # running container — so under Traefik the start happens once, below, with the
 # override in place, rather than starting here and immediately recreating.
