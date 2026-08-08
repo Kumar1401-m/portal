@@ -21,6 +21,7 @@
  *     never leave this process — an agency phone gets personal messages, and
  *     they are none of the portal's business.
  */
+const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
@@ -41,6 +42,49 @@ const STATE = {
   FAILED: 'failed',
 };
 
+/**
+ * Remove the lock Chromium leaves behind when it is killed rather than closed.
+ *
+ * Chromium writes a SingletonLock into the profile naming the process and host
+ * holding it, and refuses to start if it finds one. That is the right
+ * behaviour on a desktop, where a second Chromium really could corrupt the
+ * profile. In a container it is a trap: replacing the container kills Chromium
+ * without warning, the lock survives in the session volume, and the next
+ * container refuses to start — reporting a process on "another computer" that
+ * is really the container it just replaced.
+ *
+ * Safe to do unconditionally at startup. This process is the only thing in
+ * this container, and nothing else can be holding the profile: if another
+ * container were somehow sharing the volume, the two would already be
+ * fighting over the same WhatsApp session, which is a worse problem than a
+ * lock file.
+ *
+ * The alternative — telling someone to delete three files over SSH every time
+ * the service is rebuilt — is not an alternative.
+ */
+function clearStaleProfileLock() {
+  const root = path.resolve(config.whatsapp.sessionPath);
+  let removed = 0;
+  try {
+    for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+        const p = path.join(root, dir.name, name);
+        try {
+          fs.rmSync(p, { force: true });
+          if (fs.existsSync(p) === false) removed++;
+        } catch {
+          /* not there, or not ours to remove — Chromium will say so itself */
+        }
+      }
+    }
+  } catch {
+    // No session directory yet: a first run, which has nothing to unlock.
+    return;
+  }
+  if (removed) log.info('cleared a stale Chromium profile lock', { removed });
+}
+
 class WhatsAppService extends EventEmitter {
   constructor() {
     super();
@@ -59,7 +103,7 @@ class WhatsAppService extends EventEmitter {
     this.sendChain = Promise.resolve();
   }
 
-  /* ------------------------------ Lifecycle ------------------------------ */
+  /* ---------------------------- Lifecycle ---------------------------- */
 
   async start() {
     if (this.client) {
@@ -72,6 +116,8 @@ class WhatsAppService extends EventEmitter {
       sessionPath: config.whatsapp.sessionPath,
       clientId: config.whatsapp.clientId,
     });
+
+    clearStaleProfileLock();
 
     this.client = new Client({
       authStrategy: new LocalAuth({
