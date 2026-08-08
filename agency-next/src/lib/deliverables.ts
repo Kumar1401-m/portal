@@ -33,8 +33,6 @@ export type DeliverableListRow = {
   edited_link: string | null;
   promotion_type: string | null;
   raw_drive_link: string | null;
-  /** The client's line of work — "Speciality" on the board. */
-  business_type: string | null;
   /** Where it stands with Instagram, separate from where it stands with us. */
   posting_status: string | null;
   cloud_video_url: string | null;
@@ -150,7 +148,7 @@ export async function getDeliverables(
   const rows = await query<DeliverableListRow & { cloud_video_key: string | null }>(
     `SELECT d.id, d.client_id, d.title, d.platform, d.video_type, d.service,
             d.content_category, d.status, d.priority,
-            d.due_date, d.month_key, d.ai_score, c.company_name, c.business_type,
+            d.due_date, d.month_key, d.ai_score, c.company_name,
             d.posting_status,
             d.assigned_to, u.name AS assignee_name,
             d.content_hook, d.caption, d.description, d.writer_notes,
@@ -244,7 +242,7 @@ export async function getDeliverable(id: number): Promise<DeliverableDetail | nu
             d.custom_instructions, d.ai_prompt, d.month_key, d.status, d.priority,
             d.due_date, d.caption, d.edited_link, d.raw_drive_link, ${cloud}, d.reject_reason,
             d.ai_score, d.service, d.content_category, d.assigned_to, d.created_at,
-            c.company_name, c.business_type, c.contact_person, c.phone, c.email,
+            c.company_name, c.contact_person, c.phone, c.email,
             c.website, c.company_logo_url, c.instagram_link, c.facebook_link,
             c.youtube_link, c.caption_settings, c.placeholder_values
      FROM deliverables d JOIN clients c ON c.id = d.client_id

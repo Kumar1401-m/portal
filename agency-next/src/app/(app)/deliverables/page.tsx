@@ -96,29 +96,26 @@ export default async function DeliverablesPage({
             {hasFilters ? " match these filters" : " yet"}.
           </p>
         ) : (
-          /* Column order follows the board this replaces: who it is for, what
-             it is, when it goes out, then the two work tracks, then where it
-             stands with Instagram. Wide on purpose — it scrolls sideways
-             inside the card rather than dropping columns, because the whole
-             point is seeing a row end to end. */
-          <div className="overflow-x-auto">
-            <Table>
+          /* Ten columns, chosen to fit without scrolling sideways.
+             Speciality was the same value on every row of a client and sat
+             next to the client's own name. The hook and the caption are
+             paragraphs; at column width they were a few words and an ellipsis,
+             which is not reading them, and both are on the task itself. The
+             two links became one cell because they are never both interesting
+             at once. */
+          <Table>
               <THead>
                 <tr>
                   <th className="w-10 text-right">#</th>
                   <th>Organization</th>
                   <th>Creative type</th>
                   <th className="whitespace-nowrap">Schedule date</th>
-                  <th>Speciality</th>
-                  <th>Content in post</th>
-                  <th>Caption</th>
                   <th>Content status</th>
-                  <th className="text-center">Shoot</th>
-                  <th className="text-center">Design link</th>
                   <th>Design status</th>
-                  <th>Remarks</th>
-                  <th>Designer</th>
                   <th>Post status</th>
+                  <th>Designer</th>
+                  <th className="text-center">Links</th>
+                  <th>Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </THead>
@@ -143,49 +140,42 @@ export default async function DeliverablesPage({
                     <TD className="whitespace-nowrap tabular-nums text-muted-foreground">
                       {fmtDate(d.scheduled_at ?? d.due_date)}
                     </TD>
-                    <TD className="max-w-[9rem] truncate text-muted-foreground">
-                      {d.business_type || "—"}
-                    </TD>
-                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.content_hook ?? ""}>
-                      {d.content_hook || "—"}
-                    </TD>
-                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.caption ?? ""}>
-                      {d.caption || "—"}
-                    </TD>
                     <TD>
                       <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
                     </TD>
-                    <TD className="text-center">
-                      {d.raw_drive_link ? (
-                        <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
-                    <TD className="text-center">
-                      {d.edited_link ? (
-                        <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
                     <TD>
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
-                    </TD>
-                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
-                      {d.reject_reason || d.writer_notes || "—"}
-                    </TD>
-                    <TD className="whitespace-nowrap text-muted-foreground">
-                      {d.assignee_name || "—"}
                     </TD>
                     <TD>
                       <Badge tone={postStatusTone(d.status, d.posting_status)}>
                         {postStatusLabel(d.status, d.posting_status)}
                       </Badge>
+                    </TD>
+                    <TD className="whitespace-nowrap text-muted-foreground">
+                      {d.assignee_name || "—"}
+                    </TD>
+                    {/* Both links in one cell — the raw footage and the cut are
+                        never both what you are after at the same moment. */}
+                    <TD className="whitespace-nowrap text-center">
+                      {d.raw_drive_link || d.edited_link ? (
+                        <span className="inline-flex items-center gap-2 text-xs">
+                          {d.raw_drive_link ? (
+                            <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                              Shoot
+                            </a>
+                          ) : null}
+                          {d.edited_link ? (
+                            <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                              Video
+                            </a>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="max-w-[10rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                      {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">
                       <EditVideoModal
@@ -204,7 +194,6 @@ export default async function DeliverablesPage({
                 ))}
               </TBody>
             </Table>
-          </div>
         )}
       </Card>
     </div>
