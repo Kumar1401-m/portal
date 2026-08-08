@@ -304,6 +304,28 @@ done
 if (( ok )); then
   info "answering on 127.0.0.1:$PORT"
   info "$body"
+
+  # And through the proxy, which is the only address the portal ever uses.
+  #
+  # Checking localhost alone is how this script reported success while the
+  # public URL returned 504 for an hour: the container was healthy and simply
+  # not reachable, because recreating it gives it a new IP on the Docker
+  # network and Traefik was still routing to the old one.
+  pub=""
+  for i in $(seq 1 12); do
+    pub="$(curl -sf --max-time 8 "https://$WA_HOST/health" 2>/dev/null || true)"
+    [[ -n "$pub" ]] && break
+    sleep 5
+  done
+  if [[ -n "$pub" ]]; then
+    info "and on https://$WA_HOST — the portal can reach it"
+  else
+    warn "NOT reachable at https://$WA_HOST, though it is healthy on localhost."
+    warn "That means the proxy, not the service. Its networks and labels:"
+    docker inspect "$(docker compose -f "$HERE/docker-compose.yml" ps -q whatsapp-service 2>/dev/null)" \
+      -f '      networks: {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}{{"\n"}}      labels: {{range $k,$v := .Config.Labels}}{{if eq (slice $k 0 (min 7 (len $k))) "traefik"}}{{$k}}={{$v}} {{end}}{{end}}' 2>/dev/null || true
+    warn "A certificate can also take a minute on first issue — try once more before digging."
+  fi
   case "$body" in
     *'"state":"connected"'*)
       info "WhatsApp is connected — nothing further to do." ;;
