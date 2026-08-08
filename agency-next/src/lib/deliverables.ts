@@ -33,6 +33,10 @@ export type DeliverableListRow = {
   edited_link: string | null;
   promotion_type: string | null;
   raw_drive_link: string | null;
+  /** The client's line of work — "Speciality" on the board. */
+  business_type: string | null;
+  /** Where it stands with Instagram, separate from where it stands with us. */
+  posting_status: string | null;
   cloud_video_url: string | null;
   /**
    * Permanent link to the uploaded video, or null if there isn't one. Not a
@@ -146,7 +150,8 @@ export async function getDeliverables(
   const rows = await query<DeliverableListRow & { cloud_video_key: string | null }>(
     `SELECT d.id, d.client_id, d.title, d.platform, d.video_type, d.service,
             d.content_category, d.status, d.priority,
-            d.due_date, d.month_key, d.ai_score, c.company_name,
+            d.due_date, d.month_key, d.ai_score, c.company_name, c.business_type,
+            d.posting_status,
             d.assigned_to, u.name AS assignee_name,
             d.content_hook, d.caption, d.description, d.writer_notes,
             d.videographer_notes, d.thumbnail_url, d.edited_link,

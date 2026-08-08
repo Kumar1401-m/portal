@@ -107,6 +107,32 @@ export function contentStatusTone(status: string): BadgeTone {
   return "muted";
 }
 
+/**
+ * Where a piece stands with Instagram, said the way the old board said it.
+ *
+ * Separate from the workflow status on purpose: a video can be finished,
+ * approved and signed off and still not be on Instagram, and "Approved" in
+ * the content column has been read as "it went out" more than once.
+ *
+ * Reads the workflow status as well as posting_status, because the two drift:
+ * posting_status is only written by the publisher, so a video marked posted by
+ * hand has the workflow status and nothing else.
+ */
+export function postStatusLabel(status: string, posting?: string | null): string {
+  if (posting === "posted" || ["posted", "completed"].includes(status)) return "Posted";
+  if (posting === "rejected") return "Failed";
+  if (posting === "scheduled" || status === "scheduled") return "Scheduled";
+  return "Yet to post";
+}
+
+export function postStatusTone(status: string, posting?: string | null): BadgeTone {
+  const label = postStatusLabel(status, posting);
+  if (label === "Posted") return "success";
+  if (label === "Scheduled") return "info";
+  if (label === "Failed") return "danger";
+  return "muted";
+}
+
 export function editorStatusTone(status: string): BadgeTone {
   if (["posted", "completed"].includes(status)) return "success";
   if (["editing", "raw_uploaded"].includes(status)) return "warning";

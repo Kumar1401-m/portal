@@ -15,6 +15,8 @@ import {
   contentStatusLabel,
   editorStatusLabel,
   editorStatusTone,
+  postStatusLabel,
+  postStatusTone,
 } from "@/lib/constants";
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
@@ -94,84 +96,115 @@ export default async function DeliverablesPage({
             {hasFilters ? " match these filters" : " yet"}.
           </p>
         ) : (
-          <Table>
-            <THead>
-              <tr>
-                <th>Title</th>
-                <th>Service &amp; category</th>
-                <th className="text-center">Shoot</th>
-                <th className="text-center">Editor</th>
-                <th>Content status</th>
-                <th>Editor status</th>
-                <th>Assigned to</th>
-                <th>Due</th>
-                <th>Remarks</th>
-                <th className="text-right">Edit</th>
-              </tr>
-            </THead>
-            <TBody>
-              {rows.map((d) => (
-                <TR key={d.id}>
-                  <TD className="max-w-[16rem]">
-                    <Link
-                      href={`/deliverables/${d.id}`}
-                      className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
-                    >
-                      {d.title}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">{d.company_name}</div>
-                  </TD>
-                  <TD>
-                    <ServiceBadge task={d} category={d.content_category} />
-                  </TD>
-                  <TD className="text-center">
-                    {d.raw_drive_link ? (
-                      <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                        View
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TD>
-                  <TD className="text-center">
-                    {d.edited_link ? (
-                      <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                        View
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TD>
-                  <TD>
-                    <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
-                  </TD>
-                  <TD>
-                    <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
-                  </TD>
-                  <TD className="whitespace-nowrap text-muted-foreground">
-                    {d.assignee_name || "—"}
-                  </TD>
-                  <TD className="whitespace-nowrap text-muted-foreground">{fmtDate(d.due_date)}</TD>
-                  <TD className="max-w-[12rem] truncate text-muted-foreground" title={d.reject_reason ?? ""}>
-                    {d.reject_reason || "—"}
-                  </TD>
-                  <TD className="text-right">
-                    <EditVideoModal
-                      deliverable={d}
-                      categories={categoryMap}
-                      canSendToClient={user.role === "super_admin" || user.role === "crm"}
+          /* Column order follows the board this replaces: who it is for, what
+             it is, when it goes out, then the two work tracks, then where it
+             stands with Instagram. Wide on purpose — it scrolls sideways
+             inside the card rather than dropping columns, because the whole
+             point is seeing a row end to end. */
+          <div className="overflow-x-auto">
+            <Table>
+              <THead>
+                <tr>
+                  <th className="w-10 text-right">#</th>
+                  <th>Organization</th>
+                  <th>Creative type</th>
+                  <th className="whitespace-nowrap">Schedule date</th>
+                  <th>Speciality</th>
+                  <th>Content in post</th>
+                  <th>Caption</th>
+                  <th>Content status</th>
+                  <th className="text-center">Shoot</th>
+                  <th className="text-center">Design link</th>
+                  <th>Design status</th>
+                  <th>Remarks</th>
+                  <th>Designer</th>
+                  <th>Post status</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((d, i) => (
+                  <TR key={d.id}>
+                    <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
+                    <TD className="max-w-[12rem]">
+                      <Link
+                        href={`/deliverables/${d.id}`}
+                        className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
+                      >
+                        {d.company_name}
+                      </Link>
+                      <div className="truncate text-xs text-muted-foreground">{d.title}</div>
+                    </TD>
+                    <TD>
+                      <ServiceBadge task={d} category={d.content_category} />
+                    </TD>
+                    {/* The scheduled slot when there is one; the due date is
+                        what we aim at, the schedule is what actually happens. */}
+                    <TD className="whitespace-nowrap tabular-nums text-muted-foreground">
+                      {fmtDate(d.scheduled_at ?? d.due_date)}
+                    </TD>
+                    <TD className="max-w-[9rem] truncate text-muted-foreground">
+                      {d.business_type || "—"}
+                    </TD>
+                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.content_hook ?? ""}>
+                      {d.content_hook || "—"}
+                    </TD>
+                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.caption ?? ""}>
+                      {d.caption || "—"}
+                    </TD>
+                    <TD>
+                      <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
+                    </TD>
+                    <TD className="text-center">
+                      {d.raw_drive_link ? (
+                        <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          View
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="text-center">
+                      {d.edited_link ? (
+                        <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          View
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD>
+                      <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
+                    </TD>
+                    <TD className="max-w-[11rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                      {d.reject_reason || d.writer_notes || "—"}
+                    </TD>
+                    <TD className="whitespace-nowrap text-muted-foreground">
+                      {d.assignee_name || "—"}
+                    </TD>
+                    <TD>
+                      <Badge tone={postStatusTone(d.status, d.posting_status)}>
+                        {postStatusLabel(d.status, d.posting_status)}
+                      </Badge>
+                    </TD>
+                    <TD className="text-right">
+                      <EditVideoModal
+                        deliverable={d}
+                        categories={categoryMap}
+                        canSendToClient={user.role === "super_admin" || user.role === "crm"}
                         canDelete={user.role === "super_admin"}
                         assignees={assignees}
                         canUploadVideo={user.role !== "crm"}
                         postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
                         postCountry={POST_COUNTRIES[0].key}
                         scheduledAtLocal={utcToLocalInput(d.scheduled_at, POST_COUNTRIES[0].key)}
-                    />
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+                      />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
         )}
       </Card>
     </div>
