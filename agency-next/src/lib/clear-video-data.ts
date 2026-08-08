@@ -99,6 +99,71 @@ export async function clearAllVideoData(): Promise<ClearSummary> {
   return summary;
 }
 
+/**
+ * One client's videos and everything recorded about them.
+ *
+ * Same order and the same reasoning as clearing everything: read the storage
+ * keys before the rows that name them, delete what the cascade would orphan,
+ * then the deliverables, then the files.
+ *
+ * What survives is the point. Invoices and payments are financial records and
+ * are never touched — an archived client who still owes money must still owe
+ * it. The client row itself stays too, so the history of who they were, what
+ * they were charged and what they paid remains readable.
+ */
+export async function clearClientVideoData(clientId: number): Promise<ClearSummary> {
+  const summary: ClearSummary = { videos: 0, filesDeleted: 0, filesFailed: 0, rows: {} };
+  const id = Math.trunc(Number(clientId));
+  if (!id) return summary;
+
+  let keys: string[] = [];
+  try {
+    const rows = await query<{ cloud_video_key: string | null }>(
+      `SELECT cloud_video_key FROM deliverables
+        WHERE client_id = ? AND cloud_video_key IS NOT NULL AND cloud_video_key <> ''`,
+      [id]
+    );
+    keys = rows.map((r) => r.cloud_video_key!).filter(Boolean);
+  } catch {
+    /* an install without the storage columns has no files to remove */
+  }
+
+  const [{ n: total }] = await query<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM deliverables WHERE client_id = ?",
+    [id]
+  );
+  summary.videos = Number(total) || 0;
+
+  // Scoped by the deliverables this client owns, because these tables key on
+  // the deliverable and not on the client — deleting by client_id here would
+  // either miss rows or, worse, match another client's.
+  for (const table of ORPHANED_BY_DELETE) {
+    try {
+      const res = await execute(
+        `DELETE FROM ${table}
+          WHERE deliverable_id IN (SELECT id FROM deliverables WHERE client_id = ?)`,
+        [id]
+      );
+      summary.rows[table] = res.affectedRows ?? 0;
+    } catch {
+      /* a table this install never created is not a failure to report */
+    }
+  }
+
+  const deleted = await execute("DELETE FROM deliverables WHERE client_id = ?", [id]);
+  summary.rows.deliverables = deleted.affectedRows ?? 0;
+
+  for (const key of keys) {
+    try {
+      (await deleteObject(key)) ? summary.filesDeleted++ : summary.filesFailed++;
+    } catch {
+      summary.filesFailed++;
+    }
+  }
+
+  return summary;
+}
+
 /** What the confirmation screen shows before anything is touched. */
 export async function countVideoData(): Promise<{ videos: number; files: number }> {
   const [{ n: videos }] = await query<{ n: number }>("SELECT COUNT(*) AS n FROM deliverables");

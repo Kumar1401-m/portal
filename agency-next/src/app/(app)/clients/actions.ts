@@ -11,6 +11,7 @@ import { sendOnboardingEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
 import { setClientCrmAccess } from "@/lib/crm";
 import { generateMonthTasks } from "@/lib/task-plan";
+import { clearClientVideoData } from "@/lib/clear-video-data";
 import { monthKey } from "@/lib/utils";
 
 const PAYMENT_PLANS = ["monthly", "quarterly", "half_yearly", "yearly", "one_time"];
@@ -417,6 +418,36 @@ export async function archiveClient(formData: FormData): Promise<void> {
   if (client?.user_id) {
     await execute("UPDATE users SET is_active = 0 WHERE id = ?", [client.user_id]);
   }
-  revalidatePath("/clients");
+
+  /*
+   * Their content goes with them.
+   *
+   * Asked for explicitly, and it is irreversible, so what it does not touch
+   * is worth stating: invoices, payments and the client record itself all
+   * survive. An archived client who still owes money must still owe it, and
+   * the history of what they were charged has to stay readable.
+   *
+   * What goes is the work — videos, captions, approvals, the WhatsApp
+   * transcript about them, and the video files in storage, which otherwise
+   * cost money for ever with nothing left pointing at them.
+   *
+   * Best-effort: a client who is archived but whose videos failed to delete
+   * is a tidy-up job, while failing the archive itself leaves them active and
+   * still being messaged by every reminder.
+   */
+  try {
+    const cleared = await clearClientVideoData(id);
+    if (cleared.videos) {
+      console.info(
+        `[clients] archived ${id}: removed ${cleared.videos} videos, ${cleared.filesDeleted} files`
+      );
+    }
+  } catch (err) {
+    console.warn("[clients] could not remove the archived client's videos:", err instanceof Error ? err.message : err);
+  }
+
+  for (const p of ["/clients", "/deliverables", "/today", "/dashboard", "/approvals"]) {
+    revalidatePath(p);
+  }
   redirect("/clients");
 }

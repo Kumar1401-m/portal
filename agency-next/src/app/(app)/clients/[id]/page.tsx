@@ -91,11 +91,14 @@ export default async function ClientDetailPage({
           {c.status !== "churned" && user.role === "super_admin" ? (
             <form action={archiveClient}>
               <input type="hidden" name="id" value={c.id} />
+              {/* The label says what happens, because it cannot be undone.
+                  Invoices and payments survive; the content does not. */}
               <button
                 type="submit"
                 className={buttonClasses({ variant: "ghost", size: "sm" })}
+                title="Archives the client and permanently deletes their videos, captions and approvals. Invoices and payments are kept."
               >
-                <Archive className="h-4 w-4" /> Archive
+                <Archive className="h-4 w-4" /> Archive &amp; delete content
               </button>
             </form>
           ) : null}
