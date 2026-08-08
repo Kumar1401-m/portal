@@ -1,0 +1,108 @@
+{
+  "name": "Portal — WhatsApp reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "f0a1b2c3-0001-4000-8000-000000000001",
+      "name": "10:00 every day",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-240, 0],
+      "notes": "Mid-morning, in the server's timezone. These are messages to real clients, so the time of day is the point: a chase at 3am reads as a machine, and one at 10am reads as somebody keeping on top of things. Once a day is enough — none of these become more true by being checked hourly."
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/whatsapp/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "f0a1b2c3-0002-4000-8000-000000000002",
+      "name": "Send the reminders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-20, 0],
+      "notes": "Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env — the same value as the other two workflows. Safe to run more than once: every reminder is claimed with a unique key before it is sent, so a second run the same day sends nothing."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-not-ok",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f0a1b2c3-0003-4000-8000-000000000003",
+      "name": "Did it fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [200, 0]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "=WhatsApp reminders returned {{ $json.statusCode }}: {{ JSON.stringify($json.body) }}"
+      },
+      "id": "f0a1b2c3-0004-4000-8000-000000000004",
+      "name": "Stop and report",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [420, -100],
+      "notes": "A reminder run that quietly stopped working is the failure worth catching — nobody notices messages that were never sent."
+    }
+  ],
+  "connections": {
+    "10:00 every day": {
+      "main": [[{ "node": "Send the reminders", "type": "main", "index": 0 }]]
+    },
+    "Send the reminders": {
+      "main": [[{ "node": "Did it fail?", "type": "main", "index": 0 }]]
+    },
+    "Did it fail?": {
+      "main": [[{ "node": "Stop and report", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {}
+}

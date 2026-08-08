@@ -101,6 +101,16 @@ const reportSession = (payload) => post('/api/whatsapp/session', payload);
  */
 const transcribeVoice = (payload) => post('/api/whatsapp/transcribe', payload, { attempts: 1 });
 
+/**
+ * "status" in a client group. One attempt: a client waiting on a reply is
+ * better served by silence than by an answer that arrives a minute later,
+ * after they have moved on.
+ */
+const askSummary = (payload) => post('/api/whatsapp/summary', payload, { attempts: 1 });
+
+/** A link shared in a group, offered to the portal as footage. */
+const reportFootage = (payload) => post('/api/whatsapp/footage', payload, { attempts: 2 });
+
 module.exports = {
   post,
   reportApproval,
@@ -108,4 +118,6 @@ module.exports = {
   reportSendStatus,
   reportSession,
   transcribeVoice,
+  askSummary,
+  reportFootage,
 };

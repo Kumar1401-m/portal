@@ -705,6 +705,25 @@ async function main() {
       KEY idx_wsl_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // Reminders already sent. The unique key on (kind, scope_key) is the whole
+  // mechanism: a reminder is claimed by inserting the row before the message
+  // goes out, so two overlapping runs cannot both nudge the same client about
+  // the same thing, and a crash mid-run repeats nothing on the next one.
+  await run('whatsapp_reminders table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_reminders (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      kind           VARCHAR(32) NOT NULL,
+      scope_key      VARCHAR(96) NOT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      group_id       VARCHAR(64) DEFAULT NULL,
+      sent_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_wr_once (kind, scope_key),
+      KEY idx_wr_client (client_id),
+      KEY idx_wr_sent (sent_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // Health of the WhatsApp session itself — one row, updated in place. Lets
   // the portal show "connected / disconnected" without holding a socket open
   // to the service, which a serverless deployment cannot do.

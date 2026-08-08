@@ -52,6 +52,26 @@ const REJECT_RE = new RegExp(
   'i'
 );
 
+/**
+ * "status" on its own, and the handful of ways people ask the same thing.
+ *
+ * Anchored to the whole message so "what's the status of the music change"
+ * stays a conversation rather than triggering a canned report over the top
+ * of a real question.
+ */
+const STATUS_RE = /^\s*(?:status|update|progress)[\s?.!]*$/i;
+
+/**
+ * A shared link, which for a client group almost always means footage.
+ *
+ * Matched anywhere in the message, because people write "here you go <link>".
+ * Deliberately any http(s) URL rather than Drive specifically — clients use
+ * WeTransfer, Dropbox and iCloud too, and the portal stores whatever arrives.
+ * What it is attached to is decided there, and a link with nothing waiting on
+ * footage is answered with silence rather than a wrong guess.
+ */
+const LINK_RE = /\bhttps?:\/\/[^\s<>"']+/i;
+
 const normalizeCode = (prefix, digits) =>
   prefix && digits ? `${prefix.toUpperCase()}${digits}` : null;
 
@@ -165,6 +185,18 @@ function parseCommand(rawText) {
       comment: null,
       needsContext: !code,
     };
+  }
+
+  // Checked after the approval commands: a message that both approves and
+  // carries a link is an approval first, and answering it with "got your
+  // footage" would be a non-sequitur.
+  if (STATUS_RE.test(text)) {
+    return { command: 'status', videoCode: null, comment: null, needsContext: false };
+  }
+
+  const link = LINK_RE.exec(text);
+  if (link) {
+    return { command: 'footage', videoCode: null, comment: null, link: link[0], needsContext: false };
   }
 
   return { command: 'none', videoCode: null, comment: null, needsContext: false };

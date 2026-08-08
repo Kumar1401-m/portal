@@ -439,6 +439,24 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "whatsapp_reminders",
+    purpose:
+      "One row per reminder sent. The unique key is what stops a client being nudged twice.",
+    ddl: `CREATE TABLE IF NOT EXISTS whatsapp_reminders (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      kind           VARCHAR(32) NOT NULL,
+      scope_key      VARCHAR(96) NOT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      group_id       VARCHAR(64) DEFAULT NULL,
+      sent_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_wr_once (kind, scope_key),
+      KEY idx_wr_client (client_id),
+      KEY idx_wr_sent (sent_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "whatsapp_session",
     purpose: "Connection health of the WhatsApp account, shown on the settings page.",
     ddl: `CREATE TABLE IF NOT EXISTS whatsapp_session (

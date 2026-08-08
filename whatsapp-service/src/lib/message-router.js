@@ -15,7 +15,7 @@
 const { createLogger } = require('./logger');
 const { parseCommand, findCode } = require('./command-parser');
 const { transcribeVoice } = require('./portal-client');
-const { reportApproval, logMessage } = require('./portal-client');
+const { reportApproval, logMessage, askSummary, reportFootage } = require('./portal-client');
 
 const log = createLogger('router');
 
@@ -67,6 +67,29 @@ class MessageRouter {
     if (parsed.command === 'none') {
       log.debug('ordinary chatter, no command', { groupId: msg.groupId });
       return { handled: false };
+    }
+
+    // Two commands the portal answers with a sentence of its own, rather than
+    // by changing a video's state. Both let the portal decide whether there is
+    // anything to say: a link with nothing waiting on footage, or a group not
+    // linked to a client, comes back with no text and we stay quiet. A bot
+    // replying to a link someone shared in passing is worse than no bot.
+    if (parsed.command === 'status' || parsed.command === 'footage') {
+      const body =
+        parsed.command === 'status'
+          ? { groupId: msg.groupId }
+          : { groupId: msg.groupId, link: parsed.link, senderName: msg.senderName || null };
+      try {
+        const res = await (parsed.command === 'status' ? askSummary(body) : reportFootage(body));
+        const text = res?.data?.text;
+        if (text) await this.whatsapp.sendText(msg.groupId, text);
+        return { handled: Boolean(text), command: parsed.command };
+      } catch (err) {
+        // The portal being down is not the client's problem, and a link they
+        // sent is still in the transcript for someone to pick up by hand.
+        log.warn(`${parsed.command} lookup failed`, { error: err.message });
+        return { handled: false };
+      }
     }
 
     const payload = {
