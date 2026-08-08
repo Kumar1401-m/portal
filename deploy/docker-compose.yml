@@ -33,18 +33,22 @@ services:
     # this tmpfs is charged against the container's own memory, so a big
     # /dev/shm and a tight limit are the same mistake made twice.
     shm_size: "512m"
-    deploy:
-      resources:
-        limits:
-          # 1.5 GB was not enough. Syncing a real WhatsApp account is the
-          # heaviest thing this ever does, and being killed mid-sync means it
-          # restarts and syncs again — a loop that looks like "connected, then
-          # unreachable a minute later".
-          #
-          # 2 GB and not more: n8n shares this 4 GB box and wants about 900 MB.
-          # A limit high enough to threaten n8n trades one outage for a worse
-          # one, because then the kernel chooses the victim, not us.
-          memory: 2G
+
+    # mem_limit rather than deploy.resources: outside Swarm, Docker Compose
+    # applies these directly and ignores most of the deploy block. The old
+    # limit was written there, which is worth knowing — it may never have been
+    # enforced at all, and the real ceiling was the box.
+    #
+    # 2 GB and not more: n8n shares this 4 GB machine and wants about 900 MB.
+    # A limit high enough to threaten n8n trades one outage for a worse one,
+    # because then the kernel picks the victim rather than us.
+    mem_limit: 2g
+    # A gigabyte of swap on top. This is what turns the failure from fatal into
+    # slow: Chromium's peak is while it syncs message history, right after
+    # connecting, and without swap a peak one byte over the limit is a kill.
+    # With it, the same peak pages out, finishes, and comes back. Needs swap on
+    # the host — deploy/hostinger.sh creates it.
+    memswap_limit: 3g
     healthcheck:
       # Only so `docker ps` tells the truth. Docker will not restart an
       # unhealthy container on its own — this is for whoever is looking, not

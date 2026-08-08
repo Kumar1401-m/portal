@@ -130,6 +130,36 @@ if (( ! APPLY )); then
 fi
 
 # ---------------------------------------------------------------------------
+bold "Swap"
+# ---------------------------------------------------------------------------
+# A VPS ships without swap, and on a 4 GB box shared with n8n that makes every
+# memory spike fatal instead of merely slow. Chromium's peak is while it syncs
+# WhatsApp history — right after connecting — so the failure looks like
+# "connected, then gone", which is the hardest kind to read.
+#
+# One gigabyte, on disk, once. Idempotent: an existing swapfile is left alone.
+if [[ "$(swapon --show --noheadings 2>/dev/null | wc -l)" -gt 0 ]]; then
+  info "already has swap: $(free -h | awk '/Swap/{print $2}')"
+elif [[ -f /swapfile ]]; then
+  info "/swapfile exists but is not enabled — enabling"
+  swapon /swapfile 2>/dev/null && info "enabled" || warn "could not enable it; carrying on"
+else
+  info "creating a 1 GB swapfile"
+  if fallocate -l 1G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none; then
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null 2>&1
+    if swapon /swapfile 2>/dev/null; then
+      grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      info "swap on, and set to come back after a reboot"
+    else
+      warn "could not enable swap — the container will still run, with less headroom"
+    fi
+  else
+    warn "could not create a swapfile — carrying on without it"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 bold "Starting the WhatsApp service"
 # ---------------------------------------------------------------------------
 sed -i "s|^WA_HOST=.*|WA_HOST=$WA_HOST|" "$HERE/.env" 2>/dev/null || echo "WA_HOST=$WA_HOST" >> "$HERE/.env"
@@ -201,6 +231,12 @@ EOF
     # be added to a container that is already running.
     docker compose -f "$HERE/docker-compose.yml" -f "$OVERRIDE" up -d --build
     info "recreated on Traefik's network"
+
+    # Each rebuild orphans the previous image, and this one carries Chromium.
+    # Left alone that is a slow leak toward a full disk, which fails as
+    # something entirely unrelated weeks later.
+    docker image prune -f >/dev/null 2>&1 || true
+    info "disk: $(df -h / | awk 'NR==2{print $4" free of "$2}')"
     ;;
 
   caddy|none)
@@ -236,6 +272,48 @@ EOF
     fi
     ;;
 esac
+
+# ---------------------------------------------------------------------------
+bold "Did it actually come up?"
+# ---------------------------------------------------------------------------
+# The script used to end by telling someone which commands to run to find out.
+# They then had to relay the answer back. Checking here removes a round trip
+# and, more to the point, means a failure is reported by the thing that caused
+# it rather than discovered later from the portal.
+#
+# Two minutes: Chromium has to start and restore the session, and on one vCPU
+# that is not quick.
+ok=0
+for i in $(seq 1 24); do
+  body="$(curl -sf --max-time 5 "http://127.0.0.1:$PORT/health" 2>/dev/null || true)"
+  if [[ -n "$body" ]]; then ok=1; break; fi
+  sleep 5
+done
+
+if (( ok )); then
+  info "answering on 127.0.0.1:$PORT"
+  info "$body"
+  case "$body" in
+    *'"state":"connected"'*)
+      info "WhatsApp is connected — nothing further to do." ;;
+    *'"state":"qr_required"'*)
+      warn "Running, but logged out. Portal → Settings → WhatsApp → scan the QR once." ;;
+    *)
+      warn "Running, but the WhatsApp client is not up. Its own account of why:"
+      curl -sf --max-time 5 "http://127.0.0.1:$PORT/api/status" \
+        -H "Authorization: Bearer $(grep -E '^SERVICE_API_KEY=' "$HERE/.env" | cut -d= -f2-)" \
+        2>/dev/null | head -c 700 | sed 's/^/      /'
+      echo ;;
+  esac
+else
+  warn "No answer after two minutes. What the container says about itself:"
+  docker ps -a --filter name=whatsapp-approval-service --format '      {{.Status}}' || true
+  warn "and its last words:"
+  docker logs --tail 25 whatsapp-approval-service 2>&1 | tail -25 | sed 's/^/      /' || true
+  warn ""
+  warn "An exit code of 137 means it was killed for using too much memory."
+  warn "Anything else, the lines above say what happened."
+fi
 
 # ---------------------------------------------------------------------------
 bold "Next"
