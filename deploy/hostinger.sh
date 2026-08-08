@@ -141,7 +141,7 @@ case "$KIND" in
   traefik)
     bold "Wiring it into Traefik"
 
-    NET="$(docker inspect "$PROXY_NAME" -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}')"
+    NET="$(docker inspect "$PROXY_NAME" -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}' || true)"
     [[ -n "$NET" ]] || die "Could not read $PROXY_NAME's network."
     info "network      : $NET"
 
@@ -150,9 +150,13 @@ case "$KIND" in
     # stack; a wrong guess produces a router Traefik accepts and never serves,
     # which fails as a certificate error hours later rather than as an error
     # here.
-    LABELS="$(docker ps -q | xargs -r -n1 docker inspect -f '{{json .Config.Labels}}' 2>/dev/null | tr ',' '\n')"
-    RESOLVER="$(grep -oE 'certresolver=[A-Za-z0-9_-]+' <<<"$LABELS" | head -1 | cut -d= -f2)"
-    ENTRY="$(grep -oE 'entrypoints=[A-Za-z0-9_,-]+' <<<"$LABELS" | head -1 | cut -d= -f2 | cut -d, -f1)"
+    # `|| true` on every one of these. Under `set -euo pipefail` a grep that
+    # matches nothing exits 1 and takes the whole script with it — which is
+    # exactly the case these lines exist to handle, so the failure would
+    # happen instead of the fallback, silently, mid-run.
+    LABELS="$(docker ps -q | xargs -r -n1 docker inspect -f '{{json .Config.Labels}}' 2>/dev/null | tr ',' '\n' || true)"
+    RESOLVER="$(grep -oE 'certresolver=[A-Za-z0-9_-]+' <<<"$LABELS" | head -1 | cut -d= -f2 || true)"
+    ENTRY="$(grep -oE 'entrypoints=[A-Za-z0-9_,-]+' <<<"$LABELS" | head -1 | cut -d= -f2 | cut -d, -f1 || true)"
     [[ -n "$RESOLVER" ]] || { RESOLVER="mytlschallenge"; warn "no certresolver found on any container — assuming $RESOLVER"; }
     [[ -n "$ENTRY" ]]    || { ENTRY="websecure";        warn "no entrypoint found on any container — assuming $ENTRY"; }
     info "certresolver : $RESOLVER"
