@@ -18,6 +18,8 @@ import {
   contentStatusLabel,
   editorStatusLabel,
   editorStatusTone,
+  postStatusLabel,
+  postStatusTone,
 } from "@/lib/constants";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -132,29 +134,40 @@ export default async function TodayPage({
                 them is late.
               </p>
             ) : null}
+          {/* Same columns, same order as the Tasks board. Two boards that show
+              the same rows should not need reading twice. The one difference
+              is the date, which is emphasised when it has passed — that is
+              what this board is for. */}
           <Table>
             <THead>
               <tr>
-                <th>Client</th>
-                <th>Service &amp; category</th>
-                <th className="text-center">Shoot</th>
-                <th className="text-center">Editor</th>
+                <th className="w-10 text-right">#</th>
+                <th>Organization</th>
+                <th>Creative type</th>
+                <th className="whitespace-nowrap">Schedule date</th>
                 <th>Content status</th>
-                <th>Editor status</th>
-                {!isDesigner ? <th>Assigned to</th> : null}
-                <th>Due</th>
+                <th>Design status</th>
+                <th>Post status</th>
+                <th>Caption</th>
+                <th className="text-center">Shoot</th>
+                <th className="text-center">Video</th>
                 <th>Remarks</th>
-                <th className="text-right">Edit</th>
+                <th className="text-right">Actions</th>
               </tr>
             </THead>
             <TBody>
-              {rows.map((d) => {
+              {rows.map((d, i) => {
                 const overdue = d.due_date
                   ? new Date(d.due_date) < new Date(new Date().toDateString())
                   : false;
                 return (
                   <TR key={d.id}>
-                    <TD className="max-w-[16rem]">
+                    {/* Numbering runs on across pages, so row 9 is the ninth
+                        task and not the first of page two. */}
+                    <TD className="text-right tabular-nums text-muted-foreground">
+                      {(page - 1) * PAGE_SIZE + i + 1}
+                    </TD>
+                    <TD className="max-w-[11rem]">
                       <Link
                         href={`/deliverables/${d.id}`}
                         className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
@@ -166,19 +179,10 @@ export default async function TodayPage({
                     <TD>
                       <ServiceBadge task={d} category={d.content_category} />
                     </TD>
-                    <TD className="text-center">
-                      {d.raw_drive_link ? (
-                        <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">View</a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
-                    <TD className="text-center">
-                      {d.edited_link ? (
-                        <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">View</a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                    <TD className="whitespace-nowrap tabular-nums">
+                      <span className={overdue ? "font-medium text-destructive" : "text-muted-foreground"}>
+                        {fmtDate(d.scheduled_at ?? d.due_date)}
+                      </span>
                     </TD>
                     <TD>
                       <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
@@ -186,16 +190,36 @@ export default async function TodayPage({
                     <TD>
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
                     </TD>
-                    {!isDesigner ? (
-                      <TD className="whitespace-nowrap text-muted-foreground">{d.assignee_name || "—"}</TD>
-                    ) : null}
-                    <TD className="whitespace-nowrap">
-                      <span className={overdue ? "font-medium text-destructive" : "text-muted-foreground"}>
-                        {fmtDate(d.due_date)}
-                      </span>
+                    <TD>
+                      <Badge tone={postStatusTone(d.status, d.posting_status)}>
+                        {postStatusLabel(d.status, d.posting_status)}
+                      </Badge>
                     </TD>
-                    <TD className="max-w-[12rem] truncate text-muted-foreground" title={d.reject_reason ?? ""}>
-                      {d.reject_reason || "—"}
+                    <TD className="max-w-[13rem]">
+                      {d.caption ? (
+                        <span className="line-clamp-2 text-xs text-muted-foreground" title={d.caption}>
+                          {d.caption}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="whitespace-nowrap text-center">
+                      {d.raw_drive_link ? (
+                        <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="whitespace-nowrap text-center">
+                      {d.edited_link || d.cloud_video_link ? (
+                        <a href={d.edited_link || d.cloud_video_link!} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="max-w-[8rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                      {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">
                       <EditVideoModal
