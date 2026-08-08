@@ -137,6 +137,26 @@ class WhatsAppService extends EventEmitter {
           '--disable-gpu',
           '--no-first-run',
           '--no-zygote',
+          /*
+           * Everything below exists to keep Chromium inside a 2 GB container
+           * on a 1 vCPU box that is also running n8n. Syncing a real WhatsApp
+           * account is the heaviest moment, and being killed during it means
+           * restarting and syncing again — a loop, not a crash.
+           *
+           * None of these change what WhatsApp Web can do. They switch off
+           * work that only matters on a desktop with a screen and a user.
+           */
+          '--renderer-process-limit=1',
+          '--js-flags=--max-old-space-size=512',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-breakpad',
+          '--disable-component-update',
+          '--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter',
+          '--mute-audio',
+          '--metrics-recording-only',
         ],
       },
       // Pin the web version cache so a WhatsApp Web update doesn't break the
