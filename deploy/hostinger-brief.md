@@ -41,7 +41,7 @@ public HTTPS URL because the portal calls it and it calls back.
   hostname argument: `bash deploy/setup.sh wa.example.com`. Idempotent.
 - `deploy/docker-compose.yml` — one container.
 - `deploy/.env` — already filled in with the live keys the portal expects
-  (`PORTAL_URL`, `WA_PORTAL_KEY`, `SERVICE_API_KEY`, `WHATSAPP_SERVICE_TOKEN`,
+  (`PORTAL_URL`, `PORTAL_API_KEY`, `SERVICE_API_KEY`, `WHATSAPP_SERVICE_TOKEN`,
   `CRON_SECRET`). Gitignored. It must be copied to the server, never committed
   or pasted into a chat.
 - `n8n/workflows/publish-runner.json` and `n8n/workflows/nightly-analyse.json`

@@ -127,7 +127,7 @@ In Vercel, set:
 ```
 WHATSAPP_SERVICE_URL   = https://<the service's public URL>
 WHATSAPP_SERVICE_TOKEN = same value as SERVICE_API_KEY here
-WHATSAPP_SERVICE_KEY   = same value as WA_PORTAL_KEY here
+WHATSAPP_SERVICE_KEY   = same value as PORTAL_API_KEY here
 N8N_API_KEY            = same value as N8N_PORTAL_KEY here
 ```
 

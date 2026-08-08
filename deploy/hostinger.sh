@@ -79,7 +79,7 @@ bold "Checks"
 [[ -f "$HERE/.env" ]] || die "$HERE/.env is missing. Copy it up from your PC — it holds the keys the portal expects."
 
 missing=()
-for key in PORTAL_URL WA_PORTAL_KEY SERVICE_API_KEY WHATSAPP_SERVICE_TOKEN; do
+for key in PORTAL_URL PORTAL_API_KEY SERVICE_API_KEY WHATSAPP_SERVICE_TOKEN; do
   grep -qE "^${key}=.+" "$HERE/.env" || missing+=("$key")
 done
 (( ${#missing[@]} )) && die "Blank in .env: ${missing[*]}"
