@@ -113,7 +113,7 @@ export default async function DeliverablesPage({
                   <th>Content status</th>
                   <th>Design status</th>
                   <th>Post status</th>
-                  <th>Designer</th>
+                  <th>Caption</th>
                   <th className="text-center">Links</th>
                   <th>Remarks</th>
                   <th className="text-right">Actions</th>
@@ -151,8 +151,21 @@ export default async function DeliverablesPage({
                         {postStatusLabel(d.status, d.posting_status)}
                       </Badge>
                     </TD>
-                    <TD className="whitespace-nowrap text-muted-foreground">
-                      {d.assignee_name || "—"}
+                    {/* Two lines rather than one truncated one: a caption is
+                        judged on how it opens, and the first line alone is
+                        enough to tell whether it has been written yet. The
+                        whole thing is on hover. */}
+                    <TD className="max-w-[16rem]">
+                      {d.caption ? (
+                        <span
+                          className="line-clamp-2 text-xs text-muted-foreground"
+                          title={d.caption}
+                        >
+                          {d.caption}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TD>
                     {/* Both links in one cell — the raw footage and the cut are
                         never both what you are after at the same moment. */}
