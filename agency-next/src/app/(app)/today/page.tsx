@@ -24,6 +24,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
 import { TaskFilters } from "@/components/admin/task-filters";
+import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
 import { fmtDate } from "@/lib/utils";
@@ -64,12 +65,21 @@ export default async function TodayPage({
   // With nothing due, show what is coming instead of an empty board. A board
   // that says "nothing to do" while twenty tasks sit a few days out is
   // technically right and useless — you still have to go somewhere else to
-  // see the work. Capped, because this is a glance at what is next, not the
-  // whole list; that is what Tasks is for.
+  // see the work. All of them, paged; the count in the header is the real
+  // total rather than what fits on one page.
   const ahead =
-    due.length === 0 ? (await getDeliverables({ ...scoped, today: false, upcoming: true })).slice(0, 20) : [];
-  const rows = due.length ? due : ahead;
+    due.length === 0 ? await getDeliverables({ ...scoped, today: false, upcoming: true }) : [];
+  const all = due.length ? due : ahead;
   const showingAhead = due.length === 0 && ahead.length > 0;
+
+  // Eight to a page. A day's work should be readable without scrolling, and a
+  // list long enough to scroll is one you skim rather than work through.
+  const PAGE_SIZE = 8;
+  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  // Clamped, so a hand-edited or stale ?page= lands on a real page instead of
+  // an empty table that looks like the work vanished.
+  const page = Math.min(Math.max(1, Math.trunc(Number(sp.page)) || 1), totalPages);
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const categories = service
     ? Array.from(new Set([...categoryMap[service].map((c) => c.name), ...usedCategories]))
@@ -87,10 +97,9 @@ export default async function TodayPage({
         </h1>
         <p className="text-sm text-muted-foreground">
           {showingAhead
-            ? `Nothing due today — showing the next ${rows.length} coming up.`
-            : `${rows.length} item${rows.length === 1 ? "" : "s"} due today or overdue`}
-          {hasFilters ? " (filtered)" : ""}
-          {showingAhead ? "" : "."}
+            ? `Nothing due today — showing the next ${all.length} coming up`
+            : `${all.length} item${all.length === 1 ? "" : "s"} due today or overdue`}
+          {hasFilters ? " (filtered)" : ""}.
         </p>
       </div>
 
@@ -119,7 +128,7 @@ export default async function TodayPage({
             {showingAhead ? (
               <p className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
                 <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                Nothing is due today. These are the next {rows.length} coming up — none of
+                Nothing is due today. These are the next {all.length} coming up — none of
                 them is late.
               </p>
             ) : null}
@@ -206,6 +215,14 @@ export default async function TodayPage({
               })}
             </TBody>
           </Table>
+          <Pager
+            basePath="/today"
+            params={params}
+            page={page}
+            totalPages={totalPages}
+            totalItems={all.length}
+            pageSize={PAGE_SIZE}
+          />
           </>
         )}
       </Card>
