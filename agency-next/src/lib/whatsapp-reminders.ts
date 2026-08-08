@@ -21,6 +21,7 @@ import { fmtDate, money } from "./utils";
 
 export type ReminderKind =
   | "approval_chase"
+  | "auto_approve"
   | "footage_due"
   | "monthly_plan"
   | "invoice_due"
@@ -33,8 +34,32 @@ export type ReminderSummary = {
   failed: number;
 };
 
-/** Hours a video may sit unanswered before the group hears about it. */
-const CHASE_AFTER_HOURS = 24;
+/**
+ * Hours a video may sit unanswered before the group hears about it.
+ *
+ * Twelve, not twenty-four, now that silence approves at twenty-four: a
+ * reminder that arrives at the same moment as the decision is not a reminder.
+ * This gives the client half a day's warning that the clock is running.
+ */
+const CHASE_AFTER_HOURS = 12;
+
+/**
+ * Hours of silence that count as approval.
+ *
+ * Asked for directly, and it is a real business decision rather than a
+ * technical one: after this, work goes to a client's public Instagram account
+ * without them having said yes. Three things make that defensible, and all
+ * three are load-bearing —
+ *
+ *   the client is chased at twelve hours, so silence is informed;
+ *   the group is told at the moment it happens, not afterwards;
+ *   the timeline records it as automatic, so nobody can later be told they
+ *     approved something they did not.
+ *
+ * Remove any of those and this becomes a way to publish work behind a
+ * client's back.
+ */
+const AUTO_APPROVE_AFTER_HOURS = 24;
 /** Days before a shoot is due that we ask for the footage. */
 const FOOTAGE_WARNING_DAYS = 3;
 
@@ -162,6 +187,97 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
       `Reply *OK* to approve, or *change* followed by what you'd like different. ` +
       `A voice note works too.`;
     (await deliver("approval_chase", key, r.group_id, text)) ? sent++ : failed++;
+  }
+  return { sent, failed };
+}
+
+/* ------------------------------------------------------------------ *
+ * 1b. Still nobody replied — silence approves
+ * ------------------------------------------------------------------ */
+
+/**
+ * Approve what the client never answered, a day after it was sent.
+ *
+ * Goes through recordApproval, the same path a real "ok" takes, rather than
+ * writing a status directly. That matters: approving is not one UPDATE. It
+ * moves the content gate to waiting-for-raw or the final gate to approved,
+ * schedules the post, and writes the timeline — and a second implementation
+ * of that would drift from the first the week either changed.
+ *
+ * Only videos actually delivered to the group qualify. A video that failed to
+ * send has not been ignored by anyone, and approving it on the client's behalf
+ * because our own send failed would be indefensible.
+ */
+async function autoApprove(): Promise<{ sent: number; failed: number }> {
+  const rows = await query<{
+    id: number;
+    title: string;
+    client_id: number;
+    group_id: string;
+  }>(
+    `SELECT d.id, d.title, d.client_id, g.group_id
+       FROM deliverables d
+       JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
+       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN whatsapp_send_log s ON s.deliverable_id = d.id
+            AND s.status IN ('sent','delivered','read')
+      WHERE d.status IN ('content_review','review')
+      GROUP BY d.id, d.title, d.client_id, g.group_id
+     HAVING MAX(s.created_at) < DATE_SUB(NOW(), INTERVAL ? HOUR)
+      LIMIT 25`,
+    [AUTO_APPROVE_AFTER_HOURS]
+  );
+
+  let sent = 0, failed = 0;
+  for (const r of rows) {
+    const key = `d:${r.id}`;
+    if (!(await claim("auto_approve", key, { clientId: r.client_id, deliverableId: r.id, groupId: r.group_id })))
+      continue;
+
+    try {
+      const { recordApproval, ensureVideoCode } = await import("./whatsapp-approvals");
+      /*
+       * Name the video explicitly.
+       *
+       * Left to resolve from the group, recordApproval asks "what was this
+       * group last asked about" — and rightly refuses when several videos are
+       * waiting at once, because a client's bare "ok" really is ambiguous
+       * there. Nothing is ambiguous here: this loop is holding the row. The
+       * ambiguity guard exists for humans typing, not for us.
+       */
+      const res = await recordApproval({
+        videoCode: await ensureVideoCode(r.id),
+        command: "approve",
+        // Named, not left blank: the timeline and the approvals board both
+        // show who approved, and "—" there would read as a client who did.
+        approvedBy: "Auto-approved after 24h",
+        message: `No reply within ${AUTO_APPROVE_AFTER_HOURS} hours of sending.`,
+        groupId: r.group_id,
+        time: new Date().toISOString(),
+      });
+      if (!res.ok) {
+        // Say why. A refusal here is the portal declining to approve, which is
+        // a different thing from a crash and needs a different fix — silently
+        // counting it as "failed" hides which.
+        console.warn(`[reminders] auto_approve ${key} refused:`, res.error || "no reason given");
+        await unclaim("auto_approve", key);
+        failed++;
+        continue;
+      }
+    } catch (err) {
+      console.warn(`[reminders] auto_approve ${key} failed:`, err instanceof Error ? err.message : err);
+      await unclaim("auto_approve", key);
+      failed++;
+      continue;
+    }
+
+    // Told at the moment it happens. A client who was busy can still say
+    // "actually, change it" — and now knows they need to.
+    const text =
+      `We haven't heard back on *${r.title}*, so we're treating it as approved ` +
+      `and moving it forward.\n\n` +
+      `If you'd like anything changed, reply *change* and tell us — we'll sort it out.`;
+    (await deliver("auto_approve", key, r.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
 }
@@ -350,6 +466,9 @@ export async function runReminders(
 
   const steps: [string, () => Promise<{ sent: number; failed: number }>][] = [
     ["approval_chase", chaseApprovals],
+    // After the chase, so a video is never approved in the same run that first
+    // reminded them about it.
+    ["auto_approve", autoApprove],
     ["footage_due", requestFootage],
     ["monthly_plan", () => sendMonthlyPlan(month)],
     ["invoice_due", remindInvoices],
