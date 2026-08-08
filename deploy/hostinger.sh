@@ -78,6 +78,14 @@ bold "Checks"
 # ---------------------------------------------------------------------------
 [[ -f "$HERE/.env" ]] || die "$HERE/.env is missing. Copy it up from your PC — it holds the keys the portal expects."
 
+# A .env copied up before the key was renamed holds the right value under the
+# old name. Rename it here rather than failing: the alternative is telling
+# someone to run sed on a server, which is where this went wrong once already.
+if grep -q '^WA_PORTAL_KEY=' "$HERE/.env" && ! grep -q '^PORTAL_API_KEY=' "$HERE/.env"; then
+  sed -i 's/^WA_PORTAL_KEY=/PORTAL_API_KEY=/' "$HERE/.env"
+  info "renamed WA_PORTAL_KEY to PORTAL_API_KEY (the name the service reads)"
+fi
+
 missing=()
 for key in PORTAL_URL PORTAL_API_KEY SERVICE_API_KEY WHATSAPP_SERVICE_TOKEN; do
   grep -qE "^${key}=.+" "$HERE/.env" || missing+=("$key")
