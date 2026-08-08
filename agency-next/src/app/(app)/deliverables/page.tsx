@@ -96,13 +96,13 @@ export default async function DeliverablesPage({
             {hasFilters ? " match these filters" : " yet"}.
           </p>
         ) : (
-          /* Ten columns, chosen to fit without scrolling sideways.
-             Speciality was the same value on every row of a client and sat
-             next to the client's own name. The hook and the caption are
-             paragraphs; at column width they were a few words and an ellipsis,
-             which is not reading them, and both are on the task itself. The
-             two links became one cell because they are never both interesting
-             at once. */
+          /* Sized to fit without scrolling sideways — the scrollbar hid the
+             right-hand columns, which included the one the board exists for.
+             Speciality went because it was the same value on every row of a
+             client and sat beside that client's own name; the hook went
+             because at column width a paragraph is four words and an
+             ellipsis. Caption stayed, clamped to two lines, because whether
+             one exists is the question this board gets asked most. */
           <Table>
               <THead>
                 <tr>
@@ -114,7 +114,8 @@ export default async function DeliverablesPage({
                   <th>Design status</th>
                   <th>Post status</th>
                   <th>Caption</th>
-                  <th className="text-center">Links</th>
+                  <th className="text-center">Shoot</th>
+                  <th className="text-center">Video</th>
                   <th>Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
@@ -123,7 +124,7 @@ export default async function DeliverablesPage({
                 {rows.map((d, i) => (
                   <TR key={d.id}>
                     <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
-                    <TD className="max-w-[12rem]">
+                    <TD className="max-w-[11rem]">
                       <Link
                         href={`/deliverables/${d.id}`}
                         className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
@@ -155,7 +156,7 @@ export default async function DeliverablesPage({
                         judged on how it opens, and the first line alone is
                         enough to tell whether it has been written yet. The
                         whole thing is on hover. */}
-                    <TD className="max-w-[16rem]">
+                    <TD className="max-w-[13rem]">
                       {d.caption ? (
                         <span
                           className="line-clamp-2 text-xs text-muted-foreground"
@@ -167,27 +168,39 @@ export default async function DeliverablesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    {/* Both links in one cell — the raw footage and the cut are
-                        never both what you are after at the same moment. */}
+                    {/* Separate columns, so a glance down each one shows which
+                        clients still owe footage and which videos are cut —
+                        two different questions, asked of the whole board
+                        rather than of one row. */}
                     <TD className="whitespace-nowrap text-center">
-                      {d.raw_drive_link || d.edited_link ? (
-                        <span className="inline-flex items-center gap-2 text-xs">
-                          {d.raw_drive_link ? (
-                            <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                              Shoot
-                            </a>
-                          ) : null}
-                          {d.edited_link ? (
-                            <a href={d.edited_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                              Video
-                            </a>
-                          ) : null}
-                        </span>
+                      {d.raw_drive_link ? (
+                        <a
+                          href={d.raw_drive_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          View
+                        </a>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="max-w-[10rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                    <TD className="whitespace-nowrap text-center">
+                      {d.edited_link || d.cloud_video_link ? (
+                        <a
+                          href={d.edited_link || d.cloud_video_link!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          View
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD className="max-w-[8rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
                       {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">
