@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Search, Filter, X } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Select } from "@/components/ui/select";
 import { FILTER_STATUSES } from "@/lib/constants";
 import type { ClientMini, Assignee } from "@/lib/deliverables";
@@ -125,21 +126,9 @@ export function TaskFilters({
 
       {/* Due date range — one merged control instead of two stacked fields. */}
       <div className="flex h-9 items-center gap-1 rounded-md border border-input bg-card px-1.5 shadow-sm">
-        <Input
-          type="date"
-          name="due_from"
-          defaultValue={get("due_from")}
-          aria-label="Due from"
-          className="h-7 w-[8.25rem] border-0 p-0 text-xs shadow-none focus-visible:ring-0"
-        />
+        <DateField name="due_from" defaultValue={get("due_from")} aria-label="Due from" className="h-7 w-[8.25rem] border-0 p-0 text-xs shadow-none focus-visible:ring-0" />
         <span className="text-muted-foreground">–</span>
-        <Input
-          type="date"
-          name="due_to"
-          defaultValue={get("due_to")}
-          aria-label="Due to"
-          className="h-7 w-[8.25rem] border-0 p-0 text-xs shadow-none focus-visible:ring-0"
-        />
+        <DateField name="due_to" defaultValue={get("due_to")} aria-label="Due to" className="h-7 w-[8.25rem] border-0 p-0 text-xs shadow-none focus-visible:ring-0" />
       </div>
 
       {showMonth ? (

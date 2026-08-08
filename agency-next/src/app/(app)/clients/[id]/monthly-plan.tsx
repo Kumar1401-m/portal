@@ -13,6 +13,7 @@ import {
 import type { MonthPlan, PlannedTask } from "@/lib/task-plan";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Select } from "@/components/ui/select";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
@@ -88,13 +89,12 @@ function TaskDate({ clientId, task }: { clientId: number; task: PlannedTask }) {
     <form ref={form} action={action} className="flex items-center gap-2">
       <input type="hidden" name="client_id" value={clientId} />
       <input type="hidden" name="task_id" value={task.id} />
-      <Input
-        type="date"
+      <DateField
         name="due_date"
         defaultValue={task.due_date ? String(task.due_date).slice(0, 10) : ""}
         onChange={() => form.current?.requestSubmit()}
         aria-label={`Due date for ${task.title}`}
-        className="h-8 w-[9.5rem] text-xs"
+        className="w-[11rem]"
       />
       {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
       {!pending && state.ok ? <Check className="h-3.5 w-3.5 text-success" /> : null}

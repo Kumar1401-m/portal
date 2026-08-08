@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -351,10 +352,10 @@ export function ClientForm({
             </Select>
           </Field>
           <Field label="Joining date" name="joining_date">
-            <Input id="joining_date" name="joining_date" type="date" defaultValue={d.joining_date} />
+            <DateField id="joining_date" name="joining_date" defaultValue={d.joining_date} />
           </Field>
           <Field label="Renewal date" name="renewal_date">
-            <Input id="renewal_date" name="renewal_date" type="date" defaultValue={d.renewal_date} />
+            <DateField id="renewal_date" name="renewal_date" defaultValue={d.renewal_date} />
           </Field>
           <Field label="Default designer" name="designer_id">
             <Select id="designer_id" name="designer_id" defaultValue={d.designer_id || ""}>

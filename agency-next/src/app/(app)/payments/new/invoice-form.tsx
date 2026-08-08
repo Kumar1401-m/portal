@@ -6,6 +6,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import type { ClientMini } from "@/lib/deliverables";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,7 +42,7 @@ export function InvoiceForm({ clients }: { clients: ClientMini[] }) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="due_date">Due date</Label>
-              <Input id="due_date" name="due_date" type="date" />
+              <DateField id="due_date" name="due_date" />
             </div>
           </div>
 
