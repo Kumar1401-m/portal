@@ -20,7 +20,6 @@ import {
 } from "@/components/admin/service-category-picker";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DateField } from "@/components/ui/date-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -54,14 +53,6 @@ export function EditVideoModal({
     submitRawOrReference,
     { ok: false }
   );
-
-  // The country decides the evening slot, so the two move together on screen:
-  // change the country and the time named underneath changes with it.
-  const [country, setCountry] = useState(postCountry);
-  const postingTime = (() => {
-    const hour = postCountries.find((c) => c.key === country)?.hour ?? 18;
-    return `${hour % 12 === 0 ? 12 : hour % 12}:00 ${hour >= 12 ? "PM" : "AM"}`;
-  })();
 
   const [caption, setCaption] = useState(d.caption ?? "");
   const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
@@ -266,35 +257,6 @@ export function EditVideoModal({
               <Label htmlFor={`wn-${d.id}`}>Content Writer Inputs</Label>
               <Textarea id={`wn-${d.id}`} name="writer_notes" rows={2} defaultValue={d.writer_notes ?? ""} />
             </div>
-
-            {postCountries.length ? (
-              <div className="space-y-1.5 rounded-lg border border-border p-3">
-                <Label htmlFor={`pc-${d.id}`}>Posting day</Label>
-                <p className="text-xs text-muted-foreground">
-                  Pick the day. It goes out that evening at {postingTime}, the client&apos;s
-                  time. Leave it blank to post as soon as they approve.
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Select
-                    id={`pc-${d.id}`}
-                    name="post_country"
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                  >
-                    {postCountries.map((c) => (
-                      <option key={c.key} value={c.key}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </Select>
-                  <DateField
-                    name="post_at"
-                    defaultValue={scheduledAtLocal.slice(0, 10)}
-                    aria-label="Posting day"
-                  />
-                </div>
-              </div>
-            ) : null}
 
             {canUploadVideo ? (
             <div className="space-y-2">
