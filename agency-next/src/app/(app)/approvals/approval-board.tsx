@@ -202,7 +202,6 @@ export function ApprovalBoard({
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/40">
                   <tr className="text-xs text-muted-foreground">
-                    <th className="px-4 py-2 text-left font-medium">Code</th>
                     <th className="px-3 py-2 text-left font-medium">Video</th>
                     <th className="px-3 py-2 text-left font-medium">Client</th>
                     <th className="px-3 py-2 text-left font-medium">Who replied</th>
@@ -219,9 +218,6 @@ export function ApprovalBoard({
                           flashed.has(r.id) && "bg-primary/5"
                         )}
                       >
-                        <td className="px-4 py-2 font-mono text-xs font-medium">
-                          {r.video_code ?? "—"}
-                        </td>
                         <td className="max-w-[20rem] px-3 py-2">
                           <Link
                             href={`/deliverables/${r.id}`}

@@ -294,12 +294,12 @@ export function welcomeMessage(companyName: string, agencyName: string): string 
     "",
     `This group is now connected to ${agencyName}. Your finished videos will arrive here for approval.`,
     "",
-    "When one does, reply:",
-    "*APPROVE V245* — to approve it",
-    "*CHANGE V245* — then tell us what to adjust",
+    "When one does, just reply:",
+    "✅ *OK* — to approve it",
+    "📝 *CHANGE* — then tell us what to adjust",
     "",
-    "(V245 is the code shown with each video.)",
+    "_A voice note works too._",
     "",
-    "You can also just ask here — what's coming up, what's waiting on you — and we'll answer.",
+    "You can also send us footage by pasting a Google Drive link here, or type *status* any time to see where everything stands.",
   ].join("\n");
 }
