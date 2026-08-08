@@ -58,49 +58,78 @@ Hostinger VPS, plan **KVM 1: 1 vCPU, 4 GB RAM, 50 GB disk**.
 - Location: India — Mumbai
 
 Established by probing from outside:
-- Ports **80 and 443 are already in use** — something is reverse-proxying,
-  presumably for n8n.
+- Ports **80 and 443 are already in use** — something is reverse-proxying for
+  n8n, which is served at `https://n8n.srv1886744.hstgr.cloud`.
 - Port **5678 is closed** from outside, so n8n is behind that proxy rather than
   exposed directly.
-- Which proxy it is (Traefik, Caddy, nginx) is **not yet known**, and that is
-  the first thing to establish, because `deploy/setup.sh` installs Caddy and
-  would collide with whatever is already bound to 80/443.
+- Which proxy it is (Traefik, Caddy, nginx) is **not yet known**. Establish it
+  first: `deploy/setup.sh` installs Caddy and would take those ports away from
+  n8n. `deploy/hostinger.sh` (below) detects it instead.
+- **DNS is a wildcard.** `wa.srv1886744.hstgr.cloud`, and any other subdomain,
+  already resolves to the IP. No DNS record needs creating and no domain needs
+  buying. This settles what the WhatsApp service should be addressed as.
+
+The repo is public at `https://github.com/Kumar1401-m/portal.git`, so the
+server can clone it directly. `deploy/.env` is gitignored and must be copied
+across separately.
+
+## Already done — do not redo
+
+**n8n calls the publisher every 15 minutes, and it works.** The workflow is
+imported, the key is set, and a manual execution returns
+`{"ok":true,"considered":0,"posted":0}`. `considered: 0` is correct: the queue
+is empty because no video has been approved and scheduled yet.
+
+The key travels as a **plain header parameter written into the workflow**
+(`Authorization: <CRON_SECRET>`, no `Bearer` prefix — the portal accepts
+either). An n8n Header Auth credential was tried first and abandoned: creating
+it, naming its header field, pasting the value and attaching it to the node is
+four places to be wrong, and every one of them fails with the same flat 401.
+
+If a key is ever rejected again, `GET /api/automation/whoami` on the portal
+says why — header absent, truncated, whitespace, or a different value — and
+never echoes the secret back.
 
 ## What I want done
 
-**1. Point n8n at the portal's publisher.**
+**1. Import the second n8n workflow.**
 
-Vercel's Hobby plan allows one cron run per day. Posts are scheduled into a
-6–8 PM window in the client's timezone, which one daily run cannot serve. n8n
-should call `/api/automation/publish/run` every 15 minutes instead.
-
-Import the two workflow files, create a **Header Auth** credential named
-`Portal CRON_SECRET` with header `Authorization` and value `Bearer <secret>`,
-set `PORTAL_URL` to `https://nvkhub.vercel.app`, and activate both.
-
-A healthy execution returns `{ "ok": true, "posted": 0, "claimed": 0 }`.
-`posted: 0` is normal outside the posting window. If it returns
-`{ "skipped": "no access token" }` then n8n is working and the portal simply
-has no Instagram token yet — that is a separate, known task.
+`n8n/workflows/nightly-analyse.json`, same method as the first: paste the JSON
+onto a blank canvas, replace `PASTE_CRON_SECRET_HERE` in the HTTP node's
+Headers with the `CRON_SECRET` from `deploy/.env`, publish.
 
 **2. Give the WhatsApp service a permanent home on the same VPS.**
 
 It currently runs behind a cloudflared quick tunnel whose URL changes on every
 restart, which breaks the portal's link to it each time. It needs a fixed
-HTTPS address.
+HTTPS address, and `wa.srv1886744.hstgr.cloud` already resolves to the box.
 
-The open question is how, given 80/443 are taken. Either:
-- a subdomain (e.g. `wa.mydomain.com`) routed by the **existing** proxy to the
-  WhatsApp container — no second Caddy; or
-- a path on the existing hostname, e.g. `srv1886744.hstgr.cloud/wa/`, if the
-  proxy supports path routing.
+`deploy/hostinger.sh` is written for exactly this. It detects which proxy owns
+80/443 — by published port rather than image name — and adapts:
 
-Decide based on what is actually running, then adapt `deploy/setup.sh`
-accordingly rather than running it as-is.
+```
+bash deploy/hostinger.sh            # inspects and prints a plan, changes nothing
+bash deploy/hostinger.sh --apply    # carries it out
+```
 
-Afterwards, set `WHATSAPP_SERVICE_URL` in the Vercel project to the new
-address and redeploy, then scan the WhatsApp QR code once from the portal's
-Settings → WhatsApp page.
+It handles Traefik (network + labels), Caddy (one extra site block), and
+installs Caddy only if nothing else wants those ports. It refuses to guess at
+an unrecognised proxy. It never touches the n8n container.
+
+It has **not been run against a real server** — only its syntax and failure
+paths were tested — so read what it prints before applying, and fix it rather
+than working around it if it is wrong.
+
+Afterwards, set `WHATSAPP_SERVICE_URL` in the Vercel project to
+`https://wa.srv1886744.hstgr.cloud` and redeploy, then scan the WhatsApp QR
+code once from the portal's Settings → WhatsApp page.
+
+**3. Known, separate, and blocking Instagram — not your job unless asked.**
+
+The portal has no `META_ACCESS_TOKEN`. The publisher will run every 15 minutes
+and post nothing until a long-lived **Page** access token with
+`instagram_content_publish` and `instagram_basic` is set in Vercel. A
+short-lived *user* token was tried and is the wrong kind.
 
 ## Constraints
 
@@ -123,5 +152,8 @@ Settings → WhatsApp page.
 
 Give me one command at a time, say what it does and what I should see back,
 and wait for my output before the next one. If something fails, diagnose from
-the actual output rather than guessing. Start with step 1, which needs no
-server access at all.
+the actual output rather than guessing.
+
+I have root SSH and the Hostinger browser terminal, but I am not a sysadmin.
+Assume no knowledge of Docker, reverse proxies or TLS. Tell me exactly where
+to click when the step is in a web UI.
