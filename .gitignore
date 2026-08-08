@@ -19,3 +19,6 @@ deploy/.env
 
 # Scratch copies of secrets, for pasting into n8n without mis-selecting them.
 deploy/*.secret.txt
+
+# Generated per-server by deploy/hostinger.sh — machine-specific, never shared.
+deploy/docker-compose.override.yml
