@@ -165,8 +165,27 @@ export async function clearClientVideoData(clientId: number): Promise<ClearSumma
 }
 
 /** What the confirmation screen shows before anything is touched. */
-export async function countVideoData(): Promise<{ videos: number; files: number }> {
+export async function countVideoData(): Promise<{ videos: number; files: number; archived: number }> {
   const [{ n: videos }] = await query<{ n: number }>("SELECT COUNT(*) AS n FROM deliverables");
+  /*
+   * How many of those the boards never show.
+   *
+   * This counts every row, because it deletes every row. The boards exclude
+   * archived clients, so the two numbers disagree and the bigger one looks
+   * wrong. Naming the difference is the fix — the count is right, it is just
+   * counting something the rest of the portal hides.
+   */
+  let archived = 0;
+  try {
+    const [{ n }] = await query<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM deliverables d
+         LEFT JOIN clients c ON c.id = d.client_id
+        WHERE c.id IS NULL OR c.status = 'churned'`
+    );
+    archived = Number(n) || 0;
+  } catch {
+    /* leave it at zero rather than fail the panel */
+  }
   let files = 0;
   try {
     const [{ n }] = await query<{ n: number }>(
@@ -176,5 +195,5 @@ export async function countVideoData(): Promise<{ videos: number; files: number 
   } catch {
     /* no storage columns on this install */
   }
-  return { videos: Number(videos) || 0, files };
+  return { videos: Number(videos) || 0, files, archived };
 }

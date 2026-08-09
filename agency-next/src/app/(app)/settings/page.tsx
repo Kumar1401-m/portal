@@ -66,7 +66,7 @@ export default async function SettingsPage() {
     // Only a super admin can apply these, so only they need the status.
     isSuperAdmin ? schemaStatus() : Promise.resolve([]),
     isSuperAdmin ? tableStatus() : Promise.resolve([]),
-    isSuperAdmin ? countVideoData() : Promise.resolve({ videos: 0, files: 0 }),
+    isSuperAdmin ? countVideoData() : Promise.resolve({ videos: 0, files: 0, archived: 0 }),
   ]);
 
   return (
@@ -338,7 +338,7 @@ export default async function SettingsPage() {
       {/* Last on the page on purpose: nobody should meet this on the way to
           something else. */}
       {isSuperAdmin ? (
-        <ClearVideoDataPanel videos={videoCounts.videos} files={videoCounts.files} />
+        <ClearVideoDataPanel videos={videoCounts.videos} files={videoCounts.files} archived={videoCounts.archived} />
       ) : null}
 
       {/* --------------------------- System status --------------------------- */}

@@ -14,7 +14,16 @@ import { buttonClasses } from "@/components/ui/button";
  * and shows the counts, because the number of videos about to be destroyed is
  * the one fact that decides whether this is the right button.
  */
-export function ClearVideoDataPanel({ videos, files }: { videos: number; files: number }) {
+export function ClearVideoDataPanel({
+  videos,
+  files,
+  archived = 0,
+}: {
+  videos: number;
+  files: number;
+  /** Of those, how many belong to archived clients and are hidden elsewhere. */
+  archived?: number;
+}) {
   const [state, action, pending] = useActionState<ClearState, FormData>(clearVideoDataAction, {});
 
   const nothingToDo = videos === 0 && !state.ok;
@@ -39,6 +48,12 @@ export function ClearVideoDataPanel({ videos, files }: { videos: number; files: 
             <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
               <li>
                 <b className="tabular-nums text-foreground">{videos}</b> videos and posters
+                {archived > 0 ? (
+                  <span className="block text-[0.7rem]">
+                    includes {archived} from archived clients, which the boards hide —
+                    so this is higher than the number you see on Tasks
+                  </span>
+                ) : null}
               </li>
               <li>captions, AI analysis, scripts, thumbnails</li>
               <li>approvals, feedback, comments</li>

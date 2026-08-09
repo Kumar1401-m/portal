@@ -43,7 +43,7 @@ export async function clearVideoDataAction(
 }
 
 /** Counts for the confirmation panel, so nobody deletes a number they can't see. */
-export async function videoDataCounts(): Promise<{ videos: number; files: number }> {
+export async function videoDataCounts(): Promise<{ videos: number; files: number; archived: number }> {
   await requireUser(SUPER_ADMIN_ROLES);
   return countVideoData();
 }
