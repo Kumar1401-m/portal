@@ -282,6 +282,27 @@ const EXPECTED: ColumnSpec[] = [
       "ENUM('super_admin','admin','poster_designer','video_editor','crm','client') DEFAULT NULL",
     purpose: "So a comment from a video editor records who wrote it.",
   },
+  // The payment link an invoice reminder carries. Cached on the invoice so a
+  // client chased three weeks running is sent the same link each time, rather
+  // than three live links against one bill.
+  {
+    table: "invoices",
+    column: "payment_link",
+    definition: "payment_link VARCHAR(500) DEFAULT NULL",
+    purpose: "The Razorpay link a WhatsApp invoice reminder carries.",
+  },
+  {
+    table: "invoices",
+    column: "payment_link_id",
+    definition: "payment_link_id VARCHAR(64) DEFAULT NULL",
+    purpose: "Razorpay's own id for that link, for matching a payment back to it.",
+  },
+  {
+    table: "invoices",
+    column: "payment_link_expires_at",
+    definition: "payment_link_expires_at DATETIME DEFAULT NULL",
+    purpose: "When the cached payment link stops working and a fresh one is made.",
+  },
 ];
 
 /**
@@ -454,6 +475,32 @@ const EXPECTED_TABLES: TableSpec[] = [
       UNIQUE KEY uq_wr_once (kind, scope_key),
       KEY idx_wr_client (client_id),
       KEY idx_wr_sent (sent_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "whatsapp_outbox",
+    purpose:
+      "Reminders written now and sent later, with the wording frozen as it was approved.",
+    ddl: `CREATE TABLE IF NOT EXISTS whatsapp_outbox (
+      id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      kind            VARCHAR(32) NOT NULL DEFAULT 'custom',
+      client_id       BIGINT UNSIGNED DEFAULT NULL,
+      group_id        VARCHAR(64) NOT NULL,
+      group_label     VARCHAR(190) DEFAULT NULL,
+      body            TEXT NOT NULL,
+      send_at         DATETIME NOT NULL,
+      status          ENUM('scheduled','sending','sent','failed','cancelled') NOT NULL DEFAULT 'scheduled',
+      attempts        INT UNSIGNED NOT NULL DEFAULT 0,
+      last_error      TEXT DEFAULT NULL,
+      wa_message_id   VARCHAR(128) DEFAULT NULL,
+      created_by      BIGINT UNSIGNED DEFAULT NULL,
+      created_by_name VARCHAR(150) DEFAULT NULL,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      claimed_at      DATETIME DEFAULT NULL,
+      sent_at         DATETIME DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_wo_due (status, send_at),
+      KEY idx_wo_client (client_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {

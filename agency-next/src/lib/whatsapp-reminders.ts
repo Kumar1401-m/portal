@@ -17,8 +17,21 @@
 import "server-only";
 import { query, execute, hasColumn } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
-import { fmtDate, money } from "./utils";
+import { sendDueMessages } from "./reminder-outbox";
+import { paymentLinkForInvoice } from "./payment-links";
+import {
+  approvalChaseText,
+  footageText,
+  invoiceText,
+  monthlyPlanText,
+  teamDigestText,
+} from "./reminder-messages";
 
+/**
+ * `auto_approve` is the one kind that isn't a message a person could send —
+ * it is the portal deciding on the client's behalf — so it lives here rather
+ * than in the sendable list the console offers.
+ */
 export type ReminderKind =
   | "approval_chase"
   | "auto_approve"
@@ -128,6 +141,12 @@ async function reachableClients(): Promise<Target[]> {
  *
  * A failed send releases the claim so the next run tries again, which is the
  * one case where repeating is right: nothing reached the client.
+ *
+ * The result is read, not the absence of an exception. `sendTextToGroup` never
+ * throws — it reports a dead service as `{ ok: false }` — so a try/catch here
+ * caught nothing and counted every failure as a send. That is the worst way
+ * for this to break: the claim survives, so the reminder is never retried, and
+ * the run reports success while the client hears nothing.
  */
 async function deliver(
   kind: ReminderKind,
@@ -136,13 +155,14 @@ async function deliver(
   text: string
 ): Promise<boolean> {
   try {
-    await sendTextToGroup(groupId, text);
-    return true;
+    const res = await sendTextToGroup(groupId, text);
+    if (res.ok) return true;
+    console.warn(`[reminders] ${kind} ${scopeKey} not sent:`, res.error);
   } catch (err) {
-    console.warn(`[reminders] ${kind} ${scopeKey} failed:`, err instanceof Error ? err.message : err);
-    await unclaim(kind, scopeKey);
-    return false;
+    console.warn(`[reminders] ${kind} ${scopeKey} threw:`, err instanceof Error ? err.message : err);
   }
+  await unclaim(kind, scopeKey);
+  return false;
 }
 
 /* ------------------------------------------------------------------ *
@@ -182,10 +202,10 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
     const key = `d:${r.id}`;
     if (!(await claim("approval_chase", key, { clientId: r.client_id, deliverableId: r.id, groupId: r.group_id })))
       continue;
-    const text =
-      `Just a gentle reminder — *${r.title}* is still waiting for your approval.\n\n` +
-      `Reply *OK* to approve, or *change* followed by what you'd like different. ` +
-      `A voice note works too.`;
+    // One title, so this is the single-video wording — the codes only appear
+    // when a client is being chased about several at once, which this rule
+    // never does.
+    const text = approvalChaseText([{ title: r.title, video_code: null }]);
     (await deliver("approval_chase", key, r.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
@@ -320,13 +340,11 @@ async function requestFootage(): Promise<{ sent: number; failed: number }> {
     const key = `c:${r.client_id}:${r.due_date}`;
     if (!(await claim("footage_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
 
-    const list = r.titles.split("||").slice(0, 8).map((t) => `• ${t}`).join("\n");
-    const n = Number(r.n);
-    const text =
-      `We're due to start editing on *${fmtDate(r.due_date)}* and we don't have your footage yet.\n\n` +
-      `${n === 1 ? "This one" : `These ${n}`}:\n${list}\n\n` +
-      `Just reply with the link — a Drive or WeTransfer link on its own is enough, ` +
-      `or write *raw* in front of any other link.`;
+    // Grouped by a single due_date in the query above, so every item carries
+    // the same one and the message leads with that date.
+    const text = footageText(
+      r.titles.split("||").map((title) => ({ title, due_date: r.due_date }))
+    );
     (await deliver("footage_due", key, r.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
@@ -351,12 +369,7 @@ async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: n
     if (items.length === 0) continue; // nothing planned is not worth a message
     if (!(await claim("monthly_plan", key, { clientId: t.client_id, groupId: t.group_id }))) continue;
 
-    const lines = items
-      .map((i) => `• ${i.due_date ? fmtDate(i.due_date) : "TBC"} — ${i.title}`)
-      .join("\n");
-    const text =
-      `*This month's plan* — ${items.length} piece${items.length === 1 ? "" : "s"} of content:\n\n${lines}\n\n` +
-      `We'll send each one here for your approval before it goes out.`;
+    const text = monthlyPlanText(items);
     (await deliver("monthly_plan", key, t.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
@@ -396,10 +409,20 @@ async function remindInvoices(): Promise<{ sent: number; failed: number }> {
   for (const r of rows) {
     const key = `inv:${r.id}:${r.week}`;
     if (!(await claim("invoice_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
-    const text =
-      `A quick reminder about invoice *${r.invoice_no}* for *${money(r.total)}*, ` +
-      `which was due ${fmtDate(r.due_date)}.\n\n` +
-      `You can view and pay it in your portal. Do let us know if anything looks wrong.`;
+
+    // A payable link rather than "pay it in your portal". Cached on the
+    // invoice, so this week's reminder carries the same link as last week's
+    // and a client who kept the older message can still use it.
+    const link = await paymentLinkForInvoice(r.id);
+    const text = invoiceText([
+      {
+        invoice_no: r.invoice_no,
+        total: Number(r.total) || 0,
+        due_date: r.due_date,
+        payUrl: link.url,
+        payable: link.payable,
+      },
+    ]);
     (await deliver("invoice_due", key, r.group_id, text)) ? sent++ : failed++;
   }
   return { sent, failed };
@@ -433,11 +456,7 @@ async function teamDigest(teamGroupId: string, today: string): Promise<{ sent: n
   if (rows.length === 0) return { sent: 0, failed: 0 };
   if (!(await claim("team_digest", key, { groupId: teamGroupId }))) return { sent: 0, failed: 0 };
 
-  const overdue = rows.filter((r) => r.due_date && r.due_date < today).length;
-  const lines = rows.map((r) => `• ${r.company_name} — ${r.title}`).join("\n");
-  const text =
-    `*Today* — ${rows.length} due or overdue${overdue ? ` (${overdue} late)` : ""}, ` +
-    `${Number(awaiting[0]?.n) || 0} waiting on clients.\n\n${lines}`;
+  const text = teamDigestText(rows, Number(awaiting[0]?.n) || 0, today);
   return (await deliver("team_digest", key, teamGroupId, text))
     ? { sent: 1, failed: 0 }
     : { sent: 0, failed: 1 };
@@ -466,6 +485,19 @@ export async function runReminders(
   const month = today.slice(0, 7);
 
   const steps: [string, () => Promise<{ sent: number; failed: number }>][] = [
+    /*
+     * Anything a super admin scheduled by hand, first.
+     *
+     * A safety net rather than the mechanism: the outbox has its own runner on
+     * a five-minute poll, and that is what makes "send it at 6pm" mean 6pm.
+     * Including it here means that if the poll is ever switched off or broken,
+     * a scheduled message goes out late rather than never — and late is a
+     * problem someone notices and fixes.
+     */
+    ["outbox", async () => {
+      const r = await sendDueMessages();
+      return { sent: r.sent, failed: r.failed };
+    }],
     ["approval_chase", chaseApprovals],
     // After the chase, so a video is never approved in the same run that first
     // reminded them about it.

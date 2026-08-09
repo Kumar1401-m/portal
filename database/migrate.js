@@ -724,6 +724,55 @@ async function main() {
       KEY idx_wr_sent (sent_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // Reminders waiting for their moment.
+  //
+  // Separate from whatsapp_reminders, which records what has already gone out
+  // and exists to stop repeats. This is the opposite end: a message written
+  // now and sent later, with the text frozen at the moment it was written.
+  //
+  // Frozen deliberately. A reminder composed from live data at send time would
+  // say something the super admin never read and never approved — and the
+  // whole point of scheduling one by hand is choosing the words as well as the
+  // hour. What they see in the preview is what the client gets.
+  await run('whatsapp_outbox table', `
+    CREATE TABLE IF NOT EXISTS whatsapp_outbox (
+      id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      kind            VARCHAR(32) NOT NULL DEFAULT 'custom',
+      client_id       BIGINT UNSIGNED DEFAULT NULL,
+      group_id        VARCHAR(64) NOT NULL,
+      group_label     VARCHAR(190) DEFAULT NULL,
+      body            TEXT NOT NULL,
+      -- UTC, like every other scheduled time in the portal.
+      send_at         DATETIME NOT NULL,
+      status          ENUM('scheduled','sending','sent','failed','cancelled') NOT NULL DEFAULT 'scheduled',
+      attempts        INT UNSIGNED NOT NULL DEFAULT 0,
+      last_error      TEXT DEFAULT NULL,
+      wa_message_id   VARCHAR(128) DEFAULT NULL,
+      created_by      BIGINT UNSIGNED DEFAULT NULL,
+      created_by_name VARCHAR(150) DEFAULT NULL,
+      created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      -- When a runner took this message. A serverless function can be killed
+      -- between claiming and sending, and without a timestamp the row would
+      -- sit in 'sending' for ever, never sent and never retried.
+      claimed_at      DATETIME DEFAULT NULL,
+      sent_at         DATETIME DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_wo_due (status, send_at),
+      KEY idx_wo_client (client_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  await addColumn('whatsapp_outbox', 'claimed_at', 'claimed_at DATETIME DEFAULT NULL');
+
+  // The payment link an invoice reminder carries, cached so a client chased
+  // three weeks running gets the same link each time rather than three live
+  // links against one bill.
+  await addColumn('invoices', 'payment_link', 'payment_link VARCHAR(500) DEFAULT NULL');
+  await addColumn('invoices', 'payment_link_id', 'payment_link_id VARCHAR(64) DEFAULT NULL');
+  await addColumn(
+    'invoices',
+    'payment_link_expires_at',
+    'payment_link_expires_at DATETIME DEFAULT NULL'
+  );
+
   // Health of the WhatsApp session itself — one row, updated in place. Lets
   // the portal show "connected / disconnected" without holding a socket open
   // to the service, which a serverless deployment cannot do.

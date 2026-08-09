@@ -1,6 +1,6 @@
 # n8n → the portal
 
-Two workflows, and the reason each exists.
+Four workflows, and the reason each exists.
 
 ## What n8n is actually for here
 
@@ -62,6 +62,20 @@ worth catching.
 **`nightly-analyse.json`** — 02:30 daily, `GET /api/automation/analyse`. Watches new
 videos so the caption generator has something to work from. Overnight because it costs
 an AI call per video and nobody is waiting on it.
+
+**`whatsapp-reminders.json`** — 10:00 daily, `GET /api/automation/whatsapp/run`. The
+routine chases the agency would otherwise have to remember: an unanswered approval after
+twelve hours, footage three days before a shoot, the month's plan, an unpaid invoice, and
+the team's own digest. Once a day, mid-morning, because a chase at 3am reads as a machine.
+
+**`whatsapp-outbox.json`** — **every 5 minutes**, `GET /api/automation/whatsapp/outbox`.
+This one is not a rule; it is the delivery van. When a super admin schedules a reminder
+for 6pm in Settings → Reminders, this is what makes 6pm mean 6pm. Nothing due is one
+indexed query and no message, so five minutes costs nothing.
+
+Both WhatsApp workflows are safe to overlap and safe to run twice. The daily one claims
+each reminder by inserting a row with a unique key before sending; the outbox claims each
+message with a conditional `UPDATE`. Either way, exactly one caller can send.
 
 ## Turning the Vercel cron off
 

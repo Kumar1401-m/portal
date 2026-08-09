@@ -6,6 +6,7 @@ import {
   Lock,
   CloudUpload,
   MessageCircle,
+  BellRing,
 } from "lucide-react";
 import Link from "next/link";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
@@ -410,6 +411,30 @@ export default async function SettingsPage() {
           </Link>
         </CardContent>
       </Card>
+
+      {/* Super admin only, like the rest of the outward-facing controls: every
+          one of these lands in a paying client's WhatsApp group. */}
+      {isSuperAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BellRing className="h-5 w-5 text-muted-foreground" />
+              Reminders
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Chase footage, approvals or a payment — now, or at a time you set.
+            </p>
+            <Link
+              href="/settings/reminders"
+              className={buttonClasses({ variant: "secondary", size: "sm" })}
+            >
+              Open reminders
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {isSuperAdmin ? <SchemaPanel initial={schema} initialTables={schemaTables} /> : null}
     </div>
