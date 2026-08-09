@@ -762,6 +762,21 @@ async function main() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
   await addColumn('whatsapp_outbox', 'claimed_at', 'claimed_at DATETIME DEFAULT NULL');
 
+  // When each scheduled job last ran. One row per job, overwritten each time.
+  //
+  // Without it the portal cannot tell "the job runs every morning and there
+  // was nothing to send" from "nobody ever switched the job on" — both look
+  // like an empty list of sent reminders, and they need opposite responses.
+  await run('automation_runs table', `
+    CREATE TABLE IF NOT EXISTS automation_runs (
+      job      VARCHAR(40) NOT NULL,
+      -- UTC, written by the app. Never NOW(): this database's clock is not UTC.
+      ran_at   DATETIME NOT NULL,
+      ok       TINYINT(1) NOT NULL DEFAULT 1,
+      summary  VARCHAR(500) DEFAULT NULL,
+      PRIMARY KEY (job)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // The payment link an invoice reminder carries, cached so a client chased
   // three weeks running gets the same link each time rather than three live
   // links against one bill.

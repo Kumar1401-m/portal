@@ -22,6 +22,7 @@
 import "server-only";
 import { query, execute, hasColumn } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
+import { recordRun } from "./automation-runs";
 
 /**
  * The clock a super admin types and reads times in.
@@ -254,6 +255,22 @@ export async function sendDueMessages(): Promise<OutboxRunSummary> {
     );
     if (exhausted) failed++;
   }
+
+  /*
+   * The heartbeat, on every pass including the empty ones.
+   *
+   * Empty is the normal answer here — the poll runs 288 times a day and most
+   * of those have nothing to send. Recording only the busy passes would leave
+   * a working poll looking dead for hours at a stretch, which is precisely the
+   * confusion this exists to remove.
+   */
+  await recordRun(
+    "whatsapp_outbox",
+    true,
+    sent || failed || recovered
+      ? `Sent ${sent}${failed ? `, ${failed} gave up` : ""}${recovered ? `, ${recovered} recovered` : ""}.`
+      : "Ran, nothing was due."
+  );
 
   return { ran: true, sent, failed, ...(recovered ? { recovered } : {}) };
 }

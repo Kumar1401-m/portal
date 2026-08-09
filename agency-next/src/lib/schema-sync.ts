@@ -478,6 +478,18 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "automation_runs",
+    purpose:
+      "When each scheduled job last ran — how the portal can say whether the automatic reminders are firing.",
+    ddl: `CREATE TABLE IF NOT EXISTS automation_runs (
+      job      VARCHAR(40) NOT NULL,
+      ran_at   DATETIME NOT NULL,
+      ok       TINYINT(1) NOT NULL DEFAULT 1,
+      summary  VARCHAR(500) DEFAULT NULL,
+      PRIMARY KEY (job)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "whatsapp_outbox",
     purpose:
       "Reminders written now and sent later, with the wording frozen as it was approved.",

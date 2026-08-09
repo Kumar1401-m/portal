@@ -11,11 +11,18 @@ import {
   REMINDER_TIMEZONE,
   type OutboxRow,
 } from "@/lib/reminder-outbox";
+import {
+  pendingReminders,
+  recentlySent,
+  unreachableClients,
+} from "@/lib/whatsapp-reminders";
+import { lastRuns, type JobRun } from "@/lib/automation-runs";
 import { utcToLocalInput } from "@/lib/zapier";
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { SendPanel } from "./send-panel";
 import { ScheduleList, type ScheduledItem } from "./schedule-list";
+import { AutomaticPanel, type AutomaticStatus } from "./automatic-panel";
 
 export const metadata = { title: "Reminders · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -38,6 +45,54 @@ function whenLabel(utc: string | null): string {
     `${h12}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`
   );
 }
+
+/** "3 hours ago". Vague on purpose — the exact minute is never the question. */
+function ago(utc: string): string {
+  const ms = Date.now() - Date.parse(`${utc.replace(" ", "T")}Z`);
+  if (Number.isNaN(ms)) return "at an unknown time";
+  const mins = Math.round(ms / 60_000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * A heartbeat, plus whether it is late.
+ *
+ * "Late" is generous — roughly double the interval — because the answer that
+ * matters is "has this stopped", not "did it drift by a minute". A daily job
+ * seen 26 hours ago is fine; one seen three days ago is not.
+ */
+function beat(run: JobRun | undefined, staleAfterMinutes: number) {
+  if (!run) return null;
+  const ms = Date.now() - Date.parse(`${run.ran_at.replace(" ", "T")}Z`);
+  return {
+    agoLabel: ago(run.ran_at),
+    ok: Number(run.ok) === 1,
+    summary: run.summary,
+    stale: !Number.isNaN(ms) && ms > staleAfterMinutes * 60_000,
+  };
+}
+
+const PENDING_LABELS: { key: keyof Awaited<ReturnType<typeof pendingReminders>>; label: string; when: string }[] = [
+  { key: "approval_chase", label: "approval chases", when: "12h after the video was sent" },
+  { key: "auto_approve", label: "approve themselves", when: "24h of silence" },
+  { key: "footage_due", label: "footage requests", when: "3 days before the shoot" },
+  { key: "monthly_plan", label: "month plans", when: "once this month" },
+  { key: "invoice_due", label: "payment reminders", when: "weekly while unpaid" },
+];
+
+const SENT_LABELS: Record<string, string> = {
+  approval_chase: "approval chases",
+  auto_approve: "auto-approved",
+  footage_due: "footage requests",
+  monthly_plan: "month plans",
+  invoice_due: "payment reminders",
+  team_digest: "team digests",
+};
 
 function toItem(r: OutboxRow): ScheduledItem {
   return {
@@ -102,21 +157,41 @@ export default async function RemindersPage() {
    * would raise the wrong question — "why isn't Ortho in this list?" is harder
    * to answer than "Ortho — no WhatsApp group", which says what to fix.
    */
-  const [clients, scheduled, history, status] = await Promise.all([
-    query<{ id: number; company_name: string; group_count: number }>(
-      `SELECT c.id, c.company_name,
-              (SELECT COUNT(*) FROM whatsapp_groups g
-                WHERE g.client_id = c.id AND g.is_active = 1) AS group_count
-         FROM clients c
-        WHERE c.status <> 'churned'
-        ORDER BY c.company_name`
-    ),
-    listScheduled(),
-    listHistory(),
-    getServiceStatus(),
-  ]);
+  const [clients, scheduled, history, status, pending, runs, week, unreachable] =
+    await Promise.all([
+      query<{ id: number; company_name: string; group_count: number }>(
+        `SELECT c.id, c.company_name,
+                (SELECT COUNT(*) FROM whatsapp_groups g
+                  WHERE g.client_id = c.id AND g.is_active = 1) AS group_count
+           FROM clients c
+          WHERE c.status <> 'churned'
+          ORDER BY c.company_name`
+      ),
+      listScheduled(),
+      listHistory(),
+      getServiceStatus(),
+      pendingReminders(),
+      lastRuns(),
+      recentlySent(7),
+      unreachableClients(),
+    ]);
 
   const connected = status.ok && status.connected;
+
+  const automatic: AutomaticStatus = {
+    pending: PENDING_LABELS.map((p) => ({ label: p.label, when: p.when, n: pending[p.key] })),
+    totalPending: pending.total,
+    // A daily job is late after ~26 hours; a five-minute poll after ~20 minutes.
+    daily: beat(runs.whatsapp_reminders, 26 * 60),
+    poll: beat(runs.whatsapp_outbox, 20),
+    sentThisWeek: week.map((w) => ({
+      kind: w.kind,
+      label: SENT_LABELS[w.kind] || w.kind.replace(/_/g, " "),
+      n: Number(w.n) || 0,
+    })),
+    weekTotal: week.reduce((sum, w) => sum + (Number(w.n) || 0), 0),
+    unreachable,
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -167,10 +242,7 @@ export default async function RemindersPage() {
 
       <ScheduleList scheduled={scheduled.map(toItem)} history={history.map(toItem)} />
 
-      <p className="text-xs text-muted-foreground">
-        The routine chases — approvals after 12 hours, footage 3 days out, invoices weekly —
-        still go out on their own and don&apos;t need anything here.
-      </p>
+      <AutomaticPanel status={automatic} />
     </div>
   );
 }

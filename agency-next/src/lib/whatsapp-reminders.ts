@@ -18,6 +18,7 @@ import "server-only";
 import { query, execute, hasColumn } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { sendDueMessages } from "./reminder-outbox";
+import { recordRun } from "./automation-runs";
 import { paymentLinkForInvoice } from "./payment-links";
 import {
   approvalChaseText,
@@ -176,16 +177,17 @@ async function deliver(
  * waiting gets three separate chases, which is correct — each one is a
  * different decision they owe.
  */
-async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
-  const rows = await query<{
-    id: number;
-    title: string;
-    client_id: number;
-    group_id: string;
-    waiting_since: string;
-  }>(
-    `SELECT d.id, d.title, d.client_id, g.group_id,
-            MAX(s.created_at) AS waiting_since
+/**
+ * What this rule would act on, claims aside.
+ *
+ * Split out from the sending so the "what will the next run do" panel can ask
+ * the same question the run itself asks. One query, two callers — a second
+ * copy written for the preview would answer differently the first time either
+ * was edited, and a preview that disagrees with the run is worse than none.
+ */
+function findApprovalChases() {
+  return query<{ id: number; title: string; client_id: number; group_id: string }>(
+    `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
        JOIN ${ONE_GROUP} g ON g.client_id = c.id
@@ -196,6 +198,10 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
       LIMIT 50`,
     [CHASE_AFTER_HOURS]
   );
+}
+
+async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
+  const rows = await findApprovalChases();
 
   let sent = 0, failed = 0;
   for (const r of rows) {
@@ -228,13 +234,8 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
  * send has not been ignored by anyone, and approving it on the client's behalf
  * because our own send failed would be indefensible.
  */
-async function autoApprove(): Promise<{ sent: number; failed: number }> {
-  const rows = await query<{
-    id: number;
-    title: string;
-    client_id: number;
-    group_id: string;
-  }>(
+function findAutoApprovals() {
+  return query<{ id: number; title: string; client_id: number; group_id: string }>(
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
@@ -247,6 +248,10 @@ async function autoApprove(): Promise<{ sent: number; failed: number }> {
       LIMIT 25`,
     [AUTO_APPROVE_AFTER_HOURS]
   );
+}
+
+async function autoApprove(): Promise<{ sent: number; failed: number }> {
+  const rows = await findAutoApprovals();
 
   let sent = 0, failed = 0;
   for (const r of rows) {
@@ -313,8 +318,8 @@ async function autoApprove(): Promise<{ sent: number; failed: number }> {
  * footage" messages in a row reads as a malfunction, and the client's job is
  * the same either way: send a link.
  */
-async function requestFootage(): Promise<{ sent: number; failed: number }> {
-  const rows = await query<{
+function findFootageDue() {
+  return query<{
     client_id: number;
     group_id: string;
     due_date: string;
@@ -334,6 +339,10 @@ async function requestFootage(): Promise<{ sent: number; failed: number }> {
       LIMIT 50`,
     [FOOTAGE_WARNING_DAYS]
   );
+}
+
+async function requestFootage(): Promise<{ sent: number; failed: number }> {
+  const rows = await findFootageDue();
 
   let sent = 0, failed = 0;
   for (const r of rows) {
@@ -354,18 +363,23 @@ async function requestFootage(): Promise<{ sent: number; failed: number }> {
  * 4. What is going out this month
  * ------------------------------------------------------------------ */
 
+/** One client's month, as the plan message lists it. */
+function findMonthItems(clientId: number, month: string) {
+  return query<{ title: string; due_date: string | null }>(
+    `SELECT title, COALESCE(scheduled_at, due_date) AS due_date
+       FROM deliverables
+      WHERE client_id = ? AND month_key = ? AND status NOT IN ('cancelled','rejected')
+      ORDER BY due_date IS NULL, due_date ASC LIMIT 40`,
+    [clientId, month]
+  );
+}
+
 /** The month's schedule, once, at the start of it. */
 async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: number }> {
   let sent = 0, failed = 0;
   for (const t of await reachableClients()) {
     const key = `c:${t.client_id}:${month}`;
-    const items = await query<{ title: string; due_date: string | null; content_category: string | null }>(
-      `SELECT title, COALESCE(scheduled_at, due_date) AS due_date, content_category
-         FROM deliverables
-        WHERE client_id = ? AND month_key = ? AND status NOT IN ('cancelled','rejected')
-        ORDER BY due_date IS NULL, due_date ASC LIMIT 40`,
-      [t.client_id, month]
-    );
+    const items = await findMonthItems(t.client_id, month);
     if (items.length === 0) continue; // nothing planned is not worth a message
     if (!(await claim("monthly_plan", key, { clientId: t.client_id, groupId: t.group_id }))) continue;
 
@@ -385,8 +399,8 @@ async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: n
  * The scope key carries the ISO week, so the reminder repeats weekly for as
  * long as it stays unpaid without becoming daily nagging.
  */
-async function remindInvoices(): Promise<{ sent: number; failed: number }> {
-  const rows = await query<{
+function findUnpaidInvoices() {
+  return query<{
     id: number;
     invoice_no: string;
     total: number;
@@ -404,6 +418,10 @@ async function remindInvoices(): Promise<{ sent: number; failed: number }> {
         AND i.due_date IS NOT NULL AND i.due_date <= CURDATE()
       LIMIT 50`
   );
+}
+
+async function remindInvoices(): Promise<{ sent: number; failed: number }> {
+  const rows = await findUnpaidInvoices();
 
   let sent = 0, failed = 0;
   for (const r of rows) {
@@ -462,6 +480,127 @@ async function teamDigest(teamGroupId: string, today: string): Promise<{ sent: n
     : { sent: 0, failed: 1 };
 }
 
+/* ------------------------------------------------------------------ *
+ * What the next run would do
+ * ------------------------------------------------------------------ */
+
+/** Of these scope keys, the ones no reminder has been sent against yet. */
+async function unclaimedCount(kind: ReminderKind, keys: string[]): Promise<number> {
+  if (keys.length === 0) return 0;
+  const [row] = await query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM whatsapp_reminders
+      WHERE kind = ? AND scope_key IN (${keys.map(() => "?").join(",")})`,
+    [kind, ...keys]
+  );
+  return keys.length - (Number(row?.n) || 0);
+}
+
+export type PendingReminders = {
+  approval_chase: number;
+  auto_approve: number;
+  footage_due: number;
+  monthly_plan: number;
+  invoice_due: number;
+  total: number;
+};
+
+/**
+ * What the next automatic run would send, without sending anything.
+ *
+ * Every rule is asked through the same `find*` query it uses for real, then
+ * the claims are subtracted — so this is not an estimate, it is the run
+ * itself stopping one step short of WhatsApp.
+ *
+ * Worth having because "no reminders were sent yesterday" has two very
+ * different causes. Either nothing was due, or nothing is running. A number
+ * here plus a heartbeat in `automation_runs` tells them apart, and they need
+ * opposite responses.
+ */
+export async function pendingReminders(month?: string): Promise<PendingReminders> {
+  const m = month || new Date().toISOString().slice(0, 7);
+  const zero: PendingReminders = {
+    approval_chase: 0, auto_approve: 0, footage_due: 0,
+    monthly_plan: 0, invoice_due: 0, total: 0,
+  };
+  if (!(await hasColumn("whatsapp_reminders", "scope_key"))) return zero;
+
+  const count = async (fn: () => Promise<number>) => {
+    try {
+      return await fn();
+    } catch (err) {
+      // One rule that cannot be counted must not blank the whole panel.
+      console.warn("[reminders] pending count failed:", err instanceof Error ? err.message : err);
+      return 0;
+    }
+  };
+
+  const out = { ...zero };
+
+  out.approval_chase = await count(async () =>
+    unclaimedCount("approval_chase", (await findApprovalChases()).map((r) => `d:${r.id}`))
+  );
+  out.auto_approve = await count(async () =>
+    unclaimedCount("auto_approve", (await findAutoApprovals()).map((r) => `d:${r.id}`))
+  );
+  out.footage_due = await count(async () =>
+    unclaimedCount("footage_due", (await findFootageDue()).map((r) => `c:${r.client_id}:${r.due_date}`))
+  );
+  out.invoice_due = await count(async () =>
+    unclaimedCount("invoice_due", (await findUnpaidInvoices()).map((r) => `inv:${r.id}:${r.week}`))
+  );
+  out.monthly_plan = await count(async () => {
+    // The same per-client loop the rule runs. A single clever aggregate would
+    // be faster and would be a second definition of "has a plan worth sending".
+    const keys: string[] = [];
+    for (const t of await reachableClients()) {
+      if ((await findMonthItems(t.client_id, m)).length > 0) keys.push(`c:${t.client_id}:${m}`);
+    }
+    return unclaimedCount("monthly_plan", keys);
+  });
+
+  out.total =
+    out.approval_chase + out.auto_approve + out.footage_due + out.monthly_plan + out.invoice_due;
+  return out;
+}
+
+/**
+ * Clients the automatic reminders can never reach.
+ *
+ * Every rule joins through `whatsapp_groups`, so a client without a linked
+ * group is silently skipped by all of them — no error, no message, nothing on
+ * any screen. Naming them is the only way that becomes visible.
+ */
+export async function unreachableClients(): Promise<{ id: number; company_name: string }[]> {
+  try {
+    return await query<{ id: number; company_name: string }>(
+      `SELECT c.id, c.company_name FROM clients c
+        WHERE c.status <> 'churned'
+          AND NOT EXISTS (
+            SELECT 1 FROM whatsapp_groups g WHERE g.client_id = c.id AND g.is_active = 1
+          )
+        ORDER BY c.company_name`
+    );
+  } catch {
+    // An install without the group table has nothing to report here, and the
+    // page as a whole must still render — this is one card on it, not the point.
+    return [];
+  }
+}
+
+/** How many automatic reminders actually went out over the last week, by kind. */
+export async function recentlySent(days = 7): Promise<{ kind: string; n: number }[]> {
+  try {
+    return await query<{ kind: string; n: number }>(
+      `SELECT kind, COUNT(*) AS n FROM whatsapp_reminders
+        WHERE sent_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        GROUP BY kind ORDER BY n DESC`,
+      [days]
+    );
+  } catch {
+    return [];
+  }
+}
+
 /* ------------------------------------------------------------------ */
 
 /**
@@ -476,7 +615,11 @@ export async function runReminders(
   const summary: ReminderSummary = { ran: false, sent: {}, failed: 0 };
 
   if (!(await hasColumn("whatsapp_reminders", "scope_key"))) {
-    return { ...summary, reason: "The whatsapp_reminders table is missing — run Settings → Database." };
+    const reason = "The whatsapp_reminders table is missing — run Settings → Database.";
+    // Recorded even though nothing ran. A job that is being called but cannot
+    // work must not look identical to one nobody is calling.
+    await recordRun("whatsapp_reminders", false, reason);
+    return { ...summary, reason };
   }
   summary.ran = true;
 
@@ -519,5 +662,18 @@ export async function runReminders(
       console.warn(`[reminders] ${name} threw:`, err instanceof Error ? err.message : err);
     }
   }
+
+  const total = Object.values(summary.sent).reduce((a, b) => a + b, 0);
+  const detail = Object.entries(summary.sent)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${k} ${n}`)
+    .join(", ");
+  await recordRun(
+    "whatsapp_reminders",
+    summary.failed === 0,
+    total === 0
+      ? "Ran, nothing was due."
+      : `Sent ${total}${detail ? ` — ${detail}` : ""}${summary.failed ? `, ${summary.failed} failed` : ""}.`
+  );
   return summary;
 }
