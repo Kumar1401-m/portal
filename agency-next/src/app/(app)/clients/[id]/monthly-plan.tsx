@@ -3,11 +3,12 @@
 import { useActionState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { CalendarRange, Wand2, Check, TriangleAlert, Loader2 } from "lucide-react";
+import { CalendarRange, Wand2, Check, TriangleAlert, Loader2, Plus, Minus } from "lucide-react";
 import {
   generateMonthAction,
   shiftMonthAction,
   setTaskDateAction,
+  adjustTasksAction,
   type PlanState,
 } from "./plan-actions";
 import type { MonthPlan, PlannedTask } from "@/lib/task-plan";
@@ -132,6 +133,7 @@ export function MonthlyPlan({
     {}
   );
   const [shiftState, shift, shifting] = useActionState<PlanState, FormData>(shiftMonthAction, {});
+  const [adjState, adjust, adjusting] = useActionState<PlanState, FormData>(adjustTasksAction, {});
 
   const toAdd = plan.videosToAdd + plan.postersToAdd;
   const noTargets = plan.videoTarget === 0 && plan.posterTarget === 0;
@@ -227,6 +229,35 @@ export function MonthlyPlan({
             <Note state={genState} />
           </>
         )}
+
+
+            {/* Exactly how many, either direction. Generate answers "match the
+                contract"; this answers "give me three more", which is a
+                different question and deliberately not idempotent. */}
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-xs font-medium">Add or remove a set number</p>
+              <form action={adjust} className="flex flex-wrap items-center gap-2">
+                <input type="hidden" name="client_id" value={clientId} />
+                <input type="hidden" name="month" value={plan.month} />
+                <Input name="count" type="number" min="1" max="50" defaultValue="1" className="h-9 w-20" aria-label="How many" />
+                <Select name="kind" defaultValue="video" className="h-9 w-28 text-sm" aria-label="Videos or posters">
+                  <option value="video">videos</option>
+                  <option value="poster">posters</option>
+                </Select>
+                <button type="submit" name="direction" value="add" disabled={adjusting}
+                  className={buttonClasses({ variant: "outline", size: "sm" })}>
+                  {adjusting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+                </button>
+                <button type="submit" name="direction" value="remove" disabled={adjusting}
+                  className={buttonClasses({ variant: "ghost", size: "sm" })}>
+                  <Minus className="h-4 w-4" /> Remove
+                </button>
+              </form>
+              <p className="text-xs text-muted-foreground">
+                Removing only takes tasks nobody has started — no footage, no video, not sent to the client.
+              </p>
+              <Note state={adjState} />
+            </div>
 
         {tasks.length > 0 ? (
           <form action={shift} className="flex flex-wrap items-end gap-2 border-t border-border pt-4">

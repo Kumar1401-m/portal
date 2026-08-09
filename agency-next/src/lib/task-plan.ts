@@ -140,10 +140,20 @@ async function defaultCategory(service: ServiceKey): Promise<string> {
 export async function generateMonthTasks(
   clientId: number,
   month: string,
-  createdBy: number
+  createdBy: number,
+  /**
+   * Exact counts, overriding the contract.
+   *
+   * Topping up to the monthly target is the common case and stays the
+   * default. This is for the month that is not the contract — an extra push,
+   * a campaign, a client who asked for three more.
+   */
+  exact?: { videos?: number; posters?: number }
 ): Promise<GenerateResult> {
   const plan = await monthPlan(clientId, month);
   if (!plan) return { month: safeMonth(month), videos: 0, posters: 0 };
+  const wantVideos = exact?.videos ?? plan.videosToAdd;
+  const wantPosters = exact?.posters ?? plan.postersToAdd;
 
   const client = await queryOne<{ designer_id: number | null }>(
     "SELECT designer_id FROM clients WHERE id = ?",
@@ -197,8 +207,8 @@ export async function generateMonthTasks(
     }
   };
 
-  await add("video_editing", plan.videosToAdd, highest("Video"), "Video");
-  await add("poster_designing", plan.postersToAdd, highest("Poster"), "Poster");
+  await add("video_editing", wantVideos, highest("Video"), "Video");
+  await add("poster_designing", wantPosters, highest("Poster"), "Poster");
 
   if (rows.length) {
     await execute(
@@ -212,7 +222,7 @@ export async function generateMonthTasks(
     );
   }
 
-  return { month: plan.month, videos: plan.videosToAdd, posters: plan.postersToAdd };
+  return { month: plan.month, videos: wantVideos, posters: wantPosters };
 }
 
 /**
@@ -328,6 +338,63 @@ export async function pendingAcrossClients(
     posters += p.postersToAdd;
   }
   return { clients: n, videos, posters };
+}
+
+/**
+ * Remove tasks from a month that nobody has started.
+ *
+ * Only untouched placeholders go: still pending, no footage, no video, no
+ * caption, never sent to the client. A task with any of those has had work or
+ * a client's attention put into it, and deleting it silently because someone
+ * typed a number is not a thing this should be able to do — it refuses and
+ * says how many it could actually take.
+ *
+ * Newest first, so removing three from a month of twelve leaves 1–9 rather
+ * than a gap in the middle.
+ */
+export async function removeTasks(
+  clientId: number,
+  month: string,
+  kind: "video" | "poster",
+  count: number
+): Promise<{ removed: number; blocked: number }> {
+  const mk = safeMonth(month);
+  const want = Math.max(0, Math.trunc(Number(count) || 0));
+  if (!want) return { removed: 0, blocked: 0 };
+
+  const isPoster = kind === "poster";
+  const rows = await query<{ id: number; untouched: number }>(
+    `SELECT d.id,
+            (d.status = 'pending'
+             AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
+             AND (d.edited_link IS NULL OR d.edited_link = '')
+             AND (d.caption IS NULL OR d.caption = '')
+             AND COALESCE(d.wa_status,'not_sent') = 'not_sent') AS untouched
+       FROM deliverables d
+      WHERE d.client_id = ? AND d.month_key = ?
+        AND ${isPoster ? IS_POSTER : `NOT ${IS_POSTER}`}
+      ORDER BY d.id DESC`,
+    [clientId, mk]
+  );
+
+  const takeable = rows.filter((r) => Number(r.untouched) === 1).map((r) => r.id);
+  const ids = takeable.slice(0, want);
+  if (!ids.length) return { removed: 0, blocked: want };
+
+  const list = ids.join(",");
+  // The same orphan-prone tables the bulk clear handles: no foreign key on two
+  // of them, ON DELETE SET NULL on the rest, so a plain delete leaves rows
+  // pointing at ids that are gone.
+  for (const t of ["whatsapp_messages", "whatsapp_send_log", "captions", "scripts", "thumbnails", "post_insights"]) {
+    try {
+      await execute(`DELETE FROM ${t} WHERE deliverable_id IN (${list})`);
+    } catch {
+      /* a table this install never created */
+    }
+  }
+  const res = await execute(`DELETE FROM deliverables WHERE id IN (${list})`);
+  const removed = res.affectedRows ?? 0;
+  return { removed, blocked: Math.max(0, want - removed) };
 }
 
 export type PlannedTask = {

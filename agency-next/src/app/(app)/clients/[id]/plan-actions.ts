@@ -9,6 +9,7 @@ import {
   shiftMonthDates,
   setTaskDate,
   safeMonth,
+  removeTasks,
 } from "@/lib/task-plan";
 
 export type PlanState = { ok?: boolean; error?: string; message?: string };
@@ -113,5 +114,60 @@ export async function setTaskDateAction(
     return { ok: true, message: raw ? "Date changed." : "Date cleared." };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not change the date." };
+  }
+}
+
+/**
+ * Add or remove an exact number of tasks, ignoring the contract.
+ *
+ * Separate from Generate on purpose. Generate answers "make this month match
+ * what they pay for" and is safe to press twice; this answers "give me three
+ * more", which is a different question and must not be idempotent.
+ */
+export async function adjustTasksAction(
+  _prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  const ok = await guard(formData);
+  if (!ok) return { error: "You can't change this client's tasks." };
+
+  const month = safeMonth(String(formData.get("month") || ""));
+  const kind = String(formData.get("kind") || "video") === "poster" ? "poster" : "video";
+  const direction = String(formData.get("direction") || "add");
+  const count = Math.trunc(Number(formData.get("count")));
+
+  if (!Number.isFinite(count) || count < 1) return { error: "Enter how many." };
+  if (count > 50) return { error: "That's more than 50 — do it in smaller batches." };
+
+  try {
+    if (direction === "remove") {
+      const { removed, blocked } = await removeTasks(ok.clientId, month, kind, count);
+      refresh(ok.clientId);
+      if (!removed) {
+        return {
+          error:
+            "Nothing could be removed — the remaining ones have footage, a video, a caption, " +
+            "or have already gone to the client.",
+        };
+      }
+      return {
+        ok: true,
+        message:
+          `Removed ${removed} ${kind}${removed > 1 ? "s" : ""}.` +
+          (blocked ? ` ${blocked} were left: they have work on them already.` : ""),
+      };
+    }
+
+    const made = await generateMonthTasks(
+      ok.clientId,
+      month,
+      ok.user.id,
+      kind === "poster" ? { videos: 0, posters: count } : { videos: count, posters: 0 }
+    );
+    refresh(ok.clientId);
+    const n = kind === "poster" ? made.posters : made.videos;
+    return { ok: true, message: `Added ${n} ${kind}${n > 1 ? "s" : ""}.` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not change the tasks." };
   }
 }
