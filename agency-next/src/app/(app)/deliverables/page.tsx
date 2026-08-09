@@ -21,7 +21,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { TaskFilters } from "@/components/admin/task-filters";
+import { ColumnFilters } from "@/components/admin/column-filters";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -81,14 +81,6 @@ export default async function DeliverablesPage({
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
 
-      <TaskFilters
-        basePath="/deliverables"
-        params={params}
-        categories={categories}
-        clients={clients}
-        assignees={assignees}
-      />
-
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
           <p className="p-10 text-center text-sm text-muted-foreground">
@@ -119,6 +111,13 @@ export default async function DeliverablesPage({
                   <th>Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
+                <ColumnFilters
+                  basePath="/deliverables"
+                  params={params}
+                  clients={clients}
+                  categories={categories}
+                  columns={{ lead: 1, trail: 5 }}
+                />
               </THead>
               <TBody>
                 {rows.map((d, i) => (
