@@ -21,7 +21,9 @@ import {
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { ColumnFilters } from "@/components/admin/column-filters";
+import { ColumnFilter } from "@/components/admin/column-filter";
+import { FILTER_STATUSES } from "@/lib/constants";
+import { label as pretty } from "@/lib/utils";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -99,10 +101,19 @@ export default async function DeliverablesPage({
               <THead>
                 <tr>
                   <th className="w-10 text-right">#</th>
-                  <th>Organization</th>
-                  <th>Creative type</th>
+                  <th>
+                    <ColumnFilter label="Organization" name="client" value={params.client || ""} basePath="/deliverables" params={params}
+                      options={clients.map((c) => ({ value: String(c.id), label: c.company_name }))} />
+                  </th>
+                  <th>
+                    <ColumnFilter label="Creative type" name="category" value={params.category || ""} basePath="/deliverables" params={params}
+                      options={categories.map((c) => ({ value: c, label: c }))} />
+                  </th>
                   <th className="whitespace-nowrap">Schedule date</th>
-                  <th>Content status</th>
+                  <th>
+                    <ColumnFilter label="Content status" name="status" value={params.status || ""} basePath="/deliverables" params={params}
+                      options={FILTER_STATUSES.map((v) => ({ value: v, label: pretty(v) }))} />
+                  </th>
                   <th>Design status</th>
                   <th>Post status</th>
                   <th>Caption</th>
@@ -111,13 +122,6 @@ export default async function DeliverablesPage({
                   <th>Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
-                <ColumnFilters
-                  basePath="/deliverables"
-                  params={params}
-                  clients={clients}
-                  categories={categories}
-                  columns={{ lead: 1, trail: 5 }}
-                />
               </THead>
               <TBody>
                 {rows.map((d, i) => (

@@ -18,6 +18,7 @@ import {
   contentStatusLabel,
   editorStatusLabel,
   editorStatusTone,
+  FILTER_STATUSES,
   postStatusLabel,
   postStatusTone,
 } from "@/lib/constants";
@@ -25,11 +26,11 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { TaskFilters } from "@/components/admin/task-filters";
+import { ColumnFilter } from "@/components/admin/column-filter";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
-import { fmtDate } from "@/lib/utils";
+import { fmtDate, label as pretty } from "@/lib/utils";
 import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
@@ -107,15 +108,6 @@ export default async function TodayPage({
 
       <ServiceTabs basePath="/today" active={service} counts={counts} params={params} />
 
-      <TaskFilters
-        basePath="/today"
-        params={params}
-        categories={categories}
-        clients={clients}
-        assignees={assignees}
-        showSearch={false}
-        showMonth={false}
-      />
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
@@ -142,10 +134,19 @@ export default async function TodayPage({
             <THead>
               <tr>
                 <th className="w-10 text-right">#</th>
-                <th>Organization</th>
-                <th>Creative type</th>
+                <th>
+                  <ColumnFilter label="Organization" name="client" value={params.client || ""} basePath="/today" params={params}
+                    options={clients.map((c) => ({ value: String(c.id), label: c.company_name }))} />
+                </th>
+                <th>
+                  <ColumnFilter label="Creative type" name="category" value={params.category || ""} basePath="/today" params={params}
+                    options={categories.map((c) => ({ value: c, label: c }))} />
+                </th>
                 <th className="whitespace-nowrap">Schedule date</th>
-                <th>Content status</th>
+                <th>
+                  <ColumnFilter label="Content status" name="status" value={params.status || ""} basePath="/today" params={params}
+                    options={FILTER_STATUSES.map((v) => ({ value: v, label: pretty(v) }))} />
+                </th>
                 <th>Design status</th>
                 <th>Post status</th>
                 <th>Caption</th>
