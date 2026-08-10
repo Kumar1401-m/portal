@@ -69,40 +69,60 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={show}>
       {children}
+      {/*
+        Centred, not tucked into a corner.
+
+        A corner toast is the convention for something you may safely ignore.
+        These are not that: sending a video to a client is the moment the work
+        leaves the building, and the confirmation has to land where the eyes
+        already are — which, having just clicked a button in a modal, is the
+        middle of the screen.
+
+        `pointer-events-none` on the layer and `auto` on the box: it sits over
+        the page without blocking it, so it is prominent without being a
+        dialog nobody asked to open.
+      */}
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 left-1/2 z-[100] flex w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-2 sm:bottom-6 sm:left-auto sm:right-6 sm:translate-x-0"
+        className="pointer-events-none fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 p-4"
       >
         {toasts.map((t) => (
           <div
             key={t.id}
             className={cn(
-              "pointer-events-auto flex items-start gap-2.5 rounded-lg border p-3 shadow-lg backdrop-blur",
-              "motion-safe:animate-in motion-safe:slide-in-from-bottom-2 motion-safe:fade-in",
-              t.tone === "success"
-                ? "border-success/40 bg-card"
-                : "border-destructive/40 bg-card"
+              "pointer-events-auto flex w-[min(26rem,100%)] items-start gap-3 rounded-xl border-2 bg-card p-5 shadow-2xl",
+              "motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:fade-in",
+              t.tone === "success" ? "border-success/50" : "border-destructive/50"
             )}
           >
-            {t.tone === "success" ? (
-              <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-            ) : (
-              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{t.title}</p>
+            <span
+              className={cn(
+                "grid h-10 w-10 shrink-0 place-items-center rounded-full",
+                t.tone === "success"
+                  ? "bg-[color-mix(in_srgb,var(--success)_16%,transparent)]"
+                  : "bg-[color-mix(in_srgb,var(--destructive)_16%,transparent)]"
+              )}
+            >
+              {t.tone === "success" ? (
+                <Check className="h-5 w-5 text-success" />
+              ) : (
+                <TriangleAlert className="h-5 w-5 text-destructive" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-base font-semibold">{t.title}</p>
               {t.description ? (
-                <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{t.description}</p>
               ) : null}
             </div>
             <button
               type="button"
               onClick={() => dismiss(t.id)}
               aria-label="Dismiss"
-              className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         ))}

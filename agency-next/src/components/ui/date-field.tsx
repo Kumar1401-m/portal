@@ -68,6 +68,7 @@ export function DateField({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => parse(defaultValue) ?? new Date());
   const box = useRef<HTMLDivElement>(null);
+  const hidden = useRef<HTMLInputElement>(null);
 
   // Close on a click elsewhere or Escape. Without both, a picker left open
   // sits on top of the next thing you try to click.
@@ -87,7 +88,27 @@ export function DateField({
     };
   }, [open]);
 
+  /**
+   * Take the picked date, and make sure the form can see it.
+   *
+   * The imperative write to the hidden input is the whole point, and without
+   * it the monthly plan silently did nothing.
+   *
+   * `setValue` is a React state update: it is batched and applied when the
+   * event handler finishes. `onChange` fires inside that handler, and the
+   * caller's handler is `form.requestSubmit()` — which serialises the form
+   * straight out of the DOM, before React has written anything. So the submit
+   * carried the *previous* value. Picking a date for the first time submitted
+   * an empty string, which the action reads as "clear the date"; every later
+   * pick saved the date before it. Either way the date on screen was never the
+   * date that was saved.
+   *
+   * Setting `.value` here is not a second source of truth. React renders the
+   * same string a moment later, so the two agree — this only closes the gap
+   * between them.
+   */
   const commit = (v: string) => {
+    if (hidden.current) hidden.current.value = v;
     setValue(v);
     setOpen(false);
     onChange?.(v);
@@ -102,7 +123,7 @@ export function DateField({
 
   return (
     <div ref={box} className={cn("relative", className)}>
-      <input type="hidden" name={name} value={value} />
+      <input ref={hidden} type="hidden" name={name} value={value} readOnly />
       <button
         id={id}
         type="button"
