@@ -31,7 +31,7 @@ import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
 import { fmtDate, label as pretty } from "@/lib/utils";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
+import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";

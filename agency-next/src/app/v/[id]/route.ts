@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * The permanent address of an uploaded video: mints a fresh signed R2 URL and
- * redirects to it. Deliberately outside the signed-in area — Instagram, Zapier
+ * redirects to it. Deliberately outside the signed-in area — Instagram, n8n
  * and whoever the client forwards it to all need to fetch it without a session.
  * The token in the query string is what grants access.
  */

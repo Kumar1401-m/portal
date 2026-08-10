@@ -27,7 +27,7 @@ import { recordRun } from "./automation-runs";
 /**
  * The clock a super admin types and reads times in.
  *
- * A key into the country table in `zapier.ts` rather than a raw offset, so
+ * A key into the country table in `posting.ts` rather than a raw offset, so
  * scheduling a reminder and scheduling a post mean the same thing by "6pm" and
  * there is one place to change if the agency ever works from somewhere else.
  */

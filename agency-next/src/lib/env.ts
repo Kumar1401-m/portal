@@ -75,26 +75,20 @@ export const env = {
     enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER),
   },
 
-  // Shared-secret auth for the Zapier-facing REST API (src/app/api/zapier/*).
-  // Not the session cookie — Zapier calls these as a plain authenticated API.
-  zapier: {
-    apiKey: process.env.ZAPIER_API_KEY || "",
-    enabled: Boolean(process.env.ZAPIER_API_KEY),
-  },
-
   /**
    * Shared secret for the n8n automation API (src/app/api/automation/*).
    *
-   * Separate from the Zapier key on purpose: these endpoints can publish to a
-   * client's Instagram account and write analytics history, so the credential
-   * that reaches them should be revocable without breaking the older, read-
-   * mostly Zapier integration. Falls back to the Zapier key only so an
-   * existing install keeps working after the upgrade.
+   * The only key that reaches these endpoints. It used to fall back to
+   * ZAPIER_API_KEY so an older install kept working through the changeover;
+   * Zapier has since been removed entirely — Instagram posting runs through
+   * n8n and the portal's own publisher — and a fallback to a credential
+   * nothing issues any more is just a second key that can publish to a
+   * client's Instagram account.
    */
   automation: {
-    apiKey: process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY || "",
-    enabled: Boolean(process.env.N8N_API_KEY || process.env.ZAPIER_API_KEY),
-    /** Vercel Cron's shared secret, for the scheduled catch-up jobs. */
+    apiKey: process.env.N8N_API_KEY || "",
+    enabled: Boolean(process.env.N8N_API_KEY),
+    /** The cron secret, for the scheduled catch-up jobs. */
     cronSecret: process.env.CRON_SECRET || "",
   },
 

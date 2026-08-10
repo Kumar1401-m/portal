@@ -15,7 +15,7 @@ import {
   outboxReady,
   REMINDER_TIMEZONE,
 } from "@/lib/reminder-outbox";
-import { localTimeToUtc } from "@/lib/zapier";
+import { localTimeToUtc } from "@/lib/posting";
 
 const KINDS = new Set(SENDABLE.map((s) => s.kind));
 

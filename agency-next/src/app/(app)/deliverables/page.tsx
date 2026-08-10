@@ -29,7 +29,7 @@ import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { fmtDate } from "@/lib/utils";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
+import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 
 export const metadata = { title: "Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";

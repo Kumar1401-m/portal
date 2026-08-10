@@ -5,7 +5,7 @@ import { queryOne, execute, hasColumn } from "@/lib/db";
 import { publishHandoff } from "@/lib/instagram";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
-import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/zapier";
+import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/posting";
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
 import { sendPaidInvoiceEmail } from "@/lib/email";
 import { ACCEPTS_RAW } from "@/lib/portal";
@@ -75,7 +75,7 @@ async function clientTransition(
 
   // Final approval (not the content gate) of an auto-postable Instagram Reel:
   // hold it as "scheduled" for the client's best local engagement time
-  // instead of posting the moment it's approved. The Zapier automation only
+  // instead of posting the moment it's approved. The publish runner only
   // picks up rows once `scheduled_at` has actually arrived.
   let scheduledFor: string | null = null;
   if (effective === "approved") {

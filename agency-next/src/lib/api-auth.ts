@@ -1,32 +1,20 @@
 /**
- * Shared-secret auth for the Zapier-facing REST API. Deliberately separate
- * from the session-cookie auth in auth.ts — Zapier calls these as a plain
- * authenticated API, not as a logged-in browser user.
+ * Shared-secret auth for the machine-facing REST API. Deliberately separate
+ * from the session-cookie auth in auth.ts — n8n and the WhatsApp service call
+ * these as plain authenticated APIs, not as logged-in browser users.
  */
 import "server-only";
 import { env } from "./env";
 
 /**
- * True if the request carries the configured Zapier API key — via the
- * Authorization header, an X-Api-Key header, or a `?key=` query param.
- * The query param exists because some Zapier trigger types (e.g. Webhooks by
- * Zapier "Retrieve Poll") don't reliably expose custom-header configuration,
- * so putting the key directly in the URL is the dependable fallback.
- */
-export function isAuthorizedZapierRequest(req: Request): boolean {
-  if (!env.zapier.enabled) return false;
-  const header = req.headers.get("authorization") || "";
-  const bearerToken = header.startsWith("Bearer ") ? header.slice(7) : header;
-  const url = new URL(req.url);
-  const key = bearerToken || req.headers.get("x-api-key") || url.searchParams.get("key") || "";
-  return key.length > 0 && timingSafeEqual(key, env.zapier.apiKey);
-}
-
-/**
- * Same check for the n8n automation API (src/app/api/automation/*), against
- * its own key. Header-only: unlike the Zapier poller, every n8n HTTP Request
- * node can set headers, and these endpoints publish to live social accounts —
- * a key in a query string ends up in access logs and proxy history.
+ * The n8n automation API (src/app/api/automation/*), against its own key.
+ *
+ * Header-only, and now the only way in. The Zapier guard that used to sit here
+ * also accepted a `?key=` query param, because some Zapier trigger types could
+ * not set headers — which meant a credential that can publish to a client's
+ * Instagram account travelling in a URL, through access logs and proxy
+ * history. Zapier is gone and so is that door: every n8n HTTP Request node can
+ * set a header.
  */
 export function isAuthorizedAutomationRequest(req: Request): boolean {
   if (!env.automation.enabled) return false;
@@ -37,13 +25,13 @@ export function isAuthorizedAutomationRequest(req: Request): boolean {
 }
 
 /**
- * Auth for Vercel's scheduled invocations.
+ * Auth for scheduled invocations — Vercel Cron and the n8n workflows.
  *
  * Vercel Cron sends `Authorization: Bearer $CRON_SECRET` and nothing else —
  * no body, no custom headers — so a cron route can't use the automation guard
  * as it stands. The automation key is still accepted, which is what makes
- * these endpoints testable by hand and callable from n8n if the schedule ever
- * moves there.
+ * these endpoints testable by hand and callable from n8n, where most of the
+ * schedules now live.
  *
  * With neither secret configured this returns false, so an unconfigured
  * deployment exposes nothing rather than defaulting to open.
@@ -60,7 +48,7 @@ export function isAuthorizedCronRequest(req: Request): boolean {
 /**
  * Auth for callbacks from the WhatsApp approval service (src/app/api/whatsapp/*).
  *
- * Its own key again, not shared with n8n or Zapier: this one is held by a
+ * Its own key again, not shared with n8n: this one is held by a
  * container running an unofficial browser automation, which is the credential
  * in this system most likely to need revoking in a hurry.
  */

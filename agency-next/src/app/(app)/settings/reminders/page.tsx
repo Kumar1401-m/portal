@@ -17,7 +17,7 @@ import {
   unreachableClients,
 } from "@/lib/whatsapp-reminders";
 import { lastRuns, type JobRun } from "@/lib/automation-runs";
-import { utcToLocalInput } from "@/lib/zapier";
+import { utcToLocalInput } from "@/lib/posting";
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { SendPanel } from "./send-panel";

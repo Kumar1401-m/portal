@@ -18,7 +18,7 @@ import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey, autoTaskTitle } from "@/lib/utils";
-import { localTimeToUtc, scheduleDateToUtc } from "@/lib/zapier";
+import { localTimeToUtc, scheduleDateToUtc } from "@/lib/posting";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 

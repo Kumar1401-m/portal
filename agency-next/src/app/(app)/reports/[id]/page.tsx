@@ -11,7 +11,7 @@ import { MonthPicker } from "@/components/admin/month-picker";
 import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/zapier";
+import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 import { monthKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";

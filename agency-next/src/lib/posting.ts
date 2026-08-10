@@ -1,44 +1,17 @@
 /**
- * Data layer for the Zapier automation API (src/app/api/zapier/*).
- * Feeds a Zap: poll for approved, not-yet-posted video content, then post
- * back once Zapier has actually published it to Instagram.
+ * When a post goes out, and in whose clock.
+ *
+ * Everything about *timing*: the evening window each country posts in, and the
+ * conversions between the date somebody picks on a form and the UTC timestamp
+ * the publisher compares against. Publishing itself lives in
+ * `instagram-publish.ts`; this module only decides when.
+ *
+ * Was `zapier.ts`. Zapier is gone — Instagram posting runs through n8n and the
+ * portal's own publisher — but the scheduling half of that file was never
+ * about Zapier and is used across the portal, so it kept the code and lost the
+ * name.
  */
 import "server-only";
-import { query, queryOne, execute, hasColumn } from "./db";
-import { resolveVideoUrl } from "./storage";
-import { notifyAdmins } from "./notify";
-
-export type ZapierReadyItem = {
-  id: number;
-  title: string;
-  caption: string | null;
-  video_url: string;
-  /**
-   * Extracted Google Drive file id, or null if video_url isn't a recognisable
-   * Drive link. A Drive "view" link returns an HTML page, not raw video bytes
-   * — Instagram's API can't fetch it directly. Feed this into a Zap's
-   * "Google Drive: Retrieve File or Folder by ID" step instead, so Zapier
-   * fetches the real file regardless of how the link was pasted in.
-   */
-  drive_file_id: string | null;
-  category: string | null;
-  due_date: string | null;
-  scheduled_at: string | null;
-  client_id: number;
-  client_name: string;
-  /** Meta Graph IG business account id — maps directly to Zapier's "Instagram Account to Use" field. */
-  instagram_account_id: string;
-};
-
-/** Pull the file id out of the common Google Drive share-link shapes. */
-function extractDriveFileId(url: string): string | null {
-  const patterns = [/\/d\/([a-zA-Z0-9_-]{10,})/, /[?&]id=([a-zA-Z0-9_-]{10,})/];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  return null;
-}
 
 /* ------------------------- Best-engagement scheduling ------------------------- */
 
@@ -180,113 +153,3 @@ export function utcToLocalInput(utc: string | null, country: string | null | und
 
 /** Categories treated as "post to Instagram automatically once approved". */
 export const AUTO_SCHEDULE_CATEGORIES = ["Instagram Reel"];
-
-/**
- * Deliverables ready for unattended posting: client-approved, tagged with the
- * given category (default the "Instagram Reel" category from the video
- * service taxonomy), not already posted to Instagram, has a video link, and
- * the client has an Instagram Business account id on file.
- */
-export async function getReadyToPostToInstagram(
-  category = "Instagram Reel",
-  limit = 25
-): Promise<ZapierReadyItem[]> {
-  const cloud = (await hasColumn("deliverables", "cloud_video_url"))
-    ? "d.cloud_video_url, d.cloud_video_key"
-    : "NULL AS cloud_video_url, NULL AS cloud_video_key";
-  const rows = await query<{
-    id: number;
-    title: string;
-    caption: string | null;
-    edited_link: string;
-    cloud_video_url: string | null;
-    cloud_video_key: string | null;
-    content_category: string | null;
-    due_date: string | null;
-    scheduled_at: string | null;
-    client_id: number;
-    company_name: string;
-    ig_user_id: string;
-  }>(
-    `SELECT d.id, d.title, d.caption, d.edited_link, ${cloud}, d.content_category, d.due_date, d.scheduled_at,
-            c.id AS client_id, c.company_name, c.ig_user_id
-     FROM deliverables d
-     JOIN clients c ON c.id = d.client_id
-     WHERE c.status != 'churned'
-       AND c.ig_user_id IS NOT NULL AND c.ig_user_id <> ''
-       AND (d.service = 'video_editing' OR (d.service IS NULL AND LOWER(COALESCE(d.video_type,'')) <> 'poster'))
-       AND d.content_category = ?
-       AND d.status = 'scheduled'
-       AND d.scheduled_at IS NOT NULL AND d.scheduled_at <= NOW()
-       AND d.instagram_status != 'posted'
-       AND (d.cloud_video_key IS NOT NULL OR (d.edited_link IS NOT NULL AND d.edited_link <> ''))
-     ORDER BY d.scheduled_at ASC, d.id ASC
-     LIMIT ${Number(limit)}`,
-    [category]
-  );
-
-  return Promise.all(rows.map(async (r) => ({
-    id: r.id,
-    title: r.title,
-    caption: r.caption,
-    // A cloud-hosted file is directly fetchable, so prefer it over a Drive
-    // share link (which returns an HTML page, not video bytes).
-    // Prefer our own storage: directly fetchable, unlike a Drive share link
-    // (which returns an HTML page). A private bucket yields a signed link long
-    // enough for Zapier to pull the file.
-    video_url:
-      (await resolveVideoUrl(r.cloud_video_key, r.cloud_video_url)) || r.edited_link,
-    drive_file_id: r.cloud_video_key ? null : extractDriveFileId(r.edited_link),
-    category: r.content_category,
-    due_date: r.due_date,
-    scheduled_at: r.scheduled_at,
-    client_id: r.client_id,
-    client_name: r.company_name,
-    instagram_account_id: r.ig_user_id,
-  })));
-}
-
-export type MarkPostedResult = { ok: boolean; error?: string; alreadyPosted?: boolean };
-
-/** Record that Zapier successfully published a deliverable to Instagram. */
-export async function markPostedToInstagram(
-  deliverableId: number,
-  mediaId?: string | null,
-  permalink?: string | null
-): Promise<MarkPostedResult> {
-  const d = await queryOne<{ id: number; instagram_status: string; title: string }>(
-    "SELECT id, instagram_status, title FROM deliverables WHERE id = ?",
-    [deliverableId]
-  );
-  if (!d) return { ok: false, error: "Deliverable not found." };
-  if (d.instagram_status === "posted") return { ok: true, alreadyPosted: true };
-
-  await execute(
-    `UPDATE deliverables
-     SET instagram_status = 'posted',
-         posting_status = 'posted',
-         status = IF(status NOT IN ('completed'), 'posted', status),
-         posted_at = COALESCE(posted_at, NOW())
-     WHERE id = ?`,
-    [deliverableId]
-  );
-
-  await execute(
-    `INSERT INTO activity_logs (actor_name, action, entity_type, entity_id, description, meta_json)
-     VALUES ('Zapier automation', 'posted_to_instagram', 'deliverable', ?, ?, ?)`,
-    [
-      deliverableId,
-      `"${d.title}" posted to Instagram automatically`,
-      JSON.stringify({ instagram_media_id: mediaId ?? null, permalink: permalink ?? null }),
-    ]
-  );
-
-  await notifyAdmins(
-    "general",
-    "Posted to Instagram",
-    `"${d.title}" was auto-posted to Instagram via Zapier.`,
-    `/deliverables/${deliverableId}`
-  );
-
-  return { ok: true };
-}

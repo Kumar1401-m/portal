@@ -399,8 +399,8 @@ export type MissedPost = {
 /**
  * Videos whose posting slot has come and gone while they're still sitting in
  * `scheduled` — i.e. the automation didn't pick them up, or Instagram rejected
- * them. A 30-minute grace keeps a row from being flagged while Zapier's ~15
- * minute poll is still due to run.
+ * them. A 30-minute grace keeps a row from being flagged while the publish
+ * runner's ~15 minute poll is still due to run.
  */
 export async function getMissedPosts(clientIds: number[] | null): Promise<MissedPost[]> {
   if (clientIds && clientIds.length === 0) return [];
