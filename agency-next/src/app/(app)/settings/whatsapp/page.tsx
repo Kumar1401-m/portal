@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { SessionPanel } from "./session-panel";
 import { GroupManager } from "./group-manager";
+import { KeywordGuide } from "./keywords";
 
 export const metadata = { title: "WhatsApp · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -118,6 +119,11 @@ export default async function WhatsAppSettingsPage() {
         serviceReachable={serviceReachable}
         listWarning={groups?.ok ? groups.warning : null}
       />
+
+      {/* Above the transcript deliberately: this explains what the rows below
+          mean. Reading "Read as: change" without knowing what a client typed
+          to cause it is how the log gets mistrusted. */}
+      <KeywordGuide />
 
       <Card>
         <CardHeader>

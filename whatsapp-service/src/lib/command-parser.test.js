@@ -138,5 +138,113 @@ check(
 check('multi-letter prefix', findCode('APPROVE VID99'), 'VID99');
 check('no code present', findCode('hello there'), null);
 
+/*
+ * Every example printed on the WhatsApp settings page.
+ *
+ * The portal cannot import this parser — it is a separate service — so
+ * `agency-next/src/app/(app)/settings/whatsapp/keywords.tsx` documents the
+ * keywords by hand, which is a promise to clients that could quietly stop
+ * being true. These cases are that page, executed. Change the parser and this
+ * fails; change this and the page needs the same edit.
+ */
+console.log('Documented on the WhatsApp settings page');
+{
+  const doc = (text, command, extra = {}) =>
+    check(`"${text}"`, cmd(text), { command, videoCode: null, comment: null, ...extra });
+
+  // Approving, with no code — the common case.
+  for (const word of ['OK', 'okay', 'yes', 'yep', 'sure', 'done', 'fine', '👍', '✅']) {
+    doc(word, 'approve');
+  }
+  // Approving a named video.
+  for (const text of ['APPROVE V245', 'approve v245', 'approve #V245', 'approve V-245']) {
+    check(`"${text}"`, cmd(text), { command: 'approve', videoCode: 'V245', comment: null });
+  }
+
+  // Asking for a change. The note is what the editor reads.
+  check(
+    '"change make the subtitles bigger"',
+    cmd('change make the subtitles bigger'),
+    { command: 'change', videoCode: null, comment: 'make the subtitles bigger' }
+  );
+  for (const verb of ['revise', 'edit', 'modify', 'redo']) {
+    check(`"${verb} …"`, cmd(`${verb} the ending`).command, 'change');
+  }
+  // The one the page calls out: this must not publish anything.
+  check(
+    '"approved, but change the ending"',
+    cmd('approved, but change the ending').command,
+    'change'
+  );
+  // ...and its opposite, which must stay an approval.
+  check('"ok" is not a change', cmd('ok').command, 'approve');
+
+  // Rejecting.
+  for (const word of ['reject', 'cancel', 'discard', 'drop']) {
+    check(`"${word}"`, cmd(word).command, 'reject');
+  }
+
+  // Status, only as the whole message.
+  for (const word of ['status', 'update', 'progress']) doc(word, 'status');
+  check(
+    'a real question is not a status request',
+    cmd("what's the status of the reel?").command,
+    'none'
+  );
+
+  // The "set off by accident" box. These are documented as false positives, so
+  // the test asserts they really do fire — if the parser is ever tightened,
+  // this fails and the box comes off the page.
+  check(
+    'accidental: "change" anywhere counts',
+    cmd('we need to change our meeting time').command,
+    'change'
+  );
+  check(
+    'accidental: "change" beats "status"',
+    cmd("what's the status of the music change?").command,
+    'change'
+  );
+  // ...and the verbs the page promises do NOT do this, because they only
+  // count at the start of a message.
+  for (const text of [
+    'the client approved the budget yesterday',
+    'we should edit the plan next week',
+    'they might cancel the shoot',
+  ]) {
+    check(`not accidental: "${text}"`, cmd(text).command, 'none');
+  }
+
+  // Footage: a known host speaks for itself.
+  for (const host of [
+    'https://drive.google.com/file/d/abc/view',
+    'https://we.tl/t-abc123',
+    'https://www.dropbox.com/s/abc/clip.mp4',
+  ]) {
+    check(`known host "${host.slice(8, 28)}…"`, parseCommand(host).command, 'footage');
+    check(`  link captured`, parseCommand(host).link, host);
+  }
+  // An unknown host needs a word saying what it is.
+  check(
+    'unknown host, no word',
+    parseCommand('https://filebin.example.com/xyz').command,
+    'none'
+  );
+  for (const word of ['raw', 'footage', 'shoot', 'clips', 'files']) {
+    check(
+      `unknown host with "${word}"`,
+      parseCommand(`${word} https://filebin.example.com/xyz`).command,
+      'footage'
+    );
+  }
+  // The page promises this stays a link in a chat.
+  check(
+    'an article link is not footage',
+    parseCommand('have you seen this https://news.example.com/story').command,
+    'none'
+  );
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
+if (failed > 0) process.exit(1);
 process.exit(failed ? 1 : 0);
