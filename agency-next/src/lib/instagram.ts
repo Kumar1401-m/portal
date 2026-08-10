@@ -23,7 +23,7 @@ import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
-import { nowUtc } from "./posting";
+import { nowUtc, AUTO_SCHEDULE_CATEGORIES, utcToLocalInput } from "./posting";
 
 /** How many times a single deliverable may be attempted before giving up. */
 export const MAX_POST_ATTEMPTS = 4;
@@ -530,6 +530,25 @@ export type PostedResult = { ok: boolean; alreadyPosted?: boolean; error?: strin
  * Record a successful publish. Idempotent: n8n retrying the callback after a
  * network blip must not produce a second notification or a second log line.
  */
+/**
+ * Fill in the post's public address, after the fact.
+ *
+ * Separate from `markPosted` so that recording the publish never waits on a
+ * second Graph call. Scoped to the media id it belongs to, so a late reply
+ * about an earlier post cannot overwrite a newer one's link.
+ */
+export async function setPermalink(
+  deliverableId: number,
+  mediaId: string,
+  permalink: string
+): Promise<void> {
+  await execute(
+    `UPDATE deliverables SET instagram_permalink = ?
+      WHERE id = ? AND instagram_media_id = ?`,
+    [permalink, deliverableId, mediaId]
+  );
+}
+
 export async function markPosted(input: {
   deliverableId: number;
   mediaId: string;
@@ -537,6 +556,15 @@ export async function markPosted(input: {
   postedAt?: string | null;
   runId?: string | null;
   durationMs?: number | null;
+  /**
+   * The container this media came from.
+   *
+   * Recorded so a later run can tell that this container has already been
+   * published and must not be reused — without it the audit trail says a
+   * container existed but never says it went live, and a resumed run would
+   * post the same reel twice.
+   */
+  containerId?: string | null;
 }): Promise<PostedResult> {
   const d = await queryOne<{
     id: number;
@@ -579,6 +607,7 @@ export async function markPosted(input: {
     stage: "published",
     status: "posted",
     mediaId: input.mediaId,
+    containerId: input.containerId ?? null,
     permalink: input.permalink ?? null,
     durationMs: input.durationMs ?? null,
     runId: input.runId ?? null,
@@ -792,7 +821,33 @@ export type DeliverablePublishInfo = {
   error: string | null;
   autoPublishEnabled: boolean;
   hasInstagramAccount: boolean;
+  /** Every condition the publish queue would fail this video on, in plain words. */
+  blockers: string[];
+  /** What happens next when nothing is blocking it. */
+  nextLook: string | null;
 };
+
+/**
+ * A stored UTC timestamp as "20 Aug 2026, 6:00 pm" in the client's clock.
+ *
+ * India, like the rest of the portal's scheduling. Worth a helper rather than
+ * an inline `toLocaleString`, which would use the *server's* timezone — on
+ * Vercel that is UTC, so it would faithfully reproduce the bug it is here to
+ * fix.
+ */
+function prettyLocal(utc: string | null): string | null {
+  if (!utc) return null;
+  const local = utcToLocalInput(utc, "india"); // "2026-08-20T18:00"
+  if (!local) return null;
+  const [date, time] = local.split("T");
+  const [h, m] = time.split(":").map(Number);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  const d = new Date(`${date}T00:00:00`);
+  return (
+    `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}, ` +
+    `${h12}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`
+  );
+}
 
 /**
  * Publishing state for one deliverable, for the panel on the task page.
@@ -806,6 +861,10 @@ export async function getPublishInfo(
 ): Promise<DeliverablePublishInfo | null> {
   if (!(await hasColumn("deliverables", "instagram_media_id"))) return null;
 
+  const cloud = (await hasColumn("deliverables", "cloud_video_key"))
+    ? "d.cloud_video_key"
+    : "NULL AS cloud_video_key";
+
   const row = await queryOne<{
     instagram_status: string;
     instagram_media_id: string | null;
@@ -817,27 +876,103 @@ export async function getPublishInfo(
     post_error: string | null;
     auto_publish: number | null;
     ig_user_id: string | null;
+    content_category: string | null;
+    edited_link: string | null;
+    cloud_video_key: string | null;
+    client_status: string;
   }>(
     `SELECT d.instagram_status, d.instagram_media_id, d.instagram_permalink,
             d.instagram_posted_at, d.posted_at, d.scheduled_at,
-            d.post_attempts, d.post_error, c.auto_publish, c.ig_user_id
+            d.post_attempts, d.post_error, d.content_category, d.edited_link,
+            ${cloud}, c.auto_publish, c.ig_user_id, c.status AS client_status
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
   );
   if (!row) return null;
 
+  const status = row.instagram_status || "not_posted";
+  const attempts = Number(row.post_attempts ?? 0);
+
+  /*
+   * Why the publisher would pass this video over.
+   *
+   * Every one of these is a condition in `getPublishQueue`, restated as
+   * something a person can act on. The queue simply returns fewer rows when
+   * they fail — no error, no log line, nothing on any screen — so a video that
+   * never posts looks identical to one that is merely waiting its turn. This
+   * is the only place the two can be told apart.
+   *
+   * Deliberately checked in the order someone would fix them: the client's
+   * settings first, then the task's own.
+   */
+  const blockers: string[] = [];
+  if (status !== "posted") {
+    if (row.client_status === "churned") {
+      blockers.push("This client is archived, so nothing of theirs is published.");
+    }
+    if (!row.ig_user_id) {
+      blockers.push(
+        "No Instagram account is linked to this client. Add the Instagram Business account id on the client's edit page."
+      );
+    }
+    if (Number(row.auto_publish) !== 1) {
+      blockers.push(
+        "Auto-publishing is off for this client. Tick it on the client's edit page, or post this one by hand."
+      );
+    }
+    if (!row.edited_link && !row.cloud_video_key) {
+      blockers.push("There is no finished video on this task yet — upload it, or paste the edited link.");
+    }
+    if (row.content_category !== AUTO_SCHEDULE_CATEGORIES[0]) {
+      blockers.push(
+        `Only "${AUTO_SCHEDULE_CATEGORIES[0]}" posts automatically. This one is ` +
+          `${row.content_category ? `"${row.content_category}"` : "not categorised"}.`
+      );
+    }
+    if (!row.scheduled_at) {
+      blockers.push("No posting time is set, so it is never due. Approve it, or press Schedule.");
+    }
+    if (attempts >= MAX_POST_ATTEMPTS || status === "failed") {
+      blockers.push(
+        `It has used all ${MAX_POST_ATTEMPTS} attempts, so the publisher has stopped trying. Use the button below to reset it.`
+      );
+    }
+  }
+
+  /*
+   * What happens next when nothing is blocking it.
+   *
+   * "Waiting for its slot" on its own leaves the obvious question unanswered,
+   * and the honest answer includes the poll interval — the post does not go
+   * out at exactly the minute set, it goes out at the first check after it.
+   */
+  let nextLook: string | null = null;
+  if (status !== "posted" && blockers.length === 0 && row.scheduled_at) {
+    const dueMs = Date.parse(`${String(row.scheduled_at).replace(" ", "T")}Z`);
+    nextLook = Number.isNaN(dueMs)
+      ? null
+      : dueMs > Date.now()
+        ? "the publisher posts it at the first check after that"
+        : "due now — the publisher checks every 15 minutes";
+  }
+
   return {
-    instagramStatus: row.instagram_status || "not_posted",
+    instagramStatus: status,
     mediaId: row.instagram_media_id,
     permalink: row.instagram_permalink,
-    postedAt: row.instagram_posted_at || row.posted_at,
-    scheduledAt: row.scheduled_at,
-    attempts: Number(row.post_attempts ?? 0),
+    postedAt: prettyLocal(row.instagram_posted_at || row.posted_at),
+    // In the client's own clock, not the UTC it is stored in. Printed raw, a
+    // reel set for 6pm read "12:30:00" on the page — the right instant, shown
+    // as the wrong time, on the panel someone opens to ask when it posts.
+    scheduledAt: prettyLocal(row.scheduled_at),
+    attempts,
     maxAttempts: MAX_POST_ATTEMPTS,
     error: row.post_error,
     autoPublishEnabled: Boolean(row.auto_publish),
     hasInstagramAccount: Boolean(row.ig_user_id),
+    blockers,
+    nextLook,
   };
 }
 

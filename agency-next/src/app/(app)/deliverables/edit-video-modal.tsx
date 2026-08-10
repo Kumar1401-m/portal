@@ -13,6 +13,7 @@ import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload, CaptionLine, type CaptionNote } from "./video-upload";
+import { useToast } from "@/components/ui/toast";
 import { deleteDeliverable } from "./upload-actions";
 import {
   ServiceCategoryPicker,
@@ -46,9 +47,8 @@ export function EditVideoModal({
   postCountry?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<VideoDetailsState, FormData>(updateVideoDetails, {
-    ok: false,
-  });
+  const [state, setState] = useState<VideoDetailsState>({ ok: false });
+  const [pending, startSave] = useTransition();
   const [rawState, rawAction, rawPending] = useActionState<RawFootageState, FormData>(
     submitRawOrReference,
     { ok: false }
@@ -80,6 +80,7 @@ export function EditVideoModal({
    * thing in different words.
    */
   const [captionNote, setCaptionNote] = useState<CaptionNote>(null);
+  const toast = useToast();
   const captioning = genPending || autoCaptioning;
 
   // Reset the caption editor to the latest saved value each time the modal opens.
@@ -92,10 +93,36 @@ export function EditVideoModal({
     }
   }, [open, d]);
 
-  // Close on a successful save.
-  useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state]);
+  /*
+   * Save, close, and say so somewhere that outlives the close.
+   *
+   * This modal is the main place a video is sent to a client, and its success
+   * line lived inside the panel that disappears the instant it succeeds.
+   * Nobody ever saw it. The reasonable reading of a modal that closes silently
+   * is that nothing happened, and the reasonable response is to open it and
+   * press Send again — which sends the client the same video twice.
+   *
+   * Awaited here rather than watched from an effect, so closing and confirming
+   * are consequences of the click instead of a render that exists to have a
+   * side effect.
+   */
+  function save(formData: FormData) {
+    startSave(async () => {
+      const res = await updateVideoDetails({ ok: false }, formData);
+      setState(res);
+      if (!res.ok) return;
+      setOpen(false);
+      toast(
+        res.mode === "approval"
+          ? {
+              title: `Sent to ${d.company_name} for approval`,
+              description:
+                res.message || "They can reply OK in their WhatsApp group to approve it.",
+            }
+          : { title: "Saved", description: `"${d.title}" updated.` }
+      );
+    });
+  }
 
   function generate() {
     setCaptionNote({ text: "Writing a caption…", tone: "busy" });
@@ -173,7 +200,7 @@ export function EditVideoModal({
           </form>
         ) : null}
 
-        <form action={action} className="flex min-h-0 flex-1 flex-col">
+        <form action={save} className="flex min-h-0 flex-1 flex-col">
           <input type="hidden" name="deliverable_id" value={d.id} />
 
           <div className="flex-1 space-y-4 overflow-y-auto p-6">

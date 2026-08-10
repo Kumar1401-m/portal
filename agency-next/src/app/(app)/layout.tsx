@@ -2,6 +2,7 @@ import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import { getNotifications, getUnreadCount } from "@/lib/notifications";
 import { AppShell } from "@/components/admin/app-shell";
 import { AiAssistant } from "@/components/admin/ai-assistant";
+import { ToastProvider } from "@/components/ui/toast";
 import { suggestionsFor } from "@/lib/assistant";
 
 export default async function AppLayout({
@@ -27,14 +28,18 @@ export default async function AppLayout({
         : "the whole agency";
 
   return (
-    <AppShell user={user} notifications={notifications} unread={unread}>
-      {children}
-      {modal}
-      <AiAssistant
-        name={user.name.split(" ")[0]}
-        roleLabel={scopeLabel}
-        suggestions={suggestionsFor(user.role)}
-      />
-    </AppShell>
+    // Outside the shell, so a confirmation survives the modal that raised it
+    // closing — which is exactly when one is most needed.
+    <ToastProvider>
+      <AppShell user={user} notifications={notifications} unread={unread}>
+        {children}
+        {modal}
+        <AiAssistant
+          name={user.name.split(" ")[0]}
+          roleLabel={scopeLabel}
+          suggestions={suggestionsFor(user.role)}
+        />
+      </AppShell>
+    </ToastProvider>
   );
 }

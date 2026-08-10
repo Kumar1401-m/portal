@@ -25,6 +25,7 @@ import { env } from "./env";
 import {
   claimForPublish,
   markPosted,
+  setPermalink,
   markFailed,
   logPublishStage,
   releaseStillEncoding,
@@ -59,10 +60,24 @@ async function graph(url: string, init?: RequestInit): Promise<Graph> {
  */
 async function existingContainer(deliverableId: number): Promise<string | null> {
   const row = await queryOne<{ container_id: string | null }>(
-    `SELECT container_id FROM publish_attempts
-      WHERE deliverable_id = ? AND container_id IS NOT NULL
-        AND created_at > (NOW() - INTERVAL 2 HOUR)
-      ORDER BY id DESC LIMIT 1`,
+    `SELECT p.container_id FROM publish_attempts p
+      WHERE p.deliverable_id = ? AND p.container_id IS NOT NULL
+        AND p.created_at > (NOW() - INTERVAL 2 HOUR)
+        /*
+         * Never a container that has already been through media_publish.
+         *
+         * Resuming an unfinished container is the point of this lookup, and it
+         * saves re-uploading a video Instagram is already encoding. Resuming a
+         * *published* one would post the same reel to the client's feed twice
+         * — the one failure here that cannot be undone from the portal.
+         */
+        AND NOT EXISTS (
+          SELECT 1 FROM publish_attempts q
+           WHERE q.deliverable_id = p.deliverable_id
+             AND q.container_id = p.container_id
+             AND (q.media_id IS NOT NULL OR q.status = 'posted')
+        )
+      ORDER BY p.id DESC LIMIT 1`,
     [deliverableId]
   );
   return row?.container_id ?? null;
@@ -201,6 +216,32 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
     return { ok: false, deliverableId: item.deliverable_id, error: message, permanent: false };
   }
 
+  /*
+   * Record it before doing anything else with it.
+   *
+   * media_publish is the irreversible step: the reel is on the client's feed
+   * the instant it returns. Everything after it is optional, and every
+   * millisecond between it and the write is a window where this function can
+   * be killed — a serverless function has no say in that — leaving a post that
+   * is live and a database that does not know. The row would stay `processing`
+   * until its lease expired, be picked up again, reuse the same container from
+   * the trail, and publish it a second time.
+   *
+   * The permalink lookup used to sit in that window: a Graph round trip with a
+   * thirty-second timeout, run before the write, for a field that is only ever
+   * a convenience link. It now happens after, and updates the row separately.
+   */
+  await markPosted({
+    deliverableId: item.deliverable_id,
+    mediaId: published.id,
+    permalink: null,
+    runId,
+    durationMs: Date.now() - started,
+    // Stamped against the container, so `existingContainer` can see this one
+    // is spent and never hands it back to a later run.
+    containerId,
+  });
+
   // Best-effort: the post is live whether or not we can read its address back.
   let permalink: string | null = null;
   try {
@@ -208,17 +249,10 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
       `${GRAPH}/${v}/${published.id}?fields=permalink&access_token=${encodeURIComponent(token)}`
     );
     permalink = meta.permalink ?? null;
+    if (permalink) await setPermalink(item.deliverable_id, published.id, permalink);
   } catch {
-    /* ignore */
+    /* a missing link is cosmetic; the post and its media id are recorded */
   }
-
-  await markPosted({
-    deliverableId: item.deliverable_id,
-    mediaId: published.id,
-    permalink,
-    runId,
-    durationMs: Date.now() - started,
-  });
 
   await tellTheClient(item, permalink);
 

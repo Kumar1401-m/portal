@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
+import { useState, useTransition } from "react";
 import { Send, Loader2, Check, TriangleAlert, MessageCircle } from "lucide-react";
 import { sendForApprovalAction, type SendState } from "../../approvals/whatsapp-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 export type WaPanel = {
   videoCode: string | null;
@@ -49,10 +50,34 @@ export function SendApproval({
   deliverableId: number;
   panel: WaPanel;
 }) {
-  const [state, formAction, pending] = useActionState<SendState, FormData>(
-    sendForApprovalAction,
-    { ok: false }
-  );
+  const [state, setState] = useState<SendState>({ ok: false });
+  const [pending, start] = useTransition();
+  const toast = useToast();
+
+  /*
+   * Called directly rather than through useActionState.
+   *
+   * The result has to reach the toast, and doing that from an effect watching
+   * the action state means a render whose only job is to fire a side effect.
+   * Awaiting the action here puts the confirmation on the same path as the
+   * click that asked for it.
+   */
+  function send(formData: FormData) {
+    start(async () => {
+      const res = await sendForApprovalAction({ ok: false }, formData);
+      setState(res);
+      toast(
+        res.ok
+          ? {
+              title: "Sent to the client on WhatsApp",
+              description:
+                res.message ||
+                `${panel.groupName ? `${panel.groupName} ` : "They "}can now reply OK to approve.`,
+            }
+          : { title: "Couldn't send it", description: res.error, tone: "error" }
+      );
+    });
+  }
 
   const status = LABEL[panel.waStatus] ?? { text: panel.waStatus, tone: "muted" as const };
   const settled = ["approved", "rejected"].includes(panel.waStatus);
@@ -120,7 +145,7 @@ export function SendApproval({
         ) : null}
 
         {!settled ? (
-          <form action={formAction}>
+          <form action={send}>
             <input type="hidden" name="deliverable_id" value={deliverableId} />
             <button
               type="submit"

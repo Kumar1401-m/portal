@@ -20,12 +20,17 @@ export type PublishInfo = {
   mediaId: string | null;
   permalink: string | null;
   postedAt: string | null;
+  /** Already rendered in the client's own clock by the server. */
   scheduledAt: string | null;
   attempts: number;
   maxAttempts: number;
   error: string | null;
   autoPublishEnabled: boolean;
   hasInstagramAccount: boolean;
+  /** Every reason this video cannot post by itself, in plain words. */
+  blockers: string[];
+  /** When the publisher will next look, given nothing is blocking it. */
+  nextLook: string | null;
 };
 
 const TONE: Record<string, "success" | "warning" | "danger" | "muted"> = {
@@ -69,8 +74,14 @@ export function PublishStatus({
   const isTerminal = status === "posted";
   const exhausted = status === "failed";
 
-  // Nothing to show for a client who never opted in and has no post history.
-  if (!info.hasInstagramAccount && status === "not_posted") return null;
+  /*
+   * This used to return null when the client had no Instagram account and the
+   * video had never been scheduled — which is precisely the case where someone
+   * is standing there asking why it did not post. The panel vanished rather
+   * than answering, and the answer was one line: no account is linked.
+   *
+   * It now always renders for a video, and leads with whatever is stopping it.
+   */
 
   return (
     <Card>
@@ -84,20 +95,35 @@ export function PublishStatus({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {!info.autoPublishEnabled && !isTerminal ? (
-          <p className="flex items-start gap-2 text-muted-foreground">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              Auto-publishing is off for this client, so nothing will post by itself. Turn it on
-              from the client&apos;s edit page.
-            </span>
-          </p>
+        {/* Everything standing between this video and Instagram, listed. The
+            publisher tests several conditions and returns silently when any
+            one fails, so the only place they can be seen together is here. */}
+        {info.blockers.length > 0 && !isTerminal ? (
+          <div className="rounded-md border border-warning/40 bg-warning/5 p-2.5">
+            <p className="flex items-start gap-2 text-xs font-medium">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+              <span>
+                This won&apos;t post by itself
+                {info.blockers.length === 1 ? "" : ` — ${info.blockers.length} things need fixing`}:
+              </span>
+            </p>
+            <ul className="mt-1.5 space-y-1 pl-6">
+              {info.blockers.map((b) => (
+                <li key={b} className="list-disc text-xs text-muted-foreground">
+                  {b}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
 
         {info.scheduledAt && !isTerminal ? (
           <p className="flex items-center gap-2 text-muted-foreground">
             <Clock className="h-4 w-4 shrink-0" />
-            Scheduled for {info.scheduledAt}
+            <span>
+              Due at <span className="font-medium text-foreground">{info.scheduledAt}</span>
+              {info.nextLook ? ` · ${info.nextLook}` : ""}
+            </span>
           </p>
         ) : null}
 
@@ -139,7 +165,11 @@ export function PublishStatus({
           </p>
         ) : null}
 
-        {!isTerminal && (exhausted || info.attempts > 0) ? (
+        {/* Offered for anything not already live, rather than only after an
+            attempt has been made. A video sitting at "not scheduled" with zero
+            attempts is the most stuck a video can be, and it was the one case
+            with no button — the state that most needs a push had none. */}
+        {!isTerminal ? (
           <form action={formAction}>
             <input type="hidden" name="deliverable_id" value={deliverableId} />
             <button type="submit" disabled={pending} className={buttonClasses({ size: "sm" })}>
@@ -148,7 +178,7 @@ export function PublishStatus({
               ) : (
                 <RotateCw className="h-4 w-4" />
               )}
-              Try posting again
+              {info.attempts > 0 ? "Try posting again" : "Put it in the queue now"}
             </button>
           </form>
         ) : null}
@@ -156,7 +186,9 @@ export function PublishStatus({
         {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
         {state.ok ? (
           <p className="text-sm text-success">
-            Back in the queue — the publisher picks it up within five minutes.
+            {info.blockers.length
+              ? "Queued — but fix the points above or the publisher will still skip it."
+              : "Queued. The publisher looks every 15 minutes."}
           </p>
         ) : null}
       </CardContent>
