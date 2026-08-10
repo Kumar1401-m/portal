@@ -25,6 +25,8 @@ type Row = {
   cloud_video_key: string | null;
   scheduled_at: string | null;
   ig_user_id: string | null;
+  /** The client's opt-in to unattended posting — the publisher requires it. */
+  auto_publish: number | null;
   placeholder_values: unknown;
 };
 
@@ -45,7 +47,8 @@ async function clientTransition(
     : "NULL AS cloud_video_key";
   const d = await queryOne<Row>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.title, d.service, d.content_category,
-            d.edited_link, ${cloudCol}, d.scheduled_at, c.ig_user_id, c.placeholder_values
+            d.edited_link, ${cloudCol}, d.scheduled_at, c.ig_user_id, c.auto_publish,
+            c.placeholder_values
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE d.id = ? AND d.client_id = ?`,
     [id, user.clientId]
@@ -82,11 +85,23 @@ async function clientTransition(
     const isVideoService =
       d.service === "video_editing" ||
       (d.service == null && String(d.video_type ?? "").toLowerCase() !== "poster");
+    /*
+     * Every condition the publisher will later insist on, checked here.
+     *
+     * `auto_publish` was the one missing, and its absence was worse than a
+     * video not posting: approval marked the row `instagram_status =
+     * 'scheduled'`, so the board showed it queued and the client was told it
+     * was going out — and then the publish queue, which requires
+     * `auto_publish = 1`, never returned it. It sat looking scheduled for
+     * ever. A video nobody opted in to publish should stay plainly approved,
+     * waiting for someone to post it by hand.
+     */
     const autoPostable =
       isVideoService &&
       d.content_category != null &&
       AUTO_SCHEDULE_CATEGORIES.includes(d.content_category) &&
       Boolean(d.ig_user_id) &&
+      Number(d.auto_publish) === 1 &&
       Boolean(d.edited_link || d.cloud_video_key);
     if (autoPostable) {
       const ph = (d.placeholder_values && typeof d.placeholder_values === "object"

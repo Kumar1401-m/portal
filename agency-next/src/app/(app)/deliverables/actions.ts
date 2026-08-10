@@ -480,7 +480,13 @@ export async function updateVideoDetails(
 
 /* ------------------------- Workflow transitions ------------------------- */
 
-export type StatusState = { ok: boolean; error?: string; effective?: string };
+export type StatusState = {
+  ok: boolean;
+  error?: string;
+  effective?: string;
+  /** Succeeded, but something about the outcome is worth knowing. */
+  warning?: string;
+};
 
 const nowStr = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
@@ -494,6 +500,9 @@ type WfRow = {
   /** Read so scheduling can hand the post to the publisher without undoing one. */
   instagram_status: string | null;
   scheduled_at: string | null;
+  /** Both are conditions the publish queue insists on — see applyStatus. */
+  auto_publish: number | null;
+  ig_user_id: string | null;
 };
 
 /**
@@ -513,7 +522,10 @@ async function applyStatus(
     return { ok: false, error: "Invalid status." };
   }
   const d = await queryOne<WfRow>(
-    "SELECT id, client_id, status, video_type, posted_at, title, instagram_status, scheduled_at FROM deliverables WHERE id = ?",
+    `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
+            d.instagram_status, d.scheduled_at, c.auto_publish, c.ig_user_id
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE d.id = ?`,
     [id]
   );
   if (!d) return { ok: false, error: "Deliverable not found." };
@@ -555,7 +567,25 @@ async function applyStatus(
     updates.posting_status = "rejected";
   }
   // Scheduling has to reach instagram_status too, or the publisher never sees it.
-  if (effective === "scheduled") Object.assign(updates, publishHandoff(d));
+  //
+  // An admin pressing Schedule is a deliberate act and is always honoured —
+  // but the publish queue also requires the client to be opted in and to have
+  // an Instagram account on file, and neither is visible from this button. So
+  // the handoff still happens and the reason it will not go out is reported,
+  // rather than leaving a row that looks queued for ever.
+  let scheduleWarning: string | null = null;
+  if (effective === "scheduled") {
+    Object.assign(updates, publishHandoff(d));
+    const missing = [
+      Number(d.auto_publish) === 1 ? null : "auto-publish is off for this client",
+      d.ig_user_id ? null : "no Instagram account is linked to this client",
+    ].filter(Boolean);
+    if (missing.length) {
+      scheduleWarning =
+        `Scheduled, but it won't post by itself — ${missing.join(" and ")}. ` +
+        `Fix that on the client, or post it by hand.`;
+    }
+  }
   if (effective === "posted" || effective === "completed") {
     updates.posting_status = "posted";
     if (!d.posted_at) updates.posted_at = nowStr();
@@ -621,7 +651,7 @@ async function applyStatus(
   revalidatePath("/deliverables");
   revalidatePath("/today");
   revalidatePath("/approvals");
-  return { ok: true, effective };
+  return { ok: true, effective, ...(scheduleWarning ? { warning: scheduleWarning } : {}) };
 }
 
 /** For the detail-page workflow controls (shows errors via useActionState). */

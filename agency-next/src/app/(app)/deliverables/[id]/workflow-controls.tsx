@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import { changeStatusAction, type StatusState } from "../actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -130,6 +130,15 @@ export function WorkflowControls({
           {state.ok && state.effective ? (
             <p className="text-sm text-success">
               Moved to {label(state.effective)} ✓
+            </p>
+          ) : null}
+          {/* It worked, and it still will not do what you expect. Shown next
+              to the success line rather than instead of it, because both are
+              true and hiding either one misleads. */}
+          {state.ok && state.warning ? (
+            <p className="flex items-start gap-1.5 text-sm text-warning">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{state.warning}</span>
             </p>
           ) : null}
         </form>
