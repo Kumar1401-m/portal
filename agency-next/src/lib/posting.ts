@@ -13,6 +13,30 @@
  */
 import "server-only";
 
+/**
+ * Now, as the MySQL DATETIME string every scheduled time in this portal is
+ * stored in.
+ *
+ * The one clock. `scheduled_at` is written from here — by `scheduleDateToUtc`,
+ * `localTimeToUtc`, `nextBestPostTime` — so the question "has this post's time
+ * arrived?" must be asked against here too, and never against the database's
+ * `NOW()`.
+ *
+ * That is not a hypothetical tidy-up. Nothing in the connection pins the
+ * session timezone, so `NOW()` returns whatever wall clock the database server
+ * happens to keep, and `dateStrings` hands it back as a bare string with no
+ * zone on it. A database sitting in IST would report 11:05 while the app means
+ * 11:05 UTC, and every scheduled post would be judged due five and a half
+ * hours early — going out at half past twelve in the afternoon instead of six
+ * in the evening, silently, on a live client account.
+ *
+ * Comparisons between two database-written columns are fine as they are; it is
+ * only the app-written ones that must use this.
+ */
+export function nowUtc(): string {
+  return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
 /* ------------------------- Best-engagement scheduling ------------------------- */
 
 /**

@@ -10,6 +10,7 @@
  * well the model follows instructions.
  */
 import "server-only";
+import { nowUtc } from "./posting";
 import { query, queryOne, hasColumn } from "./db";
 import { env } from "./env";
 import type { SessionUser } from "./auth";
@@ -98,7 +99,7 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
        SUM(d.status IN ('posted','completed')
            AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m')) AS posted_this_month,
        SUM(d.status = 'scheduled' AND d.scheduled_at IS NOT NULL
-           AND d.scheduled_at < NOW() - INTERVAL 30 MINUTE
+           AND d.scheduled_at < ? - INTERVAL 30 MINUTE
            AND d.instagram_status <> 'posted') AS not_posted,
        /* The three the assistant could not see, and so answered wrongly or
           not at all: work blocked on the client rather than on us, work that
@@ -110,7 +111,11 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
            AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m'))` : "0"} AS auto_approved,
        SUM(d.instagram_status = 'failed') AS posting_failed
      FROM deliverables d JOIN clients c ON c.id = d.client_id
-     WHERE c.status <> 'churned' AND ${where}`
+     WHERE c.status <> 'churned' AND ${where}`,
+    // The app's UTC, like the publisher's own due-check — the assistant
+    // reporting a different number of late posts from the dashboard is worse
+    // than it not knowing.
+    [nowUtc()]
   );
 
   /*

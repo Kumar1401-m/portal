@@ -23,6 +23,7 @@ import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
+import { nowUtc } from "./posting";
 
 /** How many times a single deliverable may be attempted before giving up. */
 export const MAX_POST_ATTEMPTS = 4;
@@ -230,7 +231,11 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
       WHERE c.status <> 'churned'
         AND c.auto_publish = 1
         AND c.ig_user_id IS NOT NULL AND c.ig_user_id <> ''
-        AND d.scheduled_at IS NOT NULL AND d.scheduled_at <= NOW()
+        -- Against the app's UTC, not NOW(). scheduled_at was written by the
+        -- app in UTC, and a database keeping any other wall clock would make
+        -- every post due at the wrong hour. post_locked_at below is written
+        -- and read by the database on both sides, so it stays on NOW().
+        AND d.scheduled_at IS NOT NULL AND d.scheduled_at <= ?
         AND d.post_attempts < ?
         -- Ready to hand out: waiting its turn, or a previous run that took the
         -- row and never came back (expired lease).
@@ -245,7 +250,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
              OR (d.edited_link IS NOT NULL AND d.edited_link <> ''))
       ORDER BY d.scheduled_at ASC, d.id ASC
       LIMIT ${Number(limit) || 10}`,
-    [MAX_POST_ATTEMPTS, CLAIM_LEASE_MINUTES]
+    [nowUtc(), MAX_POST_ATTEMPTS, CLAIM_LEASE_MINUTES]
   );
 
   /*

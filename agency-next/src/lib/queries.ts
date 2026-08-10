@@ -5,6 +5,7 @@
  */
 import "server-only";
 import { query, queryOne, hasColumn } from "./db";
+import { nowUtc } from "./posting";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -409,16 +410,20 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
 
   const rows = await query<Record<string, unknown>>(
     `SELECT d.id, d.title, c.company_name, d.scheduled_at, d.instagram_status,
-            TIMESTAMPDIFF(MINUTE, d.scheduled_at, NOW()) AS late_minutes
+            TIMESTAMPDIFF(MINUTE, d.scheduled_at, ?) AS late_minutes
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
       WHERE d.status = 'scheduled'
         AND d.scheduled_at IS NOT NULL
-        AND d.scheduled_at < NOW() - INTERVAL 30 MINUTE
+        AND d.scheduled_at < ? - INTERVAL 30 MINUTE
         AND d.instagram_status <> 'posted'
         ${scope}
       ORDER BY d.scheduled_at ASC
-      LIMIT 20`
+      LIMIT 20`,
+    // The app's UTC on both counts, matching the publisher's own test for
+    // "due" — otherwise this board and the publisher disagree about which
+    // posts are late, and the one that is wrong is whichever you are reading.
+    [nowUtc(), nowUtc()]
   );
   return rows.map((r) => ({
     id: n(r.id),
