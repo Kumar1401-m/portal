@@ -251,7 +251,15 @@ export async function getDeliverable(id: number): Promise<DeliverableDetail | nu
             d.ai_score, d.service, d.content_category, d.assigned_to, d.created_at,
             c.company_name, c.contact_person, c.phone, c.email,
             c.website, c.company_logo_url, c.instagram_link, c.facebook_link,
-            c.youtube_link, c.caption_settings, c.placeholder_values
+            /*
+             * business_type and caption_template were both declared on
+             * CaptionSource and neither was ever selected. TypeScript was
+             * satisfied — the type said they were there — so the caption AI
+             * had been reading undefined for the client's industry, and the
+             * template someone wrote for a client had no effect at all.
+             */
+            c.youtube_link, c.business_type, c.caption_template,
+            c.caption_settings, c.placeholder_values
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE d.id = ?`,
     [id]

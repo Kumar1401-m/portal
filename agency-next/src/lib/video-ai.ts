@@ -23,6 +23,7 @@ import { resolveVideoUrl } from "./storage";
 import {
   getClientContext,
   renderContext,
+  renderTemplateRule,
   groundingAvailable,
   allowedPhones,
   correctPhones,
@@ -111,6 +112,8 @@ function buildPrompt(brief: {
   language: string | null;
   tone: string | null;
   cta: string | null;
+  /** The client's fixed caption shape, when they have one. */
+  templateRule: string | null;
 }): string {
   const context = [
     brief.clientContext,
@@ -123,11 +126,27 @@ function buildPrompt(brief: {
     .filter(Boolean)
     .join("\n");
 
+  /*
+   * The template goes last, immediately before the JSON contract.
+   *
+   * Position is doing real work here. Instructions buried in the middle of a
+   * long prompt get treated as background; the ones nearest the output format
+   * are the ones actually followed. This is the constraint the agency is most
+   * likely to be held to by a client, so it sits where it will be obeyed —
+   * and it is repeated in the caption rules below for the same reason.
+   */
+  const template = brief.templateRule ? `\n${brief.templateRule}\n` : "";
+  const templateRule = brief.templateRule
+    ? "- FOLLOW THE TEMPLATE ABOVE EXACTLY. Its structure is the client's, not\n" +
+      "  a suggestion — same sections, same order, same line breaks. Only the\n" +
+      "  wording that describes this video changes."
+    : "- Open with the hook, then 2-3 short lines, then one clear call to action.";
+
   return `You are writing the Instagram caption for a video an agency has just edited for a client.
 
 WHAT WE ALREADY KNOW ABOUT THE CLIENT
 ${context}
-
+${template}
 Now WATCH the video. Pay attention to the branding as well as the content —
 logos, watermarks, the footer bar, and any phone number, website, handle or
 tagline shown on screen. That is how the business presents itself, and the
@@ -160,7 +179,7 @@ Rules for the caption:
 - Write it in the language the video is SPOKEN in. If the preferred caption
   language above disagrees with what you hear, follow what you hear — the
   audience is whoever the speaker is addressing.
-- Open with the hook, then 2-3 short lines, then one clear call to action.
+${templateRule}
 - NEVER write a phone number, website or handle that is not either listed
   above or visible on screen in the video. If there is no number to give,
   end with "DM us" or "link in bio" — a made-up number reaches a stranger.
@@ -609,6 +628,9 @@ async function generate(
     language: str(cs.language),
     tone: str(cs.tone),
     cta: str(cs.cta),
+    // Stored on the client and, until now, read by nothing in this portal —
+    // the template someone wrote for a client was quietly having no effect.
+    templateRule: ctx ? renderTemplateRule(ctx) : null,
   });
 
   /*

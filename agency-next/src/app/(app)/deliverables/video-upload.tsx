@@ -14,6 +14,7 @@ import {
 import { getVideoUploadUrl, attachUploadedVideo } from "./upload-actions";
 import { finishAnalysisAfterUpload } from "../editor/actions";
 import { buttonClasses } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "signing" | "uploading" | "saving" | "captioning" | "done" | "error";
 
@@ -31,12 +32,44 @@ const CAPTION_POLLS = 12;
  * short-lived signed URL, then records it against the task. The bytes bypass
  * our server entirely, so there's no request-size ceiling.
  */
+/** How the caption is getting on, and whether that is good news. */
+export type CaptionNote = { text: string; tone: "busy" | "done" | "error" } | null;
+
+/**
+ * The one line that says what the caption AI is doing.
+ *
+ * Exported so whichever component is showing it draws the same thing. Two
+ * lookalike indicators in two files is how they drifted into saying the same
+ * sentence twice in slightly different words.
+ */
+export function CaptionLine({ note }: { note: NonNullable<CaptionNote> }) {
+  const Icon = note.tone === "busy" ? Loader2 : note.tone === "error" ? TriangleAlert : Sparkles;
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1.5 text-xs",
+        note.tone === "error" ? "text-destructive" : "text-muted-foreground"
+      )}
+    >
+      <Icon
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          note.tone === "busy" && "animate-spin",
+          note.tone === "done" && "text-primary"
+        )}
+      />
+      <span>{note.text}</span>
+    </p>
+  );
+}
+
 export function VideoUpload({
   deliverableId,
   currentUrl,
   onUploaded,
   onCaption,
   onCaptioningChange,
+  onCaptionProgress,
 }: {
   deliverableId: number;
   currentUrl?: string | null;
@@ -52,6 +85,18 @@ export function VideoUpload({
    * paying for a second generation of the same video.
    */
   onCaptioningChange?: (busy: boolean) => void;
+  /**
+   * Take over showing the caption's progress.
+   *
+   * Pass this and the component says nothing about the caption itself — the
+   * caller is promising to. Omit it and the note is rendered here, which is
+   * what the task page needs since it has nowhere else to put it.
+   *
+   * The point is that exactly one line on screen narrates one activity. With
+   * both a button label and a note describing the same AI, the same sentence
+   * appeared twice at once and read as two separate things going wrong.
+   */
+  onCaptionProgress?: (note: CaptionNote) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -60,7 +105,13 @@ export function VideoUpload({
   const [url, setUrl] = useState<string | null>(currentUrl ?? null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [captionNote, setCaptionNote] = useState<string | null>(null);
+  const [ownNote, setOwnNote] = useState<CaptionNote>(null);
+
+  /** To the caller if it asked for it, otherwise to our own line. Never both. */
+  const say = (note: CaptionNote) => {
+    if (onCaptionProgress) onCaptionProgress(note);
+    else setOwnNote(note);
+  };
 
   const busy =
     phase === "signing" || phase === "uploading" || phase === "saving" || phase === "captioning";
@@ -79,7 +130,7 @@ export function VideoUpload({
   async function writeCaption() {
     setPhase("captioning");
     onCaptioningChange?.(true);
-    setCaptionNote("The AI is watching the video…");
+    say({ text: "The AI is watching the video…", tone: "busy" });
 
     /*
      * try/finally rather than clearing the flag at each exit.
@@ -95,29 +146,29 @@ export function VideoUpload({
         try {
           res = await finishAnalysisAfterUpload(deliverableId);
         } catch {
-          setCaptionNote(null);
+          say(null);
           return;
         }
 
         if (!res.ok) {
           // Worth showing: "the file is too big" is something to act on, and
           // silence here reads as the feature simply not working.
-          setCaptionNote(res.error ?? null);
+          say(res.error ? { text: res.error, tone: "error" } : null);
           return;
         }
 
         if (res.state === "done") {
           if (res.caption && res.applied) onCaption?.(res.caption);
-          setCaptionNote(res.message ?? "Caption written from the video.");
+          say({ text: res.message ?? "Caption written from the video.", tone: "done" });
           return;
         }
 
-        setCaptionNote(res.message ?? "Writing the caption…");
+        say({ text: res.message ?? "Writing the caption…", tone: "busy" });
         if (!res.more) return;
         await new Promise((r) => setTimeout(r, 2500));
       }
 
-      setCaptionNote("Still working — open the task to see the caption.");
+      say({ text: "Still working — open the task to see the caption.", tone: "done" });
     } finally {
       onCaptioningChange?.(false);
     }
@@ -129,7 +180,7 @@ export function VideoUpload({
     setFilename(file.name);
     // A replacement gets its own caption; the previous one's note would be
     // read as progress on this upload.
-    setCaptionNote(null);
+    say(null);
 
     if (!file.type.startsWith("video/")) {
       setPhase("error");
@@ -291,18 +342,10 @@ export function VideoUpload({
         <p className="text-xs text-muted-foreground">Attaching to the task…</p>
       ) : null}
 
-      {/* The caption runs after the upload has already succeeded, so this is
-          progress on a bonus — never framed as part of the upload failing. */}
-      {captionNote ? (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {phase === "captioning" ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          ) : (
-            <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
-          )}
-          <span>{captionNote}</span>
-        </p>
-      ) : null}
+      {/* Only when nobody upstream took it on — see onCaptionProgress. The
+          caption runs after the upload has already succeeded, so this is
+          progress on a bonus, never framed as part of the upload failing. */}
+      {ownNote ? <CaptionLine note={ownNote} /> : null}
 
       {url ? (
         <div className="space-y-1">

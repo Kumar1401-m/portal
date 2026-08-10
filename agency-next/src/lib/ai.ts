@@ -49,6 +49,8 @@ export type CaptionSource = {
   youtube_link: string | null;
   caption_settings: unknown;
   placeholder_values: unknown;
+  /** The fixed caption shape agreed with this client, if they have one. */
+  caption_template: string | null;
 };
 
 /**
@@ -299,6 +301,23 @@ function v3Brief(d: CaptionSource, opts: CaptionOptions = {}, seen?: WatchedVide
     facebook: str(d.facebook_link || ""),
     youtube: str(d.youtube_link || ""),
     special_notes: str(d.custom_instructions || d.ai_prompt || ""),
+    /*
+     * The shape this client's captions have to take.
+     *
+     * Placeholders are filled here rather than left for the model, because
+     * `{{phone}}` resolved from the client record is a checked fact and
+     * `{{phone}}` resolved by a language model is a guess at a phone number.
+     * Anything we cannot fill is left in the braces and the prompt tells the
+     * model to write it from the video.
+     */
+    caption_template: str(d.caption_template || "").replace(
+      /\{\{\s*([\w.-]+)\s*\}\}/g,
+      (whole, key: string) => {
+        const v = ph[key];
+        const filled = v == null || typeof v === "object" ? "" : String(v).trim();
+        return filled || whole;
+      }
+    ),
   };
 }
 
@@ -315,7 +334,9 @@ You receive a JSON brief. Then:
 7. HASHTAGS (hashtags): return 10-15, no duplicates, NO commas. Mix: business name, topic, industry, location and trending niche tags. Never unrelated tags.
 8. Also produce 5 DIFFERENT alternate caption bodies in this order: (1) Professional (2) Emotional (3) Engagement (4) Short (5) Sales — never repeat wording. Score each (engagement/seo/lead_generation/overall out of 100), recommend the strongest, and rewrite any scoring below 90.
 
-RULES: Unique every time, human-like, matches the video, professional & premium tone. Naturally incorporate business name / owner / location where relevant without forcing them. NEVER invent an owner, business name, location or contact detail that is not in the brief. Do NOT list contact details (phone, website, email, handles) inside the caption body — those are shown in a separate section.
+9. CAPTION TEMPLATE — when the brief's caption_template is not empty, it OVERRIDES rules 4, 5 and 7 above and every formatting habit you have. It is the shape this client agreed to. Reproduce it exactly: the same sections in the same order, the same line breaks, the same emoji, the same punctuation. Change ONLY the words that describe this particular video. Every alternate caption uses the same template too — they differ in wording, never in shape. If any {{placeholder}} braces remain, fill them from the video or the brief; never leave braces in a caption. If the template ends in hashtags, put them there; if it has none, leave hashtags to the hashtags field.
+
+RULES: Unique every time, human-like, matches the video, professional & premium tone. Naturally incorporate business name / owner / location where relevant without forcing them. NEVER invent an owner, business name, location or contact detail that is not in the brief. Do NOT list contact details (phone, website, email, handles) inside the caption body — those are shown in a separate section, UNLESS the caption_template puts them in the body, in which case the template wins.
 
 Return ONLY strict JSON with EXACTLY these keys:
 {"detected_business":"","detected_owner":"","industry":"","main_topic":"","best_caption":"","alternate_captions":["","","","",""],"hashtags":[],"seo_keywords":[],"cta":"","scores":{"caption1":{"engagement":0,"seo":0,"lead_generation":0,"overall":0},"caption2":{"engagement":0,"seo":0,"lead_generation":0,"overall":0},"caption3":{"engagement":0,"seo":0,"lead_generation":0,"overall":0},"caption4":{"engagement":0,"seo":0,"lead_generation":0,"overall":0},"caption5":{"engagement":0,"seo":0,"lead_generation":0,"overall":0}},"recommended_caption":""}`;

@@ -226,20 +226,57 @@ export async function generateMonthTasks(
 }
 
 /**
+ * Statuses a date change is allowed to touch.
+ *
+ * Approved and scheduled work is included, which it was not before. Moving a
+ * date is how the agency says "this goes out later now", and refusing to move
+ * the approved ones meant the only tasks with a real posting time were the
+ * ones the button could not reach. The client is told either way — the
+ * approval was for the content, not for the calendar.
+ *
+ * Posted work is the line. Its date is a record of something that happened,
+ * and a record you can edit is not a record.
+ */
+const MOVABLE = [
+  "pending",
+  "in_progress",
+  "content_review",
+  "changes_requested",
+  "waiting_for_raw",
+  "raw_uploaded",
+  "editing",
+  "caption_ready",
+  "review",
+  "approved",
+  "scheduled",
+];
+
+/**
+ * Move the posting slot by the same number of days as the date.
+ *
+ * By a delta rather than by rebuilding the timestamp from the new date. The
+ * slot is stored in UTC and the date is the day it goes out in the client's
+ * own clock, and for anywhere far enough west those are different calendar
+ * days — 7pm in New York is midnight UTC the following day. Rebuilding would
+ * quietly pull those posts a day early; adding the same number of days cannot,
+ * whatever the timezone, and it keeps the exact hour that was chosen.
+ *
+ * NULL stays NULL: a task with no posting time is not scheduled, and inventing
+ * one here would queue something nobody asked to be queued.
+ */
+const SHIFT_SCHEDULED = "DATE_ADD(d.scheduled_at, INTERVAL ? DAY)";
+
+/**
  * Move every task in a month by a number of days.
  *
  * For the month that slips as a whole — a late start, a festival week — where
  * changing fifteen dates one at a time is the same decision typed fifteen
  * times.
  *
- * Work that is already out of the agency's hands is left where it is. A task
- * that has been posted has a date that is a record of what happened, and one
- * awaiting the client's approval has a date they have already been told; both
- * would be falsified by moving them, so the shift covers the tasks still on
- * the bench.
- *
  * `month_key` follows the new date, otherwise a task shifted out of its month
- * keeps counting towards the old month's target and the tallies drift.
+ * keeps counting towards the old month's target and the tallies drift. So does
+ * `scheduled_at`, or the video still posts on the day it was originally going
+ * to and the move only appears to have worked.
  */
 export async function shiftMonthDates(
   clientId: number,
@@ -250,29 +287,49 @@ export async function shiftMonthDates(
   const by = Math.trunc(Number(days) || 0);
   if (!by || Math.abs(by) > 365) return 0;
 
-  // month_key is assigned first on purpose. MySQL evaluates SET clauses left
-  // to right and a later one sees the values already assigned, so computing
-  // the month after moving the date would shift it a second time — a task
-  // moved seven days would land in the month fourteen days away.
+  // month_key and scheduled_at are assigned before due_date on purpose. MySQL
+  // evaluates SET clauses left to right and a later one sees the values
+  // already assigned, so computing either from due_date after moving it would
+  // shift it a second time — a task moved seven days would land fourteen away.
   const res = await execute(
     `UPDATE deliverables d
-        SET d.month_key = DATE_FORMAT(DATE_ADD(d.due_date, INTERVAL ? DAY), '%Y-%m'),
-            d.due_date  = DATE_ADD(d.due_date, INTERVAL ? DAY)
+        SET d.month_key    = DATE_FORMAT(DATE_ADD(d.due_date, INTERVAL ? DAY), '%Y-%m'),
+            d.scheduled_at = ${SHIFT_SCHEDULED},
+            d.due_date     = DATE_ADD(d.due_date, INTERVAL ? DAY)
       WHERE d.client_id = ? AND d.month_key = ? AND d.due_date IS NOT NULL
-        AND d.status IN ('pending','in_progress','content_review','changes_requested')`,
-    [by, by, clientId, mk]
+        AND d.status IN (${MOVABLE.map(() => "?").join(",")})
+        AND COALESCE(d.instagram_status, '') <> 'posted'`,
+    [by, by, by, clientId, mk, ...MOVABLE]
   );
   return res.affectedRows ?? 0;
 }
 
-/** Move one task, keeping its month in step with its new date. */
+/**
+ * Move one task, keeping its month and its posting slot in step.
+ *
+ * The slot moves by however far the date moved — `DATEDIFF(new, old)` — for
+ * the timezone reason described on SHIFT_SCHEDULED, and because it preserves
+ * the evening hour somebody chose. A task with no date to move from has no
+ * delta to apply, so its slot is left alone rather than guessed at.
+ *
+ * Assigned before `due_date` in the SET list: MySQL evaluates left to right,
+ * so reading `due_date` after overwriting it would give a difference of zero
+ * and the posting date would silently never move — which is the exact bug
+ * this exists to fix.
+ */
 export async function setTaskDate(taskId: number, date: string | null): Promise<boolean> {
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const res = await execute(
-    `UPDATE deliverables
-        SET due_date = ?, month_key = COALESCE(DATE_FORMAT(?, '%Y-%m'), month_key)
-      WHERE id = ?`,
-    [date, date, taskId]
+    `UPDATE deliverables d
+        SET d.month_key    = COALESCE(DATE_FORMAT(?, '%Y-%m'), d.month_key),
+            d.scheduled_at = CASE
+              WHEN ? IS NULL OR d.due_date IS NULL OR d.scheduled_at IS NULL
+                THEN d.scheduled_at
+              ELSE DATE_ADD(d.scheduled_at, INTERVAL DATEDIFF(?, d.due_date) DAY)
+            END,
+            d.due_date     = ?
+      WHERE d.id = ? AND COALESCE(d.instagram_status, '') <> 'posted'`,
+    [date, date, date, date, taskId]
   );
   return (res.affectedRows ?? 0) > 0;
 }

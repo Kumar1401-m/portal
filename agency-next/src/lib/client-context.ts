@@ -39,6 +39,17 @@ export type ClientContext = {
   websiteSummary: string | null;
   /** Logo/watermark cues previously confirmed for this client. */
   knownBrandCues: string[];
+  /**
+   * The caption shape this client's captions must take, if one was written.
+   *
+   * Deliberately not part of `renderContext`: everything else there is a
+   * *fact* offered to the model, which it may use or ignore as the video
+   * warrants. This is an *instruction*, and mixing the two is how it ended up
+   * being treated as a suggestion.
+   */
+  captionTemplate: string | null;
+  /** Values the template's {{placeholders}} are filled from. */
+  placeholders: Record<string, string>;
   /** Where each piece came from — shown to whoever audits a caption. */
   sources: string[];
 };
@@ -159,9 +170,11 @@ export async function getClientContext(clientId: number): Promise<ClientContext 
     ig_access_token: string | null;
     services: unknown;
     placeholder_values: unknown;
+    caption_template: string | null;
   }>(
     `SELECT id, company_name, business_type, phone, website, instagram_link,
-            ig_user_id, ig_username, ig_access_token, services, placeholder_values
+            ig_user_id, ig_username, ig_access_token, services, placeholder_values,
+            caption_template
        FROM clients WHERE id = ?`,
     [clientId]
   );
@@ -188,8 +201,18 @@ export async function getClientContext(clientId: number): Promise<ClientContext 
         : [],
     websiteSummary: null,
     knownBrandCues: [],
+    captionTemplate: str(c.caption_template),
+    // Every scalar in placeholder_values, so a template can reference any of
+    // them by name. Objects and arrays are skipped — a template slot is a
+    // piece of text, and "[object Object]" in a caption is worse than a gap.
+    placeholders: Object.fromEntries(
+      Object.entries(ph)
+        .map(([k, v]) => [k, v == null || typeof v === "object" ? "" : String(v).trim()])
+        .filter(([, v]) => v)
+    ),
     sources,
   };
+  if (ctx.captionTemplate) sources.push("caption template");
 
   // Cues an admin has previously confirmed belong to this client — the exact
   // strings its logo and watermark carry.
@@ -361,4 +384,52 @@ export function renderContext(ctx: ClientContext): string {
   ].filter(Boolean);
 
   return lines.join("\n");
+}
+
+/**
+ * The client's caption template, as an instruction the model must obey.
+ *
+ * A template is not a hint. Someone sat down and decided this client's
+ * captions open with a hook, then three bullets, then a phone number, then the
+ * hashtags — and a caption that ignores that is wrong however well it is
+ * written. So this is phrased as a requirement, given its own headed block,
+ * and the checkable parts are spelled out rather than left to be inferred from
+ * the shape of the example.
+ *
+ * `{{placeholders}}` are pre-filled from the client's own values where we hold
+ * them. Any left over are named explicitly, because a caption that ships with
+ * a literal `{{offer}}` in it is the one failure a reader spots immediately —
+ * better the model writes something from the video than leaves the braces in.
+ */
+export function renderTemplateRule(ctx: ClientContext): string | null {
+  const tpl = ctx.captionTemplate?.trim();
+  if (!tpl) return null;
+
+  const filled = tpl.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (whole, key: string) => {
+    const v = ctx.placeholders[key];
+    return v ? v : whole;
+  });
+
+  const unresolved = [...new Set(Array.from(filled.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g), (m) => m[1]))];
+
+  return [
+    "THE CAPTION TEMPLATE — THIS IS NOT OPTIONAL",
+    "",
+    "This client's captions follow a fixed shape, agreed with them. Reproduce",
+    "it exactly: the same sections, in the same order, with the same line",
+    "breaks, emoji and punctuation. Change only the words that describe this",
+    "particular video.",
+    "",
+    "```",
+    filled,
+    "```",
+    "",
+    unresolved.length
+      ? `Fill ${unresolved.map((u) => `{{${u}}}`).join(", ")} from what you see in the video ` +
+        "or from the client details above. Never leave the braces in the caption."
+      : "Every placeholder is already filled in above — keep those values exactly as they are.",
+    "",
+    "If the template ends with hashtags, put yours there and nowhere else.",
+    "If it has no hashtags, return them only in the hashtags field.",
+  ].join("\n");
 }

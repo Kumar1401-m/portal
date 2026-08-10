@@ -12,7 +12,7 @@ import {
 import type { DeliverableListRow } from "@/lib/deliverables";
 import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
-import { VideoUpload } from "./video-upload";
+import { VideoUpload, CaptionLine, type CaptionNote } from "./video-upload";
 import { deleteDeliverable } from "./upload-actions";
 import {
   ServiceCategoryPicker,
@@ -64,14 +64,23 @@ export function EditVideoModal({
   /*
    * The caption the uploader is writing by itself.
    *
-   * Shown on the same button as a manual generation because to the reader it
-   * is the same thing happening — a caption is being written. Two separate
-   * indicators for one activity would only invite pressing the button that
-   * looks idle.
+   * Tracked separately from a manual generation only so the button can be
+   * disabled during it. What is *said* about either comes from one place —
+   * see captionNote.
    */
   const [autoCaptioning, setAutoCaptioning] = useState(false);
   const [delPending, startDel] = useTransition();
-  const [genError, setGenError] = useState<string | null>(null);
+  /*
+   * The single sentence about the caption AI.
+   *
+   * Both routes to a caption — pressing Generate, and uploading a video that
+   * captions itself — write here, and it is rendered once, under the caption
+   * box. Previously the button narrated one and the uploader narrated the
+   * other, so one activity produced two simultaneous messages saying the same
+   * thing in different words.
+   */
+  const [captionNote, setCaptionNote] = useState<CaptionNote>(null);
+  const captioning = genPending || autoCaptioning;
 
   // Reset the caption editor to the latest saved value each time the modal opens.
   useEffect(() => {
@@ -79,7 +88,7 @@ export function EditVideoModal({
       setCaption(d.caption ?? "");
       setEditedLink(d.edited_link ?? "");
       setService(serviceOf(d));
-      setGenError(null);
+      setCaptionNote(null);
     }
   }, [open, d]);
 
@@ -89,13 +98,28 @@ export function EditVideoModal({
   }, [state]);
 
   function generate() {
-    setGenError(null);
+    setCaptionNote({ text: "Writing a caption…", tone: "busy" });
     startGen(async () => {
       const fd = new FormData();
       fd.set("deliverable_id", String(d.id));
       const res = await generateCaptionAction({ ok: false }, fd);
-      if (res.ok && res.caption) setCaption(res.caption);
-      else setGenError(res.error || "Couldn't generate a caption.");
+      if (res.ok && res.caption) {
+        setCaption(res.caption);
+        // Which source it came from is the difference between a caption about
+        // what is on screen and one about what somebody typed weeks ago, so
+        // say it rather than leaving both looking equally authoritative.
+        setCaptionNote({
+          text: res.fromVideo
+            ? "Written from the video."
+            : "Written from the brief — upload the video for one based on the footage.",
+          tone: "done",
+        });
+      } else {
+        setCaptionNote({
+          text: res.error || "Couldn't generate a caption.",
+          tone: "error",
+        });
+      }
     });
   }
 
@@ -223,22 +247,22 @@ export function EditVideoModal({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor={`cap-${d.id}`}>Caption / Description</Label>
+                {/* The label does not change while it works. A spinner and a
+                    disabled button already say "busy", and the line below says
+                    what is actually happening — a button that also narrates is
+                    the same sentence twice. */}
                 <button
                   type="button"
                   onClick={generate}
-                  disabled={genPending || autoCaptioning}
+                  disabled={captioning}
                   className={buttonClasses({ variant: "secondary", size: "sm" })}
                 >
-                  {genPending || autoCaptioning ? (
+                  {captioning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Wand2 className="h-4 w-4" />
                   )}
-                  {autoCaptioning
-                    ? "Watching the video…"
-                    : genPending
-                      ? "Generating…"
-                      : "Generate with AI"}
+                  Generate with AI
                 </button>
               </div>
               <Textarea
@@ -250,7 +274,9 @@ export function EditVideoModal({
                 placeholder="Write a caption, or generate one with AI."
                 className="font-mono text-[13px] leading-relaxed"
               />
-              {genError ? <p className="text-sm text-destructive">{genError}</p> : null}
+              {/* The one line. Everything the caption AI has to say, from
+                  either route, appears here and nowhere else. */}
+              {captionNote ? <CaptionLine note={captionNote} /> : null}
             </div>
 
             <div className="space-y-1.5">
@@ -269,6 +295,9 @@ export function EditVideoModal({
                 // discard something typed into the box a moment ago.
                 onCaption={setCaption}
                 onCaptioningChange={setAutoCaptioning}
+                // We show it, next to the caption it is writing — so the
+                // uploader must not show it too.
+                onCaptionProgress={setCaptionNote}
               />
             </div>
             ) : null}
