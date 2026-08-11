@@ -144,10 +144,14 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 /** Where each role lands after login / when hitting a page it can't see. */
 export function homeForRole(role: Role): string {
   if (role === "client") return "/portal";
-  if (role === "poster_designer") return "/poster";
-  // The Editing dashboard was removed; Today is where an editor now starts,
-  // and it is scoped to their own work.
-  if (role === "video_editor") return "/today";
+  /*
+   * The people who make the work land on their own dashboard.
+   *
+   * A designer used to open the poster board and an editor Today's tasks —
+   * both a list of what to do next, neither an answer to "how much of my
+   * month is left". My work is that answer, and the boards are one click on.
+   */
+  if (role === "poster_designer" || role === "video_editor") return "/my-work";
   if (role === "crm") return "/dashboard";
   return "/dashboard";
 }

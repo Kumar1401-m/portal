@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
 import {
   requireUser,
+  ADMIN_ROLES,
   ADMIN_OR_CRM_ROLES,
   SUPER_ADMIN_ROLES,
   type SessionUser,
@@ -18,7 +19,7 @@ import {
 import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
-import { notifyClientById, notifyUser } from "@/lib/notify";
+import { notifyClientById, notifyUser, notifyAdmins } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
@@ -672,6 +673,29 @@ async function applyStatus(
   } else if (["scheduled", "posted", "completed", "rejected", "resolved"].includes(effective)) {
     await notifyClientById(d.client_id, "general", `"${d.title}" — ${effective.replace(/_/g, " ")}`,
       reason || "Status updated by the agency.", link);
+  }
+
+  /*
+   * An editor finishing is a handover, and somebody has to be told.
+   *
+   * `caption_ready` is where the edit stops and the super admin's look begins —
+   * an editor cannot send anything to a client, by design. But nothing
+   * announced it, so finished work sat in a status nobody was watching until
+   * someone happened to scan the board. The designer's submit form has always
+   * notified; the editor's route through the workflow control never did, which
+   * made the same handover visible or invisible depending on which screen it
+   * was done from.
+   *
+   * Not when an admin does it themselves — telling someone their own action
+   * happened is how a notification list becomes noise.
+   */
+  if (effective === "caption_ready" && !ADMIN_ROLES.includes(user.role)) {
+    await notifyAdmins(
+      "general",
+      "🎬 Ready for your review",
+      `${user.name} finished "${d.title}". Check it, then send it to the client.`,
+      link
+    );
   }
 
   revalidatePath(`/deliverables/${id}`);

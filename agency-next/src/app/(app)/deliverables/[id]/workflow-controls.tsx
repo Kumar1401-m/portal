@@ -19,7 +19,9 @@ const NEXT: Record<string, Action[]> = {
   content_review: [{ label: "Approve content", status: "approved" }],
   waiting_for_raw: [{ label: "Mark raw uploaded", status: "raw_uploaded" }],
   raw_uploaded: [{ label: "Start editing", status: "editing" }],
-  editing: [{ label: "Mark caption ready", status: "caption_ready" }],
+  // Named for where it goes, not for the column it sets. An editor pressing
+  // this is handing the work over, and "caption ready" never said to whom.
+  editing: [{ label: "Send to super admin for review", status: "caption_ready" }],
   caption_ready: [{ label: "Send for final review", status: "review" }],
   review: [{ label: "Approve", status: "approved" }],
   changes_requested: [{ label: "Mark resolved", status: "resolved" }],

@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/auth";
 import {
+  Briefcase,
   LayoutDashboard,
   CalendarCheck,
   Users,
@@ -36,6 +37,7 @@ const EDITOR: Role[] = ["video_editor"];
 /** Admins see every module — nothing here is hidden from them. */
 export const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ADMIN_OR_CRM, ready: true },
+  { label: "My work", href: "/my-work", icon: Briefcase, roles: [...ALL_STAFF, ...EDITOR], ready: true },
   { label: "Today's Tasks", href: "/today", icon: CalendarCheck, roles: [...ALL_STAFF, ...EDITOR, "crm"], ready: true },
   { label: "Clients", href: "/clients", icon: Users, roles: ADMIN_OR_CRM, ready: true },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true },
