@@ -23,6 +23,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
+import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
@@ -39,10 +40,10 @@ export default async function TodayPage({
   /*
    * Not the editor's screen any more.
    *
-   * This board is every client's work filtered to one date, and an editor
-   * reaching it — by an old link or a typed URL — got the agency's day rather
-   * than their own. My work is the answer to the question they were asking, so
-   * that is where the guard sends them.
+   * This board is every client's work, and an editor reaching it — by an old
+   * link or a typed URL — got the whole agency's rather than their own. My
+   * work is the answer to the question they were asking, so that is where the
+   * guard sends them.
    */
   const user = await requireUser(STAFF_ROLES.filter((r) => r !== "video_editor"));
   const isDesigner = user.role === "poster_designer";
@@ -50,31 +51,43 @@ export default async function TodayPage({
   const { params, service, filters, hasFilters } = parseTaskQuery(sp);
   const scopeIds = await crmClientIds(user);
 
-  // Designers only ever see their own worklist; crm only their assigned
-  // clients; admins/super_admins see everyone's.
+  /*
+   * Every task, not only today's.
+   *
+   * It was filtered to "due today or overdue", so a day with one thing due
+   * showed one row while the month held thirty — and the thirty were only
+   * findable on another board. This is the board people actually work from,
+   * so it holds the work: everything, ordered so that what is still to do
+   * comes before what is finished and the oldest date is first. Page one is
+   * therefore still the day's work, and the rest is one click away rather
+   * than one screen away.
+   *
+   * Designers only ever see their own worklist; crm only their assigned
+   * clients; admins/super_admins see everyone's.
+   */
   const scoped = {
     ...filters,
-    today: true,
+    openFirst: true,
     assignedTo: isDesigner ? user.id : filters.assignedTo,
     crmClientIds: scopeIds,
   };
 
-  const [due, counts, assignees, categoryMap] = await Promise.all([
+  const [all, counts, assignees, categoryMap] = await Promise.all([
     getDeliverables(scoped),
     getServiceCounts(scoped),
     getAssignees(),
     getCategoryMap(),
   ]);
 
-  // With nothing due, show what is coming instead of an empty board. A board
-  // that says "nothing to do" while twenty tasks sit a few days out is
-  // technically right and useless — you still have to go somewhere else to
-  // see the work. All of them, paged; the count in the header is the real
-  // total rather than what fits on one page.
-  const ahead =
-    due.length === 0 ? await getDeliverables({ ...scoped, today: false, upcoming: true }) : [];
-  const all = due.length ? due : ahead;
-  const showingAhead = due.length === 0 && ahead.length > 0;
+  // How much of it is actually due — the number the heading used to be about,
+  // and still worth saying now that the board holds more than that.
+  const today = new Date(new Date().toDateString());
+  const dueNow = all.filter(
+    (d) =>
+      d.due_date &&
+      new Date(d.due_date) <= today &&
+      !["posted", "completed", "cancelled", "rejected"].includes(d.status)
+  ).length;
 
   // Eight to a page. A day's work should be readable without scrolling, and a
   // list long enough to scroll is one you skim rather than work through.
@@ -96,14 +109,15 @@ export default async function TodayPage({
           ) : null}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {showingAhead
-            ? `Nothing due today — showing the next ${all.length} coming up`
-            : `${all.length} item${all.length === 1 ? "" : "s"} due today or overdue`}
+          {all.length} task{all.length === 1 ? "" : "s"}
+          {dueNow > 0 ? ` · ${dueNow} due today or overdue, first` : " · nothing due today"}
           {hasFilters ? " (filtered)" : ""}.
         </p>
       </div>
 
       <ServiceTabs basePath="/today" active={service} counts={counts} params={params} />
+
+      <SearchBox basePath="/today" params={params} />
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
@@ -113,20 +127,19 @@ export default async function TodayPage({
           />
         ) : (
           <>
-            {/* Said once, above the rows, so nobody reads a list of future
-                work as a list of things that are late. */}
-            {showingAhead ? (
+            {/* Said once, above the rows, so nobody reads a list that runs on
+                into next week as a list of things that are late. */}
+            {dueNow === 0 ? (
               <p className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
                 <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                Nothing is due today. These are the next {all.length} coming up — none of
-                them is late.
+                Nothing is due today — none of these is late.
               </p>
             ) : null}
           {/* Same columns, same order as the Tasks board. Two boards that show
               the same rows should not need reading twice. The one difference
               is the date, which is emphasised when it has passed — that is
               what this board is for. */}
-          <Table>
+          <Table dense>
             <THead>
               <tr>
                 <th className="w-10 text-right">#</th>
@@ -136,10 +149,10 @@ export default async function TodayPage({
                 <th>Content status</th>
                 <th>Design status</th>
                 <th>Post status</th>
-                <th>Caption</th>
+                <th className="hidden 2xl:table-cell">Caption</th>
                 <th className="text-center">Shoot</th>
                 <th className="text-center">Video</th>
-                <th>Remarks</th>
+                <th className="hidden 2xl:table-cell">Remarks</th>
                 <th className="text-right">Actions</th>
               </tr>
             </THead>
@@ -155,7 +168,7 @@ export default async function TodayPage({
                     <TD className="text-right tabular-nums text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </TD>
-                    <TD className="max-w-[11rem]">
+                    <TD className="max-w-[9rem]">
                       <Link
                         href={`/deliverables/${d.id}`}
                         className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
@@ -183,7 +196,7 @@ export default async function TodayPage({
                         {postStatusLabel(d.status, d.posting_status)}
                       </Badge>
                     </TD>
-                    <TD className="max-w-[13rem]">
+                    <TD className="max-w-[10rem] hidden 2xl:table-cell">
                       {d.caption ? (
                         <span className="line-clamp-2 text-xs text-muted-foreground" title={d.caption}>
                           {d.caption}
@@ -206,7 +219,7 @@ export default async function TodayPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="max-w-[8rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                    <TD className="hidden max-w-[8rem] truncate text-muted-foreground 2xl:table-cell" title={d.reject_reason ?? d.writer_notes ?? ""}>
                       {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">

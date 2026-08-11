@@ -1,10 +1,33 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Table({ className, ...props }: React.HTMLAttributes<HTMLTableElement>) {
+export function Table({
+  className,
+  dense,
+  ...props
+}: React.HTMLAttributes<HTMLTableElement> & {
+  /**
+   * Tighten the cells so a wide board fits the window.
+   *
+   * The task boards carry twelve columns, and at the normal 16px of padding
+   * each side that is nearly 400px of air — enough to push the table past the
+   * viewport and put a horizontal scrollbar under it. A scrollbar is the worst
+   * outcome available here: the columns it hides are on the right, which is
+   * where Shoot, Video and Actions live, so the parts of a row you act on are
+   * the parts that disappear.
+   */
+  dense?: boolean;
+}) {
   return (
     <div className="w-full overflow-x-auto">
-      <table className={cn("w-full caption-bottom text-sm", className)} {...props} />
+      <table
+        className={cn(
+          "w-full caption-bottom text-sm",
+          dense && "[&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5",
+          className
+        )}
+        {...props}
+      />
     </div>
   );
 }

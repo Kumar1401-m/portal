@@ -54,6 +54,16 @@ export type DeliverableFilters = {
   today?: boolean; // due today or overdue, still open
   /** Dated after today and still open — what the Today board falls back to. */
   upcoming?: boolean;
+  /**
+   * Sort work still to do above work already finished.
+   *
+   * For a board someone opens to decide what to do next. Without it a month
+   * whose first ten tasks are posted opens on ten posted tasks, because they
+   * have the oldest dates — the whole list, correctly ordered, and useless.
+   * The dates still order within each group, so overdue is first of the open
+   * ones and page one is the day's work.
+   */
+  openFirst?: boolean;
   assignedTo?: number; // scope to one owner (poster designers)
   service?: ServiceKey; // task organisation: one service per tab
   category?: string;
@@ -98,8 +108,11 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
     params.push(f.month);
   }
   if (f.q) {
-    conds.push("(d.title LIKE ? OR d.caption LIKE ?)");
-    params.push(`%${f.q}%`, `%${f.q}%`);
+    // The client's name too. It is the first column on every board, so it is
+    // the first thing anyone types — and searching for "4insite" and getting
+    // nothing reads as a broken search, not a narrow one.
+    conds.push("(d.title LIKE ? OR d.caption LIKE ? OR c.company_name LIKE ?)");
+    params.push(`%${f.q}%`, `%${f.q}%`, `%${f.q}%`);
   }
   if (f.assignedTo) {
     conds.push("d.assigned_to = ?");
@@ -165,7 +178,8 @@ export async function getDeliverables(
      JOIN clients c ON c.id = d.client_id
      LEFT JOIN users u ON u.id = d.assigned_to
      ${where}
-     ORDER BY d.due_date IS NULL, d.due_date ASC,
+     ORDER BY ${f.openFirst ? "d.status IN ('posted','completed','cancelled','rejected')," : ""}
+              d.due_date IS NULL, d.due_date ASC,
               FIELD(d.priority,'urgent','high','medium','low'), d.id DESC
      LIMIT 200`,
     params

@@ -20,6 +20,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
+import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
@@ -88,6 +89,8 @@ export default async function DeliverablesPage({
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
 
+      <SearchBox basePath="/deliverables" params={params} />
+
       <Card className="overflow-hidden">
         {all.length === 0 ? (
           <p className="p-10 text-center text-sm text-muted-foreground">
@@ -102,7 +105,7 @@ export default async function DeliverablesPage({
              because at column width a paragraph is four words and an
              ellipsis. Caption stayed, clamped to two lines, because whether
              one exists is the question this board gets asked most. */
-          <Table>
+          <Table dense>
               <THead>
                 <tr>
                   <th className="w-10 text-right">#</th>
@@ -112,10 +115,10 @@ export default async function DeliverablesPage({
                   <th>Content status</th>
                   <th>Design status</th>
                   <th>Post status</th>
-                  <th>Caption</th>
+                  <th className="hidden 2xl:table-cell">Caption</th>
                   <th className="text-center">Shoot</th>
                   <th className="text-center">Video</th>
-                  <th>Remarks</th>
+                  <th className="hidden 2xl:table-cell">Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </THead>
@@ -125,7 +128,7 @@ export default async function DeliverablesPage({
                     <TD className="text-right tabular-nums text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </TD>
-                    <TD className="max-w-[11rem]">
+                    <TD className="max-w-[9rem]">
                       <Link
                         href={`/deliverables/${d.id}`}
                         className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
@@ -157,7 +160,7 @@ export default async function DeliverablesPage({
                         judged on how it opens, and the first line alone is
                         enough to tell whether it has been written yet. The
                         whole thing is on hover. */}
-                    <TD className="max-w-[13rem]">
+                    <TD className="max-w-[10rem] hidden 2xl:table-cell">
                       {d.caption ? (
                         <span
                           className="line-clamp-2 text-xs text-muted-foreground"
@@ -201,7 +204,7 @@ export default async function DeliverablesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="max-w-[8rem] truncate text-muted-foreground" title={d.reject_reason ?? d.writer_notes ?? ""}>
+                    <TD className="hidden max-w-[8rem] truncate text-muted-foreground 2xl:table-cell" title={d.reject_reason ?? d.writer_notes ?? ""}>
                       {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">
