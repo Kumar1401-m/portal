@@ -18,6 +18,7 @@ import {
   clientFacts,
   composeReply,
   holdingReply,
+  recentTurns,
   shouldAutoReply,
   markReplied,
 } from "@/lib/whatsapp-ai";
@@ -60,7 +61,13 @@ async function maybeAnswer(input: {
     const clientId = await clientForGroup(input.groupId);
     if (!clientId) return false;
 
-    const facts = await clientFacts(clientId);
+    // The record and the conversation. Without the second, "and the other
+    // one?" — which is how people actually talk in a chat — could only be
+    // answered by asking them to say it again.
+    const [facts, history] = await Promise.all([
+      clientFacts(clientId),
+      recentTurns(input.groupId),
+    ]);
     if (!facts) return false;
 
     /*
@@ -72,7 +79,7 @@ async function maybeAnswer(input: {
      * promise of a person instead, and the notification below is what makes
      * that promise true rather than a nicer way of ignoring them.
      */
-    const composed = await composeReply(facts, input.message || "", input.senderName);
+    const composed = await composeReply(facts, input.message || "", input.senderName, history);
     const reply = composed ?? holdingReply(input.senderName);
 
     const sent = await sendTextToGroup(input.groupId, reply);

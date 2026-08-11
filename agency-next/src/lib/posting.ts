@@ -184,5 +184,33 @@ export function utcToLocalInput(utc: string | null, country: string | null | und
   return new Date(ms + offsetForCountry(country) * 60000).toISOString().slice(0, 16);
 }
 
+/**
+ * A stored UTC timestamp as "20 Aug 2026, 6:00 pm" in the client's clock.
+ *
+ * India, like the rest of the portal's scheduling. Worth a helper rather than
+ * an inline `toLocaleString`, which would use the *server's* timezone — on
+ * Vercel that is UTC, so it would faithfully reproduce the bug it is here to
+ * fix.
+ *
+ * Lives here, beside the offset table it depends on, because two places need
+ * it: the publish panel, and the assistant that tells a client in their own
+ * WhatsApp group when their video goes out. The second is the one that must
+ * not get it wrong — a page showing 11:30 for a 5pm slot is a bug someone
+ * reports, a message telling the customer 11:30 is one they act on.
+ */
+export function prettyLocal(utc: string | null): string | null {
+  if (!utc) return null;
+  const local = utcToLocalInput(utc, "india"); // "2026-08-20T18:00"
+  if (!local) return null;
+  const [date, time] = local.split("T");
+  const [h, m] = time.split(":").map(Number);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  const d = new Date(`${date}T00:00:00`);
+  return (
+    `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}, ` +
+    `${h12}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`
+  );
+}
+
 /** Categories treated as "post to Instagram automatically once approved". */
 export const AUTO_SCHEDULE_CATEGORIES = ["Instagram Reel"];

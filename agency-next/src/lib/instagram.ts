@@ -23,7 +23,7 @@ import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
-import { nowUtc, AUTO_SCHEDULE_CATEGORIES, utcToLocalInput } from "./posting";
+import { nowUtc, AUTO_SCHEDULE_CATEGORIES, prettyLocal } from "./posting";
 
 /** How many times a single deliverable may be attempted before giving up. */
 export const MAX_POST_ATTEMPTS = 4;
@@ -864,27 +864,6 @@ function missedItsWindow(scheduledAt: string): boolean {
   return Date.now() - due > PUBLISH_WINDOW_HOURS * 3_600_000;
 }
 
-/**
- * A stored UTC timestamp as "20 Aug 2026, 6:00 pm" in the client's clock.
- *
- * India, like the rest of the portal's scheduling. Worth a helper rather than
- * an inline `toLocaleString`, which would use the *server's* timezone — on
- * Vercel that is UTC, so it would faithfully reproduce the bug it is here to
- * fix.
- */
-function prettyLocal(utc: string | null): string | null {
-  if (!utc) return null;
-  const local = utcToLocalInput(utc, "india"); // "2026-08-20T18:00"
-  if (!local) return null;
-  const [date, time] = local.split("T");
-  const [h, m] = time.split(":").map(Number);
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  const d = new Date(`${date}T00:00:00`);
-  return (
-    `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}, ` +
-    `${h12}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`
-  );
-}
 
 /**
  * Publishing state for one deliverable, for the panel on the task page.
