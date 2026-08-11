@@ -10,7 +10,9 @@ import {
   setTaskDate,
   safeMonth,
   removeTasks,
+  respaceMonth,
 } from "@/lib/task-plan";
+import { fmtDate } from "@/lib/utils";
 
 export type PlanState = {
   ok?: boolean;
@@ -97,6 +99,40 @@ export async function shiftMonthAction(
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not move the dates." };
+  }
+}
+
+/**
+ * Put a month's existing tasks onto the two-day rhythm.
+ *
+ * For the months filled before generating spaced them out, where everything
+ * sits on the first. Separate from the "move by N days" control next to it:
+ * that shifts a shape that already exists, this gives one to a month that
+ * never had it.
+ */
+export async function respaceMonthAction(
+  _prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  const ok = await guard(formData);
+  if (!ok) return { error: "You can't change this client's tasks." };
+  const month = safeMonth(String(formData.get("month") || ""));
+
+  try {
+    const r = await respaceMonth(ok.clientId, month);
+    refresh(ok.clientId);
+    if (!r.moved) {
+      return { error: "Nothing to space out — every task here is posted or finished." };
+    }
+    return {
+      ok: true,
+      message:
+        `Spread ${r.moved} task${r.moved > 1 ? "s" : ""} two days apart, ` +
+        `${fmtDate(r.from)} to ${fmtDate(r.to)}.` +
+        (r.skipped ? ` ${r.skipped} left alone — already posted.` : ""),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not space them out." };
   }
 }
 

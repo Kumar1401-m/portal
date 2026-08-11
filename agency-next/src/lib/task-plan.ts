@@ -419,6 +419,71 @@ export async function setTaskDate(taskId: number, date: string | null): Promise<
   return (res.affectedRows ?? 0) > 0;
 }
 
+/**
+ * Re-date a month's existing tasks onto the two-day rhythm.
+ *
+ * Generating spaces new tasks out; this is for the months that were filled
+ * before it did, where twelve videos all sit on the 1st. Same rhythm, same
+ * start, applied to what is already there.
+ *
+ * Each move goes through `setTaskDate`, so a task's posting slot follows its
+ * date exactly as it does when the date is changed by hand — the day it lands
+ * on is the day it goes out. Writing a second, faster loop here would be a
+ * second definition of what moving a date means.
+ *
+ * Order is preserved: whatever sequence the month is already in stays, so a
+ * plan somebody has read does not come back reshuffled. Posted work keeps its
+ * date and is skipped — that date is a record of something that happened.
+ */
+export async function respaceMonth(
+  clientId: number,
+  month: string
+): Promise<{ moved: number; skipped: number; from: string | null; to: string | null }> {
+  const mk = safeMonth(month);
+  const due = firstOfMonth(mk);
+
+  const [bounds] = await query<{ base: string; last: string }>(
+    `SELECT ${DUE_DATE_SQL} AS base, LAST_DAY(?) AS last`,
+    [mk, due, due, due]
+  );
+
+  const tasks = await query<{ id: number }>(
+    `SELECT d.id FROM deliverables d
+      WHERE d.client_id = ? AND d.month_key = ?
+        AND d.status IN (${MOVABLE.map(() => "?").join(",")})
+        AND COALESCE(d.instagram_status,'') <> 'posted'
+      ORDER BY d.due_date IS NULL, d.due_date ASC, d.id ASC`,
+    [clientId, mk, ...MOVABLE]
+  );
+  if (!tasks.length) return { moved: 0, skipped: 0, from: null, to: null };
+
+  const DAY_MS = 86_400_000;
+  const baseMs = Date.parse(`${String(bounds.base).slice(0, 10)}T00:00:00Z`);
+  const lastMs = Date.parse(`${String(bounds.last).slice(0, 10)}T00:00:00Z`);
+
+  let moved = 0;
+  let skipped = 0;
+  let firstDate: string | null = null;
+  let lastDate: string | null = null;
+
+  for (let i = 0; i < tasks.length; i++) {
+    // Clamped to the month's last day, for the same reason generating is: a
+    // task dated outside its own month_key is counted by one month and shown
+    // in another's calendar.
+    const at = Math.min(baseMs + i * SPACING_DAYS * DAY_MS, lastMs);
+    const date = new Date(at).toISOString().slice(0, 10);
+    if (await setTaskDate(tasks[i].id, date)) {
+      moved++;
+      firstDate ??= date;
+      lastDate = date;
+    } else {
+      skipped++;
+    }
+  }
+
+  return { moved, skipped, from: firstDate, to: lastDate };
+}
+
 export type SyncResult = {
   month: string;
   added: { videos: number; posters: number };

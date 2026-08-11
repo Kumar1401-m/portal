@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CalendarRange, Wand2, Check, TriangleAlert, Loader2, Plus, Minus } from "lucide-react";
 import {
+  respaceMonthAction,
   generateMonthAction,
   shiftMonthAction,
   setTaskDateAction,
@@ -137,6 +138,10 @@ export function MonthlyPlan({
   );
   const [shiftState, shift, shifting] = useActionState<PlanState, FormData>(shiftMonthAction, {});
   const [adjState, adjust, adjusting] = useActionState<PlanState, FormData>(adjustTasksAction, {});
+  const [spaceState, respace, respacing] = useActionState<PlanState, FormData>(
+    respaceMonthAction,
+    {}
+  );
 
   const toAdd = plan.videosToAdd + plan.postersToAdd;
   const noTargets = plan.videoTarget === 0 && plan.posterTarget === 0;
@@ -331,6 +336,29 @@ export function MonthlyPlan({
                 </form>
               ) : null}
             </div>
+
+        {tasks.length > 0 ? (
+          <div className="space-y-2 border-t border-border pt-4">
+            <form action={respace}>
+              <input type="hidden" name="client_id" value={clientId} />
+              <input type="hidden" name="month" value={plan.month} />
+              <button
+                type="submit"
+                disabled={respacing}
+                className={buttonClasses({ variant: "outline", size: "sm" })}
+              >
+                {respacing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
+                Space them two days apart
+              </button>
+            </form>
+            <p className="text-xs text-muted-foreground">
+              Re-dates this month from the start, two days between each — for months filled
+              before that was the default. Posting times move with the dates; posted work is
+              left alone.
+            </p>
+            <Note state={spaceState} />
+          </div>
+        ) : null}
 
         {tasks.length > 0 ? (
           <form action={shift} className="flex flex-wrap items-end gap-2 border-t border-border pt-4">
