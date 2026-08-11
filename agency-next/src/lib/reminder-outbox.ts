@@ -20,7 +20,7 @@
  * one that goes twice, which for a client-facing chase is the right way round.
  */
 import "server-only";
-import { query, execute, hasColumn } from "./db";
+import { query, queryOne, execute, hasColumn } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { recordRun } from "./automation-runs";
 
@@ -51,6 +51,29 @@ export type OutboxRow = {
   created_at: string;
   sent_at: string | null;
 };
+
+/**
+ * Where a client is written to.
+ *
+ * The default group when there is one, then the oldest — the same order the
+ * automatic reminders use, so a client is always addressed in the same chat
+ * whatever sent the message: the nightly rules, the console, or the assistant.
+ * Three copies of this choice would eventually pick three different groups for
+ * a client who has more than one.
+ */
+export async function groupForClient(
+  clientId: number
+): Promise<{ groupId: string; label: string } | null> {
+  const row = await queryOne<{ group_id: string; group_name: string | null; company_name: string }>(
+    `SELECT g.group_id, g.group_name, c.company_name
+       FROM whatsapp_groups g JOIN clients c ON c.id = g.client_id
+      WHERE g.client_id = ? AND g.is_active = 1
+      ORDER BY g.is_default DESC, g.id ASC LIMIT 1`,
+    [clientId]
+  ).catch(() => null);
+  if (!row) return null;
+  return { groupId: row.group_id, label: row.group_name || row.company_name };
+}
 
 /** Attempts before a message is given up on rather than retried for ever. */
 const MAX_ATTEMPTS = 4;

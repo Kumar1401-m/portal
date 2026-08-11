@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
-import { queryOne } from "@/lib/db";
 import {
   composeReminder,
   SENDABLE,
@@ -13,6 +12,7 @@ import {
   queueMessage,
   sendNow,
   outboxReady,
+  groupForClient,
   REMINDER_TIMEZONE,
 } from "@/lib/reminder-outbox";
 import { localTimeToUtc } from "@/lib/posting";
@@ -79,27 +79,6 @@ export type SendState = {
   error?: string;
   warning?: string;
 };
-
-/**
- * Where a client is written to.
- *
- * The default group when there is one, then the oldest — the same order the
- * automatic reminders use, so a client is always addressed in the same chat
- * whichever sent it.
- */
-async function groupForClient(
-  clientId: number
-): Promise<{ groupId: string; label: string } | null> {
-  const row = await queryOne<{ group_id: string; group_name: string | null; company_name: string }>(
-    `SELECT g.group_id, g.group_name, c.company_name
-       FROM whatsapp_groups g JOIN clients c ON c.id = g.client_id
-      WHERE g.client_id = ? AND g.is_active = 1
-      ORDER BY g.is_default DESC, g.id ASC LIMIT 1`,
-    [clientId]
-  );
-  if (!row) return null;
-  return { groupId: row.group_id, label: row.group_name || row.company_name };
-}
 
 export async function sendReminderAction(
   _prev: SendState,

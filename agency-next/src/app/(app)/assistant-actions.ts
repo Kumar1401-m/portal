@@ -6,6 +6,9 @@ import { queryOne, execute } from "@/lib/db";
 import { canAccessClient } from "@/lib/crm";
 import { sendEmail, sendApprovalRequestEmail } from "@/lib/email";
 import { notifyClientById } from "@/lib/notify";
+import { approvalChaseText, invoiceText } from "@/lib/reminder-messages";
+import { paymentLinkForInvoice } from "@/lib/payment-links";
+import { sendNow, groupForClient } from "@/lib/reminder-outbox";
 import {
   answerQuestion,
   buildSnapshot,
@@ -109,6 +112,58 @@ export async function runAssistantAction(
       return { ok: true, text: `**${d.title}** is now assigned to **${u.name}**.` };
     }
 
+    /*
+     * Chase an approval, in the group where the client answers.
+     *
+     * Through the same composer and the same outbox as the scheduled chases,
+     * so the client gets one voice however the message was triggered, and
+     * every send lands in one log. Writing a second version of this wording
+     * here is how a client ends up chased in two different tones.
+     */
+    if (kind === "approval_reminder") {
+      const d = await queryOne<{
+        title: string; client_id: number; status: string;
+        video_code: string | null; company_name: string;
+      }>(
+        `SELECT d.title, d.client_id, d.status, d.video_code, c.company_name
+           FROM deliverables d JOIN clients c ON c.id = d.client_id
+          WHERE d.id = ?`,
+        [id]
+      );
+      if (!d) return { ok: false, text: "I can't find that one." };
+      if (!(await canAccessClient(user, d.client_id)))
+        return { ok: false, text: "That isn't one of your clients." };
+      if (!["content_review", "review"].includes(d.status)) {
+        return {
+          ok: false,
+          text: `**${d.title}** isn't waiting on the client — it's ${d.status.replace(/_/g, " ")}.`,
+        };
+      }
+
+      const target = await groupForClient(d.client_id);
+      if (!target) {
+        return {
+          ok: false,
+          text: `**${d.company_name}** has no WhatsApp group linked, so there's nowhere to send it.`,
+        };
+      }
+
+      const body = approvalChaseText([{ title: d.title, video_code: d.video_code }]);
+      const res = await sendNow({
+        kind: "approval_chase",
+        clientId: d.client_id,
+        groupId: target.groupId,
+        groupLabel: target.label,
+        body,
+        createdBy: user.id,
+        createdByName: user.name || user.email,
+      });
+      revalidatePath("/deliverables");
+      return res.ok
+        ? { ok: true, text: `Reminded **${d.company_name}** about **${d.title}** on WhatsApp.` }
+        : { ok: false, text: `Couldn't send it: ${res.error}. It's queued and will be retried.` };
+    }
+
     if (kind === "payment_reminder") {
       const inv = await queryOne<{
         invoice_no: string; total: string; due_date: string | null;
@@ -121,11 +176,61 @@ export async function runAssistantAction(
         [id]
       );
       if (!inv) return { ok: false, text: "That invoice is already settled, or gone." };
-      if (!inv.email) return { ok: false, text: `${inv.company_name} has no email address on file.` };
 
       const amount = new Intl.NumberFormat("en-IN", {
         style: "currency", currency: "INR", maximumFractionDigits: 0,
       }).format(Number(inv.total));
+
+      /*
+       * WhatsApp first, because that is where the money comes from.
+       *
+       * An emailed invoice reminder asks someone to find an email, open a
+       * portal and remember a password. The WhatsApp one carries a Razorpay
+       * link they can pay from the chat, and it is the channel these clients
+       * actually answer on. Same composer as the weekly automatic chase, so
+       * the wording matches whatever else has been sent about this invoice.
+       */
+      const group = await groupForClient(inv.client_id);
+      if (group) {
+        const link = await paymentLinkForInvoice(id);
+        const body = invoiceText([
+          {
+            invoice_no: inv.invoice_no,
+            total: Number(inv.total) || 0,
+            due_date: inv.due_date,
+            payUrl: link.url,
+            payable: link.payable,
+          },
+        ]);
+        const res = await sendNow({
+          kind: "invoice_due",
+          clientId: inv.client_id,
+          groupId: group.groupId,
+          groupLabel: group.label,
+          body,
+          createdBy: user.id,
+          createdByName: user.name || user.email,
+        });
+        if (res.ok) {
+          await notifyClientById(inv.client_id, "general", "Payment reminder",
+            `Invoice ${inv.invoice_no} for ${amount} is still open.`, "/portal/invoices", false);
+          return {
+            ok: true,
+            text:
+              `Reminder for **${inv.invoice_no}** (${amount}) sent to **${inv.company_name}** on WhatsApp` +
+              (link.payable ? ", with a link they can pay from the chat." : "."),
+          };
+        }
+        // Fall through to email rather than stopping — a reminder that reaches
+        // them by some route beats one that reached them by none.
+      }
+
+      if (!inv.email) {
+        return {
+          ok: false,
+          text: `${inv.company_name} has no WhatsApp group and no email address — nowhere to send it.`,
+        };
+      }
 
       const sent = await sendEmail(
         inv.email,

@@ -413,7 +413,12 @@ export function chartsFor(question: string, s: Snapshot): AssistantChart[] {
 
 /* ------------------------------- Actions ------------------------------- */
 
-export type ActionKind = "request_approval" | "payment_reminder" | "assign" | "message_client";
+export type ActionKind =
+  | "request_approval"
+  | "approval_reminder"
+  | "payment_reminder"
+  | "assign"
+  | "message_client";
 
 export type ActionOffer = {
   kind: ActionKind;
@@ -426,6 +431,9 @@ export type ActionOffer = {
 const CAN: Record<ActionKind, SessionUser["role"][]> = {
   // Sending work to the client stays where it already sits in the portal.
   request_approval: ["super_admin", "crm"],
+  // Chasing a decision the client already has in front of them — same people
+  // who were allowed to put it there.
+  approval_reminder: ["super_admin", "crm"],
   payment_reminder: ["super_admin", "admin"],
   assign: ["super_admin", "admin", "crm"],
   message_client: ["super_admin", "admin", "crm"],
@@ -443,9 +451,22 @@ export async function actionOffers(user: SessionUser, question: string): Promise
   const { where } = await scopeFor(user);
   const offers: ActionOffer[] = [];
 
+  /*
+   * What the person asked for, matched on words rather than word order.
+   *
+   * The old patterns assumed English sentence shape — "send to client" — and
+   * so missed "client ki content share cheyi", which is how the request is
+   * actually made here. A command the assistant silently declines to
+   * understand is worse than one it cannot do, because there is nothing to
+   * see: no offer appears and no reason is given.
+   *
+   * Each list is the action's own vocabulary, in both languages, matched
+   * anywhere in the sentence. Overlap between them is fine — two offers are
+   * two buttons, and the person picks. Firing on nothing is the failure.
+   */
   const wants = (re: RegExp) => re.test(t);
 
-  if (canRun(user.role, "request_approval") && wants(/approv|review|send.*client|ready/)) {
+  if (canRun(user.role, "request_approval") && wants(/approv|review|ready|\b(send|share|pampu|forward)\b/)) {
     const rows = await query<Record<string, unknown>>(
       `SELECT d.id, d.title, c.company_name FROM deliverables d JOIN clients c ON c.id = d.client_id
         WHERE c.status <> 'churned' AND ${where}
@@ -456,6 +477,29 @@ export async function actionOffers(user: SessionUser, question: string): Promise
       offers.push({
         kind: "request_approval",
         label: "Send to the client for approval",
+        targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
+      });
+  }
+
+  /*
+   * Chasing a decision the client already has.
+   *
+   * Distinct from "send it to them" and easy to conflate: one puts a video in
+   * front of a client, the other asks about one already sitting there. Offered
+   * only for work actually waiting at a gate, so the two lists never overlap
+   * and picking the wrong one is not possible.
+   */
+  if (canRun(user.role, "approval_reminder") && wants(/remind|chase|follow.?up|approv|waiting|reply|gurthu|nudge/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT d.id, d.title, c.company_name FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status <> 'churned' AND ${where}
+          AND d.status IN ('content_review','review')
+        ORDER BY d.due_date IS NULL, d.due_date ASC LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "approval_reminder",
+        label: "Remind the client to approve it",
         targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
       });
   }
@@ -475,7 +519,7 @@ export async function actionOffers(user: SessionUser, question: string): Promise
       });
   }
 
-  if (canRun(user.role, "payment_reminder") && wants(/payment|invoice|unpaid|due|remind|money/)) {
+  if (canRun(user.role, "payment_reminder") && wants(/payment|invoice|unpaid|bill|money|\b(due|pay|paid)\b/)) {
     const rows = await query<Record<string, unknown>>(
       `SELECT i.id, i.invoice_no, i.total, c.company_name
          FROM invoices i JOIN clients c ON c.id = i.client_id
@@ -494,7 +538,7 @@ export async function actionOffers(user: SessionUser, question: string): Promise
       });
   }
 
-  if (canRun(user.role, "message_client") && wants(/message|tell|email|contact|talk|inform|update/)) {
+  if (canRun(user.role, "message_client") && wants(/message|tell|email|contact|talk|inform|update|\b(msg|cheppu)\b/)) {
     const ids = user.role === "crm" ? await crmClientIds(user) : null;
     const scope = ids && ids.length ? `AND id IN (${ids.map((v) => Math.trunc(Number(v))).join(",")})` : ids ? "AND 1=0" : "";
     const rows = await query<Record<string, unknown>>(
