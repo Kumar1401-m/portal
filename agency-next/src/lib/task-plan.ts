@@ -23,6 +23,7 @@ import "server-only";
 import { query, queryOne, execute } from "./db";
 import { getCategoryMap } from "./categories";
 import { DEFAULT_CATEGORIES, videoTypeForService, type ServiceKey } from "./services";
+import { utcToLocalInput } from "./posting";
 
 /** Tasks a cancelled or rejected row shouldn't count towards. */
 const COUNTS_TOWARDS_TARGET = "d.status NOT IN ('cancelled','rejected')";
@@ -305,31 +306,59 @@ export async function shiftMonthDates(
 }
 
 /**
- * Move one task, keeping its month and its posting slot in step.
+ * Move one task to a day, and make that day the day it posts.
  *
- * The slot moves by however far the date moved — `DATEDIFF(new, old)` — for
- * the timezone reason described on SHIFT_SCHEDULED, and because it preserves
- * the evening hour somebody chose. A task with no date to move from has no
- * delta to apply, so its slot is left alone rather than guessed at.
+ * The picked date is treated as an instruction about *the posting day*, not as
+ * an offset. Shifting `scheduled_at` by `DATEDIFF(picked, due_date)` was only
+ * right while the two agreed — and they had already drifted apart on live
+ * data, because until today moving a date never touched the slot at all. On
+ * such a row a relative shift preserves the drift for ever: pick the 11th on a
+ * task whose slot is the 10th and you get the 12th.
  *
- * Assigned before `due_date` in the SET list: MySQL evaluates left to right,
- * so reading `due_date` after overwriting it would give a difference of zero
- * and the posting date would silently never move — which is the exact bug
- * this exists to fix.
+ * So the delta is measured from where the post is actually going out, in the
+ * client's own clock, which makes the picked day exactly right whatever the
+ * row started as. Any existing divergence is corrected the first time someone
+ * touches the date.
+ *
+ * Still a whole number of days added to the stored instant, never a rebuilt
+ * timestamp: that keeps the evening hour somebody chose and stays correct for
+ * a client whose local evening falls on the next UTC day.
  */
 export async function setTaskDate(taskId: number, date: string | null): Promise<boolean> {
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+
+  const row = await queryOne<{
+    scheduled_at: string | null;
+    country: string | null;
+  }>(
+    `SELECT d.scheduled_at,
+            JSON_UNQUOTE(JSON_EXTRACT(c.placeholder_values, '$.country')) AS country
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE d.id = ?`,
+    [taskId]
+  );
+
+  // Where the slot moves to, worked out here rather than in SQL so the
+  // timezone conversion is the same one the rest of the portal uses.
+  let scheduledAt: string | null | undefined; // undefined = leave it alone
+  if (date && row?.scheduled_at) {
+    const from = postingDay(row.scheduled_at, row.country);
+    const shiftDays = from ? Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) : 0;
+    scheduledAt = shiftDays
+      ? new Date(Date.parse(`${row.scheduled_at.replace(" ", "T")}Z`) + shiftDays * 86_400_000)
+          .toISOString()
+          .slice(0, 19)
+          .replace("T", " ")
+      : row.scheduled_at;
+  }
+
   const res = await execute(
-    `UPDATE deliverables d
-        SET d.month_key    = COALESCE(DATE_FORMAT(?, '%Y-%m'), d.month_key),
-            d.scheduled_at = CASE
-              WHEN ? IS NULL OR d.due_date IS NULL OR d.scheduled_at IS NULL
-                THEN d.scheduled_at
-              ELSE DATE_ADD(d.scheduled_at, INTERVAL DATEDIFF(?, d.due_date) DAY)
-            END,
-            d.due_date     = ?
-      WHERE d.id = ? AND COALESCE(d.instagram_status, '') <> 'posted'`,
-    [date, date, date, date, taskId]
+    `UPDATE deliverables
+        SET month_key    = COALESCE(DATE_FORMAT(?, '%Y-%m'), month_key),
+            due_date     = ?,
+            scheduled_at = COALESCE(?, scheduled_at)
+      WHERE id = ? AND COALESCE(instagram_status, '') <> 'posted'`,
+    [date, date, scheduledAt ?? null, taskId]
   );
   return (res.affectedRows ?? 0) > 0;
 }
@@ -471,15 +500,43 @@ export type PlannedTask = {
  * list that doesn't reorder as you change them is no help in seeing whether
  * the month now looks right.
  */
+/**
+ * The month's tasks, each showing the day it actually goes out.
+ *
+ * `due_date` alone was wrong here, and produced the worst kind of wrong: the
+ * Tasks board shows `scheduled_at ?? due_date`, so the same video appeared on
+ * two screens under two different dates with nothing to explain it. Whichever
+ * one you happened to be looking at, you were reading a real column — they
+ * were simply different columns.
+ *
+ * The posting slot wins, because it is the one that decides when the client's
+ * audience sees it. Converted to the client's own day: the slot is stored in
+ * UTC and a picker showing a UTC date would be a third answer.
+ */
 export async function monthTasks(clientId: number, month: string): Promise<PlannedTask[]> {
-  return query<PlannedTask>(
-    `SELECT id, title, status, service, video_type, content_category, due_date
-       FROM deliverables
-      WHERE client_id = ? AND month_key = ?
-      ORDER BY (due_date IS NULL), due_date ASC, id ASC
+  const rows = await query<PlannedTask & { scheduled_at: string | null; country: string | null }>(
+    `SELECT d.id, d.title, d.status, d.service, d.video_type, d.content_category,
+            d.due_date, d.scheduled_at,
+            JSON_UNQUOTE(JSON_EXTRACT(c.placeholder_values, '$.country')) AS country
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE d.client_id = ? AND d.month_key = ?
+      ORDER BY (COALESCE(d.scheduled_at, d.due_date) IS NULL),
+               COALESCE(d.scheduled_at, d.due_date) ASC, d.id ASC
       LIMIT 100`,
     [clientId, safeMonth(month)]
   );
+
+  return rows.map(({ scheduled_at, country, ...t }) => ({
+    ...t,
+    due_date: postingDay(scheduled_at, country) ?? t.due_date,
+  }));
+}
+
+/** The local day a UTC posting slot falls on, as YYYY-MM-DD. */
+function postingDay(scheduledAt: string | null, country: string | null): string | null {
+  if (!scheduledAt) return null;
+  const local = utcToLocalInput(scheduledAt, country);
+  return local ? local.slice(0, 10) : null;
 }
 
 /** Months that already have tasks, newest first — for the month picker. */

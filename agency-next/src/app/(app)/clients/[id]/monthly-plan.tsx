@@ -94,7 +94,7 @@ function TaskDate({ clientId, task }: { clientId: number; task: PlannedTask }) {
         name="due_date"
         defaultValue={task.due_date ? String(task.due_date).slice(0, 10) : ""}
         onChange={() => form.current?.requestSubmit()}
-        aria-label={`Due date for ${task.title}`}
+        aria-label={`Posting date for ${task.title}`}
         className="w-[11rem]"
       />
       {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
@@ -305,7 +305,9 @@ export function MonthlyPlan({
             <tr>
               <th>Task</th>
               <th>Status</th>
-              <th>Due</th>
+              {/* The same date the Tasks board calls "Schedule date", and the
+                  same value — they read one column now, not two. */}
+              <th className="whitespace-nowrap">Schedule date</th>
             </tr>
           </THead>
           <TBody>
