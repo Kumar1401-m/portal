@@ -31,6 +31,7 @@ export type ClientDefaults = Partial<{
   renewal_date: string;
   notes: string;
   designer_id: string;
+  editor_id: string;
   caption_language: string;
   caption_tone: string;
   loc_city: string;
@@ -67,6 +68,7 @@ export function ClientForm({
   action,
   defaults = {},
   designers,
+  editors,
   isCreate,
   submitButton,
   crmUsers = [],
@@ -75,6 +77,7 @@ export function ClientForm({
   action: (formData: FormData) => void | Promise<void>;
   defaults?: ClientDefaults;
   designers: Designer[];
+  editors: Designer[];
   isCreate: boolean;
   submitButton: React.ReactNode;
   /** Active crm-role users, for the access checklist below. */
@@ -357,12 +360,27 @@ export function ClientForm({
           <Field label="Renewal date" name="renewal_date">
             <DateField id="renewal_date" name="renewal_date" defaultValue={d.renewal_date} />
           </Field>
-          <Field label="Default designer" name="designer_id">
+          {/* Who this client's work lands on when nobody picks a person. One
+              per kind of work — a poster and a video are made by different
+              people, and one dropdown could only ever be right about one of
+              them. A crm is assigned further down, on the access list, because
+              that grants them the client rather than the task. */}
+          <Field label="Default designer (posters)" name="designer_id">
             <Select id="designer_id" name="designer_id" defaultValue={d.designer_id || ""}>
               <option value="">— None —</option>
               {designers.map((ds) => (
                 <option key={ds.id} value={ds.id}>
                   {ds.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Default video editor (videos)" name="editor_id">
+            <Select id="editor_id" name="editor_id" defaultValue={d.editor_id || ""}>
+              <option value="">— None —</option>
+              {editors.map((ed) => (
+                <option key={ed.id} value={ed.id}>
+                  {ed.name}
                 </option>
               ))}
             </Select>

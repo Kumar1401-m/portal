@@ -124,6 +124,12 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "editor_id",
+    definition: "editor_id BIGINT UNSIGNED DEFAULT NULL",
+    purpose: "The client's default video editor — the video half of the pair with designer_id.",
+  },
+  {
+    table: "clients",
     column: "ig_username",
     definition: "ig_username VARCHAR(100) DEFAULT NULL",
     purpose: "The client's Instagram @handle.",

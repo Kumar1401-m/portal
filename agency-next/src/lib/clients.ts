@@ -1,6 +1,6 @@
 /** Read queries for the Clients (CRM) module. */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -28,6 +28,7 @@ export type ClientFull = {
   notes: string | null;
   status: string;
   designer_id: number | null;
+  editor_id: number | null;
   caption_settings: unknown;
   placeholder_values: unknown;
   /** JSON array of ServiceKey — signed-up services (filtering/reporting only). */
@@ -119,5 +120,51 @@ export type Designer = { id: number; name: string };
 export async function getDesigners(): Promise<Designer[]> {
   return query<Designer>(
     "SELECT id, name FROM users WHERE role = 'poster_designer' AND is_active = 1 ORDER BY name"
+  );
+}
+
+/** Video editors, for the "default video editor" dropdown. */
+export async function getEditors(): Promise<Designer[]> {
+  return query<Designer>(
+    "SELECT id, name FROM users WHERE role = 'video_editor' AND is_active = 1 ORDER BY name"
+  );
+}
+
+/**
+ * Who a new task lands on when nobody picks a person.
+ *
+ * One rule, in one place, because three callers need it and had been keeping
+ * their own copy: the manual task form, the month generator, and the reassign
+ * that runs when a client's default changes. A poster goes to the designer, a
+ * video to the editor, and everything else stays unassigned — a Meta ads task
+ * has no default owner and guessing one hides it from whoever should pick it
+ * up.
+ */
+export type ClientTaskOwners = { designer_id: number | null; editor_id: number | null };
+
+export function defaultAssigneeFor(
+  service: string | null | undefined,
+  client: ClientTaskOwners | null | undefined
+): number | null {
+  if (!client) return null;
+  if (service === "poster_designing") return client.designer_id ?? null;
+  if (service === "video_editing") return client.editor_id ?? null;
+  return null;
+}
+
+/**
+ * A client's two default owners.
+ *
+ * `editor_id` is read only where the column exists — the app has to keep
+ * working on a database the migration hasn't reached yet, and a missing
+ * column would otherwise take down the whole task form rather than just the
+ * default it provides.
+ */
+export async function clientDefaults(clientId: number): Promise<ClientTaskOwners | null> {
+  const hasEditor = await hasColumn("clients", "editor_id");
+  return queryOne<ClientTaskOwners>(
+    `SELECT designer_id, ${hasEditor ? "editor_id" : "NULL AS editor_id"}
+       FROM clients WHERE id = ?`,
+    [clientId]
   );
 }

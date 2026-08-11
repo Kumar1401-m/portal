@@ -19,6 +19,7 @@ import {
 import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
+import { clientDefaults, defaultAssigneeFor } from "@/lib/clients";
 import { notifyClientById, notifyUser, notifyAdmins } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
@@ -45,10 +46,7 @@ export async function createDeliverable(formData: FormData): Promise<void> {
     redirect("/deliverables/new?error=1");
   }
 
-  const client = await queryOne<{ id: number; designer_id: number | null }>(
-    "SELECT id, designer_id FROM clients WHERE id = ?",
-    [clientId]
-  );
+  const client = await queryOne<{ id: number }>("SELECT id FROM clients WHERE id = ?", [clientId]);
   if (!client) redirect("/deliverables/new?error=notfound");
   // The page already scopes the dropdown, but the action is the real gate:
   // a crm must not create work against a client they cannot access.
@@ -75,16 +73,10 @@ export async function createDeliverable(formData: FormData): Promise<void> {
   const promotionType = String(formData.get("promotion_type") || "").trim() || null;
   const customInstructions = String(formData.get("custom_instructions") || "").trim() || null;
   const assignedToRaw = Number(formData.get("assigned_to"));
-  // The client's default designer only stands in for poster work — that's what
-  // designer_id means. Applying it to every service silently assigned video
-  // tasks to a poster designer nobody had picked; leaving those unassigned is
-  // both honest and visible.
+  // Nobody picked a person, so fall back to the client's default for this kind
+  // of work — a poster to their designer, a video to their editor.
   const assignedTo =
-    assignedToRaw > 0
-      ? assignedToRaw
-      : service === "poster_designing"
-        ? (client.designer_id ?? null)
-        : null;
+    assignedToRaw > 0 ? assignedToRaw : defaultAssigneeFor(service, await clientDefaults(client.id));
 
   const mk = dueDate ? dueDate.slice(0, 7) : monthKey();
 

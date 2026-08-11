@@ -66,15 +66,19 @@ export function SendApproval({
     start(async () => {
       const res = await sendForApprovalAction({ ok: false }, formData);
       setState(res);
+      // `ack` — this one holds the screen until it is read. The video has
+      // just gone to a client's group and there is no taking it back, so the
+      // confirmation is worth a deliberate click rather than a glance.
       toast(
         res.ok
           ? {
-              title: "Sent to the client on WhatsApp",
+              title: "Sent for approval",
               description:
                 res.message ||
                 `${panel.groupName ? `${panel.groupName} ` : "They "}can now reply OK to approve.`,
+              ack: true,
             }
-          : { title: "Couldn't send it", description: res.error, tone: "error" }
+          : { title: "Couldn't send it", description: res.error, tone: "error", ack: true }
       );
     });
   }

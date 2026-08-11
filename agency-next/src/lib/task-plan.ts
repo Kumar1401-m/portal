@@ -25,6 +25,7 @@ import { query, queryOne, execute } from "./db";
 import { getCategoryMap } from "./categories";
 import { DEFAULT_CATEGORIES, videoTypeForService, type ServiceKey } from "./services";
 import { utcToLocalInput } from "./posting";
+import { clientDefaults, defaultAssigneeFor } from "./clients";
 
 /** Tasks a cancelled or rejected row shouldn't count towards. */
 const COUNTS_TOWARDS_TARGET = "d.status NOT IN ('cancelled','rejected')";
@@ -169,10 +170,7 @@ export async function generateMonthTasks(
   const wantVideos = exact?.videos ?? plan.videosToAdd;
   const wantPosters = exact?.posters ?? plan.postersToAdd;
 
-  const client = await queryOne<{ designer_id: number | null }>(
-    "SELECT designer_id FROM clients WHERE id = ?",
-    [clientId]
-  );
+  const client = await clientDefaults(clientId);
 
   const due = firstOfMonth(plan.month);
 
@@ -245,10 +243,9 @@ export async function generateMonthTasks(
     if (count <= 0) return;
     const category = await defaultCategory(service);
     const videoType = videoTypeForService(service, category);
-    // The client's default designer stands in for poster work only — the same
-    // rule the manual form follows, so generated tasks land where hand-made
-    // ones would.
-    const assignee = service === "poster_designing" ? (client?.designer_id ?? null) : null;
+    // The same rule the manual form follows, so a generated task lands where a
+    // hand-made one would.
+    const assignee = defaultAssigneeFor(service, client);
     for (let i = 0; i < count; i++) {
       rows.push([
         clientId,

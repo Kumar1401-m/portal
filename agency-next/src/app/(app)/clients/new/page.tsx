@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
-import { getDesigners } from "@/lib/clients";
+import { getDesigners, getEditors } from "@/lib/clients";
 import { getCrmUsers } from "@/lib/crm";
 import { createClient } from "../actions";
 import { ClientForm } from "../client-form";
@@ -24,8 +24,9 @@ export default async function NewClientPage({
 }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const isSuperAdmin = user.role === "super_admin";
-  const [designers, crmUsers, sp] = await Promise.all([
+  const [designers, editors, crmUsers, sp] = await Promise.all([
     getDesigners(),
+    getEditors(),
     isSuperAdmin ? getCrmUsers() : Promise.resolve([]),
     searchParams,
   ]);
@@ -48,6 +49,7 @@ export default async function NewClientPage({
       <ClientForm
         action={createClient}
         designers={designers}
+        editors={editors}
         isCreate
         submitButton={<Button type="submit">Create client</Button>}
         crmUsers={crmUsers}

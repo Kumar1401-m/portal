@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
-import { getClientDetail, getDesigners } from "@/lib/clients";
+import { getClientDetail, getDesigners, getEditors } from "@/lib/clients";
 import { getCrmUsers, getClientCrmUserIds } from "@/lib/crm";
 import { updateClient } from "../../actions";
 import { ClientForm, type ClientDefaults } from "../../client-form";
@@ -24,9 +24,10 @@ export default async function EditClientPage({
   const user = await requireUser(ADMIN_ROLES);
   const isSuperAdmin = user.role === "super_admin";
   const { id } = await params;
-  const [client, designers, crmUsers, assignedCrmIds, sp] = await Promise.all([
+  const [client, designers, editors, crmUsers, assignedCrmIds, sp] = await Promise.all([
     getClientDetail(Number(id)),
     getDesigners(),
+    getEditors(),
     isSuperAdmin ? getCrmUsers() : Promise.resolve([]),
     isSuperAdmin ? getClientCrmUserIds(Number(id)) : Promise.resolve([]),
     searchParams,
@@ -62,6 +63,7 @@ export default async function EditClientPage({
     renewal_date: str(client.renewal_date).slice(0, 10),
     notes: str(client.notes),
     designer_id: client.designer_id ? String(client.designer_id) : "",
+    editor_id: client.editor_id ? String(client.editor_id) : "",
     caption_language: str(cs.language),
     caption_tone: str(cs.tone),
     loc_city: str(ph.location),
@@ -99,6 +101,7 @@ export default async function EditClientPage({
         action={updateClient}
         defaults={defaults}
         designers={designers}
+        editors={editors}
         isCreate={false}
         submitButton={<Button type="submit">Save changes</Button>}
         crmUsers={crmUsers}

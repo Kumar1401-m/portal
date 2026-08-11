@@ -8,7 +8,7 @@ import { queryOne, execute, transaction, hasColumn, type ResultSetHeader } from 
 import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
-import { isServiceKey } from "@/lib/services";
+import { isServiceKey, type ServiceKey } from "@/lib/services";
 import { setClientCrmAccess } from "@/lib/crm";
 import { generateMonthTasks, syncMonthToTarget } from "@/lib/task-plan";
 import { monthKey } from "@/lib/utils";
@@ -34,6 +34,7 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   const payment_plan = s(fd, "payment_plan");
   const status = s(fd, "status");
   const designer = s(fd, "designer_id");
+  const editor = s(fd, "editor_id");
 
   const columns: Record<string, string | number | null> = {
     company_name: s(fd, "company_name"),
@@ -67,6 +68,11 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   // arrived later — an un-migrated database still saves everything else.
   if (await hasColumn("clients", "category")) {
     columns.category = s(fd, "category").toUpperCase().slice(0, 10);
+  }
+  // The default editor, the video half of the pair with designer_id. Same
+  // guard, same reason.
+  if (await hasColumn("clients", "editor_id")) {
+    columns.editor_id = editor ? Number(editor) : null;
   }
 
   /* ---- Instagram automation. Guarded because these columns arrive with a
@@ -194,15 +200,18 @@ export async function updateClient(formData: FormData): Promise<void> {
   const id = Number(formData.get("id"));
   if (!id) redirect("/clients");
 
+  const hasEditorCol = await hasColumn("clients", "editor_id");
   const existing = await queryOne<{
     id: number;
     designer_id: number | null;
+    editor_id: number | null;
     caption_settings: unknown;
     placeholder_values: unknown;
     monthly_deliverables: number | null;
     monthly_posters: number | null;
   }>(
-    `SELECT id, designer_id, caption_settings, placeholder_values,
+    `SELECT id, designer_id, ${hasEditorCol ? "editor_id" : "NULL AS editor_id"},
+            caption_settings, placeholder_values,
             monthly_deliverables, monthly_posters
        FROM clients WHERE id = ?`,
     [id]
@@ -227,13 +236,28 @@ export async function updateClient(formData: FormData): Promise<void> {
     [...cols.map((k) => columns[k]), JSON.stringify(mergedCs), JSON.stringify(mergedPh), id]
   );
 
-  // Designer changed at client level → reassign this client's open tasks.
-  if (existing!.designer_id !== columns.designer_id) {
-    await execute(
-      `UPDATE deliverables SET assigned_to = ?
-       WHERE client_id = ? AND status NOT IN ('posted','completed','cancelled','rejected')`,
-      [columns.designer_id, id]
+  /*
+   * A default changed → move this client's open work to the new person.
+   *
+   * Only the work that default is *for*. This used to reassign every open task
+   * of the client, so picking a poster designer handed them the videos as
+   * well — the create and generate paths were fixed to split by service and
+   * this one was not, which meant the same choice did different things
+   * depending on where it was made.
+   *
+   * Finished work keeps the name of whoever actually did it.
+   */
+  const OPEN = "status NOT IN ('posted','completed','cancelled','rejected')";
+  const reassign = async (service: ServiceKey, to: unknown) =>
+    execute(
+      `UPDATE deliverables SET assigned_to = ? WHERE client_id = ? AND service = ? AND ${OPEN}`,
+      [to as number | null, id, service]
     );
+  if (existing!.designer_id !== columns.designer_id) {
+    await reassign("poster_designing", columns.designer_id);
+  }
+  if ("editor_id" in columns && existing!.editor_id !== columns.editor_id) {
+    await reassign("video_editing", columns.editor_id);
   }
 
   if (isSuperAdmin) {

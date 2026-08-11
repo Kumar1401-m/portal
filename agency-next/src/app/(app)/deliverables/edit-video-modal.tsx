@@ -117,12 +117,17 @@ export function EditVideoModal({
       setState(res);
       if (!res.ok) return;
       setOpen(false);
+      // A send holds the screen until it is acknowledged; a save does not.
+      // The modal has just closed under both, and only one of them is a thing
+      // the client has already received.
       toast(
         res.mode === "approval"
           ? {
-              title: `Sent to ${d.company_name} for approval`,
+              title: "Sent for approval",
               description:
-                res.message || "They can reply OK in their WhatsApp group to approve it.",
+                res.message ||
+                `${d.company_name} can reply OK in their WhatsApp group to approve it.`,
+              ack: true,
             }
           : { title: "Saved", description: `"${d.title}" updated.` }
       );

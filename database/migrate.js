@@ -182,8 +182,10 @@ async function main() {
   await addColumn('deliverables', 'metric_saves', 'metric_saves BIGINT UNSIGNED NOT NULL DEFAULT 0');
   await addColumn('deliverables', 'content_rating', 'content_rating TINYINT UNSIGNED DEFAULT NULL');
 
-  // Client-level designer assignment: every task for this client goes to this designer.
+  // Client-level default owners: a poster goes to the designer, a video to the
+  // editor. Split by service, so one client can have both.
   await addColumn('clients', 'designer_id', 'designer_id BIGINT UNSIGNED DEFAULT NULL');
+  await addColumn('clients', 'editor_id', 'editor_id BIGINT UNSIGNED DEFAULT NULL');
 
   /* ---- Cluster E: task discussion (Slack-style comments with attachments) ---- */
   await run('task_comments table', `
