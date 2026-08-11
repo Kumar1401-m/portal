@@ -167,7 +167,7 @@ export default async function DashboardPage() {
       {!isCrm ? <ServiceMix rows={serviceMix} /> : null}
 
       {/* Per-client production summary (reference image 4) */}
-      <ProductionSummary rows={production} />
+      <ProductionSummary rows={production} canEditTargets={user.role === "super_admin"} />
 
       <div className="grid gap-6">
         {/* Upcoming tasks */}

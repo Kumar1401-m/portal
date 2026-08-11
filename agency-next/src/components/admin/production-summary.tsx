@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import type { ProductionRow } from "@/lib/queries";
+import { TargetCell, TargetText } from "./target-cell";
 import { Card } from "@/components/ui/card";
 
 function Th({ children }: { children: React.ReactNode }) {
@@ -19,7 +20,14 @@ function Th({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
+export function ProductionSummary({
+  rows,
+  canEditTargets = false,
+}: {
+  rows: ProductionRow[];
+  /** Super admin only — changing this creates and deletes real tasks. */
+  canEditTargets?: boolean;
+}) {
   const totals = rows.reduce(
     (a, r) => ({
       required: a.required + r.required,
@@ -54,6 +62,7 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
           <span className="text-muted-foreground/80">
             <b>Designed</b> is work finished — the edit is done.{" "}
             <b>Pending</b> is what is still to make.
+            {canEditTargets ? " Click a Required number to change it." : ""}
           </span>
         </p>
       </div>
@@ -104,7 +113,13 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
                       {r.company_name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2.5 text-center tabular-nums">{r.required || "—"}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    {canEditTargets ? (
+                      <TargetCell clientId={r.id} clientName={r.company_name} value={r.required} />
+                    ) : (
+                      <TargetText value={r.required} />
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-center tabular-nums">{r.designed}</td>
                   {showPosters ? (
                     <td className="px-3 py-2.5 text-center tabular-nums text-orange-600 dark:text-orange-400">
