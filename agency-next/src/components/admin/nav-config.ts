@@ -4,7 +4,6 @@ import {
   CalendarCheck,
   Users,
   ClipboardList,
-  Clapperboard,
   CheckCircle2,
   Image as ImageIcon,
   CreditCard,

@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { queryOne, execute, transaction, type ResultSetHeader } from "@/lib/db";
+import { queryOne, transaction, type ResultSetHeader } from "@/lib/db";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { notifyClientById } from "@/lib/notify";
 import { sendInvoiceEmail, sendPaidInvoiceEmail } from "@/lib/email";

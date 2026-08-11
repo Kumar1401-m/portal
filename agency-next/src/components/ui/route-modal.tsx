@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
@@ -29,9 +30,8 @@ export function RouteModal({
   title?: string;
 }) {
   const router = useRouter();
-  // document.body only exists once mounted on the client.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // document.body only exists once the browser has the page.
+  const mounted = useHydrated();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

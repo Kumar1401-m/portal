@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Sparkles, Copy, Check, Save, Loader2, Wand2 } from "lucide-react";
 import {
@@ -62,10 +62,21 @@ export function CaptionStudio({
   const [caption, setCaption] = useState(initialCaption);
   const [copied, setCopied] = useState(false);
 
-  // When a fresh caption is generated, load it into the editor.
-  useEffect(() => {
+  /*
+   * When a fresh caption is generated, load it into the editor.
+   *
+   * Adjusted during render rather than from an effect. The editor's contents
+   * are real state — they are typed in — so they cannot simply be derived from
+   * the action's result; but "the action returned something new" is a change
+   * this component can notice while rendering, and React re-runs immediately
+   * without painting the stale value first. Doing it in an effect painted the
+   * old caption for a frame and cost a second render every time.
+   */
+  const [seenGen, setSeenGen] = useState(genState);
+  if (genState !== seenGen) {
+    setSeenGen(genState);
     if (genState.ok && genState.caption) setCaption(genState.caption);
-  }, [genState]);
+  }
 
   async function copy() {
     try {

@@ -29,7 +29,6 @@ import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { fmtDate } from "@/lib/utils";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 
 export const metadata = { title: "Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -214,9 +213,6 @@ export default async function DeliverablesPage({
                         canDelete={user.role === "super_admin"}
                         assignees={assignees}
                         canUploadVideo={user.role !== "crm"}
-                        postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
-                        postCountry={POST_COUNTRIES[0].key}
-                        scheduledAtLocal={utcToLocalInput(d.scheduled_at, POST_COUNTRIES[0].key)}
                       />
                     </TD>
                   </TR>

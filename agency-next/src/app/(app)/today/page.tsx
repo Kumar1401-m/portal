@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { CalendarCheck, CalendarClock } from "lucide-react";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
-import { CaptionCatchUp } from "@/components/admin/caption-catch-up";
 import {
   getDeliverables,
   getServiceCounts,
@@ -31,7 +30,6 @@ import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
 import { fmtDate, label as pretty } from "@/lib/utils";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -230,9 +228,6 @@ export default async function TodayPage({
                         canDelete={user.role === "super_admin"}
                         assignees={assignees}
                         canUploadVideo={user.role !== "crm"}
-                        postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
-                        postCountry={POST_COUNTRIES[0].key}
-                        scheduledAtLocal={utcToLocalInput(d.scheduled_at, POST_COUNTRIES[0].key)}
                       />
                     </TD>
                   </TR>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { Sparkles, X, Send, Trash2, Loader2 } from "lucide-react";
 import {
   askAssistant,
@@ -42,14 +43,31 @@ function useDraggable(ref: React.RefObject<HTMLElement | null>) {
   );
   const [dragging, setDragging] = useState(false);
 
-  useEffect(() => {
+  /*
+   * The spot this was last dragged to, read once the browser is there.
+   *
+   * Not `useSyncExternalStore`, because this is not external state — dragging
+   * owns it, and localStorage is only where it survives a reload. Not a lazy
+   * initialiser either: that runs during the server render too, where there is
+   * no localStorage, and a saved position would then differ between the
+   * server's HTML and the browser's first paint.
+   *
+   * So it is seeded on the first render that has a browser, during render
+   * rather than after it. `useHydrated` is false for the hydration pass and
+   * true from the next one, which is exactly when reading is both safe and
+   * consistent with what was sent.
+   */
+  const hydrated = useHydrated();
+  const [seeded, setSeeded] = useState(false);
+  if (hydrated && !seeded) {
+    setSeeded(true);
     try {
       const raw = localStorage.getItem(POS_KEY);
       if (raw) setPos(JSON.parse(raw) as Pos);
     } catch {
       /* first run, or storage unavailable — fall back to the default corner */
     }
-  }, []);
+  }
 
   // A saved spot can fall off screen when the window shrinks.
   useEffect(() => {

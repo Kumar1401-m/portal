@@ -12,15 +12,31 @@ function Pie({ slices, title }: { slices: { label: string; value: number }[]; ti
 
   const R = 52;
   const C = 60;
-  let angle = -Math.PI / 2; // start at twelve o'clock
+  const START = -Math.PI / 2; // twelve o'clock
+
+  /*
+   * Where each slice begins, worked out up front.
+   *
+   * A running `let angle` mutated inside the map was the obvious way to write
+   * this and the reason React's compiler refused the file: a variable declared
+   * during render and reassigned while producing the output cannot be
+   * memoised, because re-running the map would carry on from wherever the last
+   * run stopped. Each slice's start is a function of the ones before it, so it
+   * can be stated as one — and then the map is pure.
+   */
+  const startAngles = slices.reduce<number[]>(
+    (acc, s, i) => [...acc, acc[i] + (s.value / total) * Math.PI * 2],
+    [START]
+  );
 
   const paths = slices.map((s, i) => {
     const sweep = (s.value / total) * Math.PI * 2;
-    const x1 = C + R * Math.cos(angle);
-    const y1 = C + R * Math.sin(angle);
-    angle += sweep;
-    const x2 = C + R * Math.cos(angle);
-    const y2 = C + R * Math.sin(angle);
+    const from = startAngles[i];
+    const to = startAngles[i + 1];
+    const x1 = C + R * Math.cos(from);
+    const y1 = C + R * Math.sin(from);
+    const x2 = C + R * Math.cos(to);
+    const y2 = C + R * Math.sin(to);
     // A single slice can't be drawn as an arc — it's the whole circle.
     const d =
       slices.length === 1

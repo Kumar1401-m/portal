@@ -212,7 +212,8 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
     // when a client is being chased about several at once, which this rule
     // never does.
     const text = approvalChaseText([{ title: r.title, video_code: null }]);
-    (await deliver("approval_chase", key, r.group_id, text)) ? sent++ : failed++;
+    if (await deliver("approval_chase", key, r.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }
@@ -302,7 +303,8 @@ async function autoApprove(): Promise<{ sent: number; failed: number }> {
       `We haven't heard back on *${r.title}*, so we're treating it as approved ` +
       `and moving it forward.\n\n` +
       `If you'd like anything changed, reply *change* and tell us — we'll sort it out.`;
-    (await deliver("auto_approve", key, r.group_id, text)) ? sent++ : failed++;
+    if (await deliver("auto_approve", key, r.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }
@@ -354,7 +356,8 @@ async function requestFootage(): Promise<{ sent: number; failed: number }> {
     const text = footageText(
       r.titles.split("||").map((title) => ({ title, due_date: r.due_date }))
     );
-    (await deliver("footage_due", key, r.group_id, text)) ? sent++ : failed++;
+    if (await deliver("footage_due", key, r.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }
@@ -384,7 +387,8 @@ async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: n
     if (!(await claim("monthly_plan", key, { clientId: t.client_id, groupId: t.group_id }))) continue;
 
     const text = monthlyPlanText(items);
-    (await deliver("monthly_plan", key, t.group_id, text)) ? sent++ : failed++;
+    if (await deliver("monthly_plan", key, t.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }
@@ -441,7 +445,8 @@ async function remindInvoices(): Promise<{ sent: number; failed: number }> {
         payable: link.payable,
       },
     ]);
-    (await deliver("invoice_due", key, r.group_id, text)) ? sent++ : failed++;
+    if (await deliver("invoice_due", key, r.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }

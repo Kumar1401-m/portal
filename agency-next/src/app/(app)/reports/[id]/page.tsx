@@ -11,7 +11,6 @@ import { MonthPicker } from "@/components/admin/month-picker";
 import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
-import { POST_COUNTRIES, utcToLocalInput } from "@/lib/posting";
 import { monthKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -313,9 +312,6 @@ export default async function ClientReportPage({
                           canDelete={user.role === "super_admin"}
                           assignees={assignees}
                           canUploadVideo={user.role !== "crm"}
-                          postCountries={user.role === "super_admin" ? POST_COUNTRIES : []}
-                          postCountry={POST_COUNTRIES[0].key}
-                          scheduledAtLocal={utcToLocalInput(t.scheduled_at, POST_COUNTRIES[0].key)}
                         />
                       </td>
                     </tr>

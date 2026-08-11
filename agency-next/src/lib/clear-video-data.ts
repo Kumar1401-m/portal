@@ -90,7 +90,8 @@ export async function clearAllVideoData(): Promise<ClearSummary> {
   //    rows rather than before them.
   for (const key of keys) {
     try {
-      (await deleteObject(key)) ? summary.filesDeleted++ : summary.filesFailed++;
+      if (await deleteObject(key)) summary.filesDeleted++;
+      else summary.filesFailed++;
     } catch {
       summary.filesFailed++;
     }
@@ -155,7 +156,8 @@ export async function clearClientVideoData(clientId: number): Promise<ClearSumma
 
   for (const key of keys) {
     try {
-      (await deleteObject(key)) ? summary.filesDeleted++ : summary.filesFailed++;
+      if (await deleteObject(key)) summary.filesDeleted++;
+      else summary.filesFailed++;
     } catch {
       summary.filesFailed++;
     }

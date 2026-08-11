@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { Pencil, Loader2, Send, Wand2, UploadCloud, Trash2 } from "lucide-react";
 import {
   updateVideoDetails,
@@ -32,9 +32,6 @@ export function EditVideoModal({
   canDelete = false,
   assignees = [],
   canUploadVideo = true,
-  postCountries = [],
-  scheduledAtLocal = "",
-  postCountry = "india",
 }: {
   deliverable: DeliverableListRow;
   categories: CategoryOptions;
@@ -42,9 +39,6 @@ export function EditVideoModal({
   canDelete?: boolean;
   assignees?: { id: number; name: string; role: string }[];
   canUploadVideo?: boolean;
-  postCountries?: { key: string; label: string; hour?: number }[];
-  scheduledAtLocal?: string;
-  postCountry?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<VideoDetailsState>({ ok: false });
@@ -83,15 +77,26 @@ export function EditVideoModal({
   const toast = useToast();
   const captioning = genPending || autoCaptioning;
 
-  // Reset the caption editor to the latest saved value each time the modal opens.
-  useEffect(() => {
+  /*
+   * Reset the editor to the saved values each time the modal opens.
+   *
+   * Adjusted during render rather than from an effect. These four are real
+   * state — they are edited — so they cannot be derived outright, but
+   * "the modal just opened" is a change this component can see while
+   * rendering, and React re-runs before painting. From an effect it showed the
+   * previous task's caption for a frame, which on a fast click looks like the
+   * wrong task opened.
+   */
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setCaption(d.caption ?? "");
       setEditedLink(d.edited_link ?? "");
       setService(serviceOf(d));
       setCaptionNote(null);
     }
-  }, [open, d]);
+  }
 
   /*
    * Save, close, and say so somewhere that outlives the close.

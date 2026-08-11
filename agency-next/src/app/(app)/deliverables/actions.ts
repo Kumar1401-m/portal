@@ -3,7 +3,12 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
-import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, SUPER_ADMIN_ROLES, type SessionUser } from "@/lib/auth";
+import {
+  requireUser,
+  ADMIN_OR_CRM_ROLES,
+  SUPER_ADMIN_ROLES,
+  type SessionUser,
+} from "@/lib/auth";
 import {
   generateCaption,
   type ComposedCaption,
