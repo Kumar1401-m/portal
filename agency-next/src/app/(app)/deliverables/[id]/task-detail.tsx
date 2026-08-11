@@ -164,7 +164,11 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
           {/* Posters don't go through the video publisher, so the panel would
               only ever say "not scheduled" for them. */}
           {publishInfo && !isPoster ? (
-            <PublishStatus deliverableId={d.id} info={publishInfo} />
+            <PublishStatus
+              deliverableId={d.id}
+              info={publishInfo}
+              canPostNow={user.role === "super_admin"}
+            />
           ) : null}
 
           <Card>

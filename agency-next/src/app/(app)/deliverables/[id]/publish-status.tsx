@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import {
   Send,
   Loader2,
@@ -9,8 +9,10 @@ import {
   TriangleAlert,
   Clock,
   CheckCircle2,
+  Zap,
 } from "lucide-react";
-import { retryPublishAction, type RetryState } from "../actions";
+import { retryPublishAction, postNowAction, type RetryState } from "../actions";
+import { useToast } from "@/components/ui/toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
@@ -61,13 +63,45 @@ const LABEL: Record<string, string> = {
 export function PublishStatus({
   deliverableId,
   info,
+  canPostNow = false,
 }: {
   deliverableId: number;
   info: PublishInfo;
+  /** Super admin only — this puts a post on a live client account at once. */
+  canPostNow?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<RetryState, FormData>(retryPublishAction, {
     ok: false,
   });
+  const [posting, startPost] = useTransition();
+  const [confirming, setConfirming] = useState(false);
+  const toast = useToast();
+
+  /*
+   * Two clicks, not one.
+   *
+   * Everything else on this page can be undone from inside the portal. This
+   * puts a video on a client's public Instagram account the moment it is
+   * pressed, and the only way back is to delete the post — from Instagram,
+   * where the people who saw it already have.
+   */
+  function postNow() {
+    startPost(async () => {
+      const fd = new FormData();
+      fd.set("deliverable_id", String(deliverableId));
+      const res = await postNowAction({ ok: false }, fd);
+      setConfirming(false);
+      toast(
+        res.ok
+          ? { title: "Posted to Instagram", description: res.permalink || "It's live now." }
+          : {
+              title: res.pending ? "Instagram is still encoding it" : "Couldn't post it",
+              description: res.error,
+              tone: res.pending ? "success" : "error",
+            }
+      );
+    });
+  }
 
   const status = info.instagramStatus || "not_posted";
   const tone = TONE[status] ?? "muted";
@@ -170,17 +204,71 @@ export function PublishStatus({
             attempts is the most stuck a video can be, and it was the one case
             with no button — the state that most needs a push had none. */}
         {!isTerminal ? (
-          <form action={formAction}>
-            <input type="hidden" name="deliverable_id" value={deliverableId} />
-            <button type="submit" disabled={pending} className={buttonClasses({ size: "sm" })}>
-              {pending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex flex-wrap items-center gap-2">
+            <form action={formAction}>
+              <input type="hidden" name="deliverable_id" value={deliverableId} />
+              <button
+                type="submit"
+                disabled={pending || posting}
+                className={buttonClasses({ variant: "secondary", size: "sm" })}
+              >
+                {pending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCw className="h-4 w-4" />
+                )}
+                {info.attempts > 0 ? "Try again at its slot" : "Put it in the queue"}
+              </button>
+            </form>
+
+            {/* Skips the clock, not the requirements: without an account or a
+                video there is still nothing to send, and the panel says so
+                above rather than letting this fail. */}
+            {canPostNow ? (
+              confirming ? (
+                <span className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={postNow}
+                    disabled={posting}
+                    className={buttonClasses({ size: "sm" })}
+                  >
+                    {posting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Zap className="h-4 w-4" />
+                    )}
+                    {posting ? "Posting…" : "Yes — post it live"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    disabled={posting}
+                    className={buttonClasses({ variant: "ghost", size: "sm" })}
+                  >
+                    Cancel
+                  </button>
+                </span>
               ) : (
-                <RotateCw className="h-4 w-4" />
-              )}
-              {info.attempts > 0 ? "Try posting again" : "Put it in the queue now"}
-            </button>
-          </form>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(true)}
+                  disabled={posting}
+                  className={buttonClasses({ size: "sm" })}
+                  title="Publish to the client's Instagram account immediately"
+                >
+                  <Zap className="h-4 w-4" /> Post now
+                </button>
+              )
+            ) : null}
+          </div>
+        ) : null}
+
+        {confirming ? (
+          <p className="text-xs text-muted-foreground">
+            This goes on {info.hasInstagramAccount ? "the client's" : "their"} Instagram account
+            straight away, without waiting for its slot. It can only be removed from Instagram.
+          </p>
         ) : null}
 
         {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}

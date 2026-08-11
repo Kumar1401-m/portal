@@ -279,6 +279,72 @@ async function tellTheClient(item: PublishQueueItem, permalink: string | null): 
   }
 }
 
+/**
+ * Publish one video now, without waiting for its slot.
+ *
+ * The scheduler answers "when", and the answer is sometimes "not for another
+ * six hours" when what is wanted is "now". Everything else the publisher
+ * checks still applies — an Instagram account, a video, a token — because
+ * those are not preferences, they are what the Graph API needs. Only the
+ * clock and the client's auto-publish preference are set aside, and both are
+ * for the same reason: a person is standing here asking for this one post, so
+ * neither "it isn't six o'clock" nor "don't do this unattended" is an answer.
+ *
+ * Goes through exactly the same claim and publish path as the automatic run.
+ * A second implementation of publishing would be a second set of bugs, and
+ * the claim is what stops this racing the scheduled run happening at the same
+ * moment.
+ */
+export async function publishNow(
+  deliverableId: number
+): Promise<{ ok: true; permalink: string | null } | { ok: false; error: string; pending?: boolean }> {
+  const { retryPublish, claimForPublish, getPublishInfo } = await import("./instagram");
+
+  const info = await getPublishInfo(deliverableId);
+  if (!info) return { ok: false, error: "Publishing isn't set up on this database." };
+  if (info.instagramStatus === "posted") return { ok: false, error: "This is already on Instagram." };
+
+  /*
+   * Only the blockers a person cannot overrule from here.
+   *
+   * "Auto-publishing is off" and "no posting time is set" both stop the
+   * unattended run and neither should stop this one — pressing the button is
+   * the missing consent and the missing time. The rest are real: without an
+   * account or a video there is nothing to send.
+   */
+  const fatal = info.blockers.filter(
+    (b) => !/^Auto-publishing is off/.test(b) && !/^No posting time is set/.test(b) && !/^It has used all/.test(b)
+  );
+  if (fatal.length) return { ok: false, error: fatal[0] };
+
+  // Resets the attempt count and puts the row in the one state the claim
+  // accepts — the same door "Try posting again" uses.
+  await retryPublish(deliverableId);
+
+  const runId = `manual-${deliverableId}`;
+  const claim = await claimForPublish(deliverableId, runId);
+  if (!claim.ok) {
+    return {
+      ok: false,
+      error:
+        claim.reason === "claimed_elsewhere"
+          ? "The publisher is already working on this one — give it a minute."
+          : `Couldn't take it for publishing (${claim.reason}).`,
+    };
+  }
+
+  const out = await publishClaimed(claim.item, runId);
+  if (!out.ok) return { ok: false, error: out.error };
+  if ("pending" in out) {
+    return {
+      ok: false,
+      pending: true,
+      error: "Instagram is still encoding the video. It will go out on the next run, within 15 minutes.",
+    };
+  }
+  return { ok: true, permalink: out.permalink };
+}
+
 export type RunSummary = {
   considered: number;
   posted: number;

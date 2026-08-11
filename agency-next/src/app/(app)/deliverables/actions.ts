@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
-import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, type SessionUser } from "@/lib/auth";
+import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES, SUPER_ADMIN_ROLES, type SessionUser } from "@/lib/auth";
 import {
   generateCaption,
   type ComposedCaption,
@@ -566,6 +566,28 @@ async function applyStatus(
     updates.approval_status = "rejected";
     updates.posting_status = "rejected";
   }
+
+  /*
+   * Pulling a video back takes it out of the publish queue.
+   *
+   * Nothing did this. The queue selects on `instagram_status = 'scheduled'`
+   * and nothing but publishing ever cleared it, so a video that had been
+   * scheduled and was then rejected, sent back for changes, or returned to the
+   * client for another look stayed queued the whole time — and would go live
+   * on the client's feed while they were still looking at it, or after they
+   * had turned it down. Rejecting even set `posting_status = 'rejected'` while
+   * leaving `instagram_status` alone, so the board said one thing and the
+   * publisher read another.
+   *
+   * A video already posted is untouched: that is history, not a queue entry.
+   */
+  if (["review", "content_review", "changes_requested", "rejected", "cancelled"].includes(effective)) {
+    if (d.instagram_status !== "posted") {
+      updates.instagram_status = "not_posted";
+      if (effective !== "rejected") updates.posting_status = "not_posted";
+      updates.scheduled_at = null;
+    }
+  }
   // Scheduling has to reach instagram_status too, or the publisher never sees it.
   //
   // An admin pressing Schedule is a deliberate act and is always honoured —
@@ -777,4 +799,48 @@ export async function retryPublishAction(
   revalidatePath(`/deliverables/${id}`);
   revalidatePath("/deliverables");
   return { ok: true };
+}
+
+/* ------------------------------ Post it now ------------------------------ */
+
+export type PostNowState = { ok: boolean; error?: string; permalink?: string; pending?: boolean };
+
+/**
+ * Publish this video to Instagram right now.
+ *
+ * The scheduler answers "when", and sometimes the answer needed is "now" —
+ * a post that missed its slot, a client on the phone, a date that was moved
+ * once too often. Waiting up to fifteen minutes for the next poll to agree
+ * with you is not a workflow.
+ *
+ * Super admin only, and not because of the code: this is the one button in the
+ * portal that puts something on a client's public account the instant it is
+ * pressed. Everything else can be undone from inside the portal; this cannot.
+ */
+export async function postNowAction(
+  _prev: PostNowState,
+  formData: FormData
+): Promise<PostNowState> {
+  const user = await requireUser(SUPER_ADMIN_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing task." };
+
+  const row = await queryOne<{ client_id: number }>(
+    "SELECT client_id FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!row) return { ok: false, error: "Task not found." };
+  if (!(await canAccessClient(user, row.client_id))) {
+    return { ok: false, error: "You don't have access to this client." };
+  }
+
+  const { publishNow } = await import("@/lib/instagram-publish");
+  const res = await publishNow(id);
+
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/deliverables");
+  revalidatePath("/today");
+
+  if (!res.ok) return { ok: false, error: res.error, pending: res.pending };
+  return { ok: true, permalink: res.permalink ?? undefined };
 }
