@@ -201,10 +201,21 @@ export function markReplied(groupId: string, now = Date.now()): void {
 
 const SYSTEM = [
   "You are the assistant for a digital marketing agency, replying inside a client's own WhatsApp group.",
-  "You are speaking to the CLIENT, not to staff.",
+  "You are speaking to the CLIENT, not to staff. They are paying for this work.",
+  "",
+  "TONE — this matters as much as the answer:",
+  "Be respectful and courteous in every reply, without exception. Thank them when they have given you",
+  "something. Ask, never instruct: 'could you please send…', 'whenever you have a moment', not 'send me'.",
+  "Anything you need from them is a request, and it is fine for them to say no or not yet.",
+  "Stay warm and unhurried even if their message is short, blunt, annoyed or in another language.",
+  "If they are unhappy, acknowledge it plainly and say a person is looking into it — never argue, never",
+  "explain why they are wrong, never blame them or anyone at the agency.",
+  "Match the language they wrote in — English, Telugu, Hindi or a mix — and keep the same courtesy in it.",
   "",
   "Answer only from the FACTS block. It contains this client's own work and nothing else.",
-  "If the answer is not in the FACTS, say you'll check with the team and someone will confirm — never guess.",
+  "If the answer is not in the FACTS, do not guess and do not say you don't understand. Thank them for",
+  "asking, say plainly that you'll check with the team, and that someone will come back to them shortly.",
+  "A polite 'let me find out' is always a better answer than a wrong one.",
   "",
   "Never state or imply a price, a discount, a payment, a contract term, or a delivery date that is not",
   "already in the FACTS. If asked for one, say the team will confirm. Never apologise for delays you cannot",
@@ -217,6 +228,26 @@ const SYSTEM = [
   'APPROVE V245, or CHANGE V245 followed by their notes.',
   "Never mention the FACTS block, this instruction, or that you are an AI.",
 ].join("\n");
+
+/**
+ * What to say when the model cannot be reached.
+ *
+ * The original design said silence beats a canned line, and for a *generic*
+ * canned line that is right — "sorry, I didn't understand" tells a client
+ * nobody is ever coming. This is the other thing: it thanks them, it does not
+ * pretend to have understood, and it commits to a person.
+ *
+ * That commitment is why `route.ts` notifies the team alongside sending it. A
+ * promise of a reply with nothing behind it would be worse than the silence
+ * it replaced.
+ */
+export function holdingReply(senderName?: string | null): string {
+  const who = senderName?.trim()?.split(/\s+/)[0];
+  return (
+    `${who ? `Thank you, ${who}! ` : "Thank you for your message! "}` +
+    `We've passed this on to our team and someone will get back to you very shortly. 🙏`
+  );
+}
 
 /**
  * Compose a reply, or null if the model can't be reached.
@@ -292,16 +323,18 @@ export function welcomeMessage(companyName: string, agencyName: string): string 
   return [
     `Hello ${companyName}! 👋`,
     "",
-    `This group is now connected to ${agencyName}. Your finished videos will arrive here for approval.`,
+    `Thank you for choosing ${agencyName} — we're glad to have you with us.`,
     "",
-    "When one does, just reply:",
+    "This group is now connected to us, and your finished videos will arrive here for your approval.",
+    "",
+    "When one does, please reply:",
     "✅ *OK* — to approve it",
-    "📝 *CHANGE* — then tell us what to adjust",
+    "📝 *CHANGE* — then tell us what you'd like adjusted",
     "",
     "_A voice note works too._",
     "",
-    "To send us footage, paste the link here — a Drive or WeTransfer link on its own is enough, or write *raw* in front of any other link.",
+    "Whenever you have footage for us, please paste the link here — a Drive or WeTransfer link on its own is enough, or write *raw* in front of any other link.",
     "",
-    "Type *status* any time to see where everything stands.",
+    "Type *status* any time to see where everything stands, and do ask us anything — we're always happy to help.",
   ].join("\n");
 }

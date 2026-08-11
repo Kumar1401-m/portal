@@ -17,9 +17,11 @@ import { sendTextToGroup } from "@/lib/whatsapp-service-client";
 import {
   clientFacts,
   composeReply,
+  holdingReply,
   shouldAutoReply,
   markReplied,
 } from "@/lib/whatsapp-ai";
+import { notifyAdmins } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -61,11 +63,30 @@ async function maybeAnswer(input: {
     const facts = await clientFacts(clientId);
     if (!facts) return false;
 
-    const reply = await composeReply(facts, input.message || "", input.senderName);
-    if (!reply) return false;
+    /*
+     * A question we cannot answer still gets an answer.
+     *
+     * When the model is switched off or unreachable, the client used to get
+     * silence — which, to someone who has just asked their agency a question,
+     * is indistinguishable from being ignored. They get a thank-you and a
+     * promise of a person instead, and the notification below is what makes
+     * that promise true rather than a nicer way of ignoring them.
+     */
+    const composed = await composeReply(facts, input.message || "", input.senderName);
+    const reply = composed ?? holdingReply(input.senderName);
 
     const sent = await sendTextToGroup(input.groupId, reply);
     if (!sent.ok) return false;
+
+    if (!composed) {
+      await notifyAdmins(
+        "general",
+        `${facts.companyName} asked a question`,
+        `${input.senderName || "They"} wrote: "${(input.message || "").slice(0, 200)}". ` +
+          `They've been told someone will come back to them.`,
+        `/clients/${clientId}`
+      ).catch(() => {});
+    }
 
     markReplied(input.groupId);
 

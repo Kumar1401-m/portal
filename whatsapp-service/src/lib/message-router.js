@@ -130,7 +130,14 @@ class MessageRouter {
           await this.replySafely(msg.groupId, reason);
           return { handled: false, reason: 'ambiguous' };
         }
-        await this.replySafely(msg.groupId, `⚠️ Couldn't record that: ${reason}`);
+        // Apologetic, and never blaming: the client typed what they were
+        // asked to type, and if it did not land that is our problem to solve
+        // with them rather than a mistake to point out.
+        await this.replySafely(
+          msg.groupId,
+          `🙏 Sorry — we couldn't record that (${reason}). ` +
+            `Could you please try once more? Our team is on hand if it still doesn't go through.`
+        );
         return { handled: false, reason: 'portal_rejected' };
       }
       // A 5xx or unreachable portal is our problem, not the client's. Stay
@@ -159,7 +166,14 @@ class MessageRouter {
     return { handled: true, videoCode: settledCode, command: parsed.command };
   }
 
-  /** Confirm in the group, so the client knows it registered. */
+  /**
+   * Confirm in the group, so the client knows it registered.
+   *
+   * Thanks first, and the fact second. These are the only messages a client
+   * gets from us without a person behind them, and a bare "Approved." reads
+   * like a receipt printer — the client has just done something for us, and
+   * the reply should say so.
+   */
   async acknowledge(groupId, command, videoCode, data) {
     const title = data?.title ? ` — _${data.title}_` : '';
     // A code is shown only if there is one; the client no longer sees codes
@@ -167,10 +181,10 @@ class MessageRouter {
     const ref = videoCode ? `*${videoCode}* ` : '';
     const text =
       command === 'approve'
-        ? `✅ ${ref}Approved${title}\nThank you! We'll schedule it for posting.`
+        ? `✅ Thank you! ${ref}Approved${title}\nWe'll get it scheduled for posting.`
         : command === 'change'
-          ? `📝 Noted${title}\nYour changes have gone to the editor.`
-          : `🚫 ${ref}Marked as rejected${title}\nWe'll follow up with you.`;
+          ? `📝 Thank you — noted${title}\nYour changes have gone to the editor, and we'll share the updated version here soon.`
+          : `🚫 Understood${title}\nWe've marked it as rejected. Someone from our team will follow up with you shortly.`;
 
     await this.replySafely(groupId, text);
   }

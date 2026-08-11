@@ -363,10 +363,11 @@ export function buildApprovalMessages(
    * when typed, and is the tie-breaker when two videos are waiting at once.
    */
   followUps.push(
-    `Please review${caption ? " the video and the caption" : ""} and reply:\n\n` +
+    `Whenever you have a moment, could you please review${caption ? " the video and the caption" : " it"} and reply:\n\n` +
       `✅ *OK* to approve\n` +
-      `📝 *CHANGE* — then tell us what to adjust\n\n` +
-      `_A voice note works too._`
+      `📝 *CHANGE* — then tell us what you'd like adjusted\n\n` +
+      `_A voice note works too._\n\n` +
+      `Thank you! 🙏`
   );
 
   return { mediaCaption, followUps };

@@ -104,9 +104,9 @@ export function footageText(items: FootageItem[]): string {
   const n = items.length;
 
   const head = oneDate
-    ? `We're due to start editing on *${fmtDate(items[0].due_date)}* and we don't have your footage yet.\n\n` +
+    ? `Hello! We're due to start editing on *${fmtDate(items[0].due_date)}*, and we're still waiting on your footage.\n\n` +
       `${n === 1 ? "This one" : `These ${n}`}:`
-    : `We don't have your footage for ${n === 1 ? "this" : `these ${n}`} yet:`;
+    : `Hello! Whenever you have a moment, could you please send us the footage for ${n === 1 ? "this" : `these ${n}`}:`;
 
   const lines = listed
     .map((i) => (oneDate ? `• ${i.title}` : `• ${i.title}${i.due_date ? ` — ${fmtDate(i.due_date)}` : ""}`))
@@ -114,8 +114,8 @@ export function footageText(items: FootageItem[]): string {
 
   return (
     `${head}\n${lines}${andMore(n, listed.length)}\n\n` +
-    `Just reply with the link — a Drive or WeTransfer link on its own is enough, ` +
-    `or write *raw* in front of any other link.`
+    `Please just reply with the link — a Drive or WeTransfer link on its own is enough, ` +
+    `or write *raw* in front of any other link.\n\nThank you! 🙏`
   );
 }
 
@@ -133,8 +133,8 @@ export function approvalChaseText(items: WaitingItem[]): string {
   if (items.length === 1) {
     return (
       `Just a gentle reminder — *${items[0].title}* is still waiting for your approval.\n\n` +
-      `Reply *OK* to approve, or *change* followed by what you'd like different. ` +
-      `A voice note works too.`
+      `Whenever you're free, please reply *OK* to approve, or *change* followed by what you'd like different. ` +
+      `A voice note works too.\n\nThank you! 🙏`
     );
   }
 
@@ -148,9 +148,10 @@ export function approvalChaseText(items: WaitingItem[]): string {
     `A gentle reminder — ${items.length} are still waiting for your approval:\n\n` +
     `${lines}${andMore(items.length, listed.length)}\n\n` +
     (example
-      ? `Reply *OK ${example}* to approve one, or *change ${example}* followed by what you'd like different. ` +
+      ? `Whenever you're free, please reply *OK ${example}* to approve one, or *change ${example}* followed by what you'd like different. ` +
         `A voice note works too.`
-      : `Reply *OK* against the one you mean, or *change* followed by what you'd like different.`)
+      : `Whenever you're free, please reply *OK* against the one you mean, or *change* followed by what you'd like different.`) +
+    `\n\nThank you! 🙏`
   );
 }
 
@@ -162,9 +163,10 @@ export function monthlyPlanText(items: PlanItem[]): string {
     .map((i) => `• ${i.due_date ? fmtDate(i.due_date) : "TBC"} — ${i.title}`)
     .join("\n");
   return (
-    `*This month's plan* — ${items.length} piece${items.length === 1 ? "" : "s"} of content:\n\n` +
+    `Hello! Here's *this month's plan* — ${items.length} piece${items.length === 1 ? "" : "s"} of content:\n\n` +
     `${lines}${andMore(items.length, listed.length)}\n\n` +
-    `We'll send each one here for your approval before it goes out.`
+    `We'll send each one here for your approval before it goes out. ` +
+    `Do let us know if you'd like anything changed — we're happy to adjust. 🙏`
   );
 }
 
@@ -191,11 +193,11 @@ export function invoiceText(items: InvoiceItem[]): string {
     const i = items[0];
     const due = i.due_date ? `, which was due ${fmtDate(i.due_date)}` : "";
     return (
-      `A quick reminder about invoice *${i.invoice_no}* for *${money(i.total)}*${due}.\n\n` +
+      `Hello! Just a gentle reminder about invoice *${i.invoice_no}* for *${money(i.total)}*${due}.\n\n` +
       (i.payable
-        ? `You can pay it here — it opens straight into UPI, card or net banking:\n${i.payUrl}`
-        : `You can view and pay it in your portal:\n${i.payUrl}`) +
-      `\n\nDo let us know if anything looks wrong.`
+        ? `Whenever convenient, you can pay it here — it opens straight into UPI, card or net banking:\n${i.payUrl}`
+        : `Whenever convenient, you can view and pay it in your portal:\n${i.payUrl}`) +
+      `\n\nIf anything looks wrong, please do let us know and we'll sort it out. Thank you! 🙏`
     );
   }
 
@@ -208,9 +210,9 @@ export function invoiceText(items: InvoiceItem[]): string {
     )
     .join("\n");
   return (
-    `A quick reminder about ${items.length} unpaid invoices, *${money(total)}* in total:\n\n` +
+    `Hello! Just a gentle reminder about ${items.length} unpaid invoices, *${money(total)}* in total:\n\n` +
     `${lines}${andMore(items.length, Math.min(items.length, MAX_LISTED))}\n\n` +
-    `Do let us know if anything looks wrong.`
+    `If anything looks wrong, please do let us know and we'll sort it out. Thank you! 🙏`
   );
 }
 

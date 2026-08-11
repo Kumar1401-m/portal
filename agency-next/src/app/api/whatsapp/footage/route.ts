@@ -83,7 +83,11 @@ export async function POST(request: Request) {
     attached: true,
     deliverableId: task.id,
     text:
-      `Got it — thanks! Attached to *${task.title}* and the team can start editing.` +
-      (left ? `\n\nStill waiting on footage for ${left} more.` : ""),
+      `🙏 Thank you! We've received it and attached it to *${task.title}* — our team will start editing.` +
+      // A request, not a tally. "Still waiting on 3" reads as a complaint
+      // about the client on the one message thanking them for helping.
+      (left
+        ? `\n\nWhenever you have a moment, could you please send the footage for ${left} more as well?`
+        : ""),
   });
 }
