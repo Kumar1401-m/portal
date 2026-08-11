@@ -26,28 +26,31 @@ const ALL_STAFF: Role[] = ["super_admin", "admin", "poster_designer"];
 /** crm sees a subset of the admin modules, always scoped to its assigned clients. */
 const ADMIN_OR_CRM: Role[] = ["super_admin", "admin", "crm"];
 /**
- * A video editor's whole portal: their own work, and the task they open from it.
- *
- * Nothing else appears — not clients, not payments, not the posters board.
- * The nav is the honest list of what the role can open, so an editor never
- * clicks something only to be bounced back to where they started.
- */
-const EDITOR: Role[] = ["video_editor"];
-/**
  * Today's Tasks is the whole agency's board filtered to one date.
  *
- * That is the right screen for an admin running the day and for a crm chasing
- * their clients, and the wrong one for the two roles that now have My work: an
- * editor was being shown every client's task when their own list is what they
- * came for, and a super admin already has the Dashboard and Tasks, where the
- * same rows arrive with every filter rather than just the one.
+ * Everyone who runs the day keeps it. It came off the video editor's nav only,
+ * because it showed them every client's task when their own list is what they
+ * opened it for — only designers were ever scoped to themselves there — and My
+ * work is that list.
+ *
+ * A video editor's whole portal is therefore My work and the task they open
+ * from it. Nothing else appears — not clients, not payments, not the posters
+ * board. The nav is the honest list of what the role can open, so an editor
+ * never clicks something only to be bounced back to where they started.
  */
-const DAY_BOARD: Role[] = ["admin", "poster_designer", "crm"];
+const DAY_BOARD: Role[] = ["super_admin", "admin", "poster_designer", "crm"];
+/**
+ * My work is one person's own assigned work, so it is for the people work is
+ * assigned to. A super admin's would be empty, and an empty screen in the nav
+ * of the person who runs the place is just a wrong turn — they have the
+ * Dashboard and Tasks, which show everybody's.
+ */
+const MAKERS: Role[] = ["admin", "poster_designer", "video_editor"];
 
-/** Admins see every module bar Today's Tasks — see DAY_BOARD for why. */
+/** Admins see every module. */
 export const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ADMIN_OR_CRM, ready: true },
-  { label: "My work", href: "/my-work", icon: Briefcase, roles: [...ALL_STAFF, ...EDITOR], ready: true },
+  { label: "My work", href: "/my-work", icon: Briefcase, roles: MAKERS, ready: true },
   { label: "Today's Tasks", href: "/today", icon: CalendarCheck, roles: DAY_BOARD, ready: true },
   { label: "Clients", href: "/clients", icon: Users, roles: ADMIN_OR_CRM, ready: true },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true },
