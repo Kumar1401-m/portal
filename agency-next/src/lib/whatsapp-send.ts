@@ -11,10 +11,17 @@
  */
 import "server-only";
 import { prepareSend, markQueued, recordSendStatus } from "./whatsapp-approvals";
-import { sendVideoToGroup } from "./whatsapp-service-client";
+import { sendVideoToGroup, sendTextToGroup } from "./whatsapp-service-client";
 
 export type DeliveryResult =
-  | { ok: true; videoCode: string; clientName: string; sentAsLink: boolean }
+  | {
+      ok: true;
+      videoCode: string;
+      clientName: string;
+      sentAsLink: boolean;
+      /** False when the video went but the "please review" message did not. */
+      asked: boolean;
+    }
   /**
    * Nothing was attempted, and that is not necessarily a problem — a client
    * with no WhatsApp group is a client who approves by email. Kept distinct
@@ -41,7 +48,7 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
     groupId: video.groupId,
     videoUrl: video.videoUrl,
     watchUrl: video.watchUrl,
-    caption: video.caption,
+    caption: video.mediaCaption,
     filename: `${video.videoCode}.mp4`,
   });
 
@@ -58,17 +65,51 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
     return { ok: false, error: result.error, unreachable: result.unreachable };
   }
 
+  /*
+   * Then the question, as its own message.
+   *
+   * After the video, never with it: the first message is the post exactly as
+   * it will appear, and this one is the agency asking about it. Bundled
+   * together, a client checking the caption had to read past our reply
+   * instructions to find where their copy ended.
+   *
+   * Best-effort, and deliberately not able to fail the delivery. The video is
+   * already in the group by this point; reporting the whole send as failed
+   * would invite a retry, and the retry would post the video a second time.
+   * A client left holding a video with no question is recoverable by one
+   * message — a client sent the same video twice is not.
+   */
+  let asked = true;
+  for (const text of video.followUps) {
+    const sent = await sendTextToGroup(video.groupId, text);
+    if (!sent.ok) {
+      asked = false;
+      console.warn(
+        `[whatsapp] ${video.videoCode} sent, but the follow-up did not:`,
+        sent.error
+      );
+      break;
+    }
+  }
+
   return {
     ok: true,
     videoCode: video.videoCode,
     clientName: video.clientName,
     sentAsLink: Boolean(result.sentAsLink),
+    asked,
   };
 }
 
 /** One sentence describing what the client received, for the UI to echo back. */
 export function describeDelivery(r: Extract<DeliveryResult, { ok: true }>): string {
-  return r.sentAsLink
-    ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got the caption and a link to watch it. They can still reply APPROVE ${r.videoCode}.`
-    : `${r.videoCode} sent to ${r.clientName} on WhatsApp. They'll reply APPROVE ${r.videoCode} or CHANGE ${r.videoCode}.`;
+  const what = r.sentAsLink
+    ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got the caption and a link to watch it.`
+    : `${r.videoCode} sent to ${r.clientName} on WhatsApp, with the caption.`;
+
+  // Said plainly, because it is the one case where the client has the video
+  // and does not know what is being asked of them.
+  return r.asked
+    ? `${what} They can reply OK to approve, or CHANGE with what to adjust.`
+    : `${what} The "please review" message did not go through — send it by hand, or press send again once WhatsApp is back.`;
 }

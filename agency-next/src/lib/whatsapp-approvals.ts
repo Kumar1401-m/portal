@@ -233,7 +233,10 @@ export type SendableVideo = {
    * can still reply APPROVE from the same group.
    */
   watchUrl: string | null;
-  caption: string;
+  /** Rides with the video: the post, as the client will see it published. */
+  mediaCaption: string;
+  /** Sent after it, in order. The question, and the caption when it was too long. */
+  followUps: string[];
 };
 
 /**
@@ -307,61 +310,88 @@ export async function prepareSend(
       groupId: group.group_id,
       videoUrl,
       watchUrl: d.cloud_video_key ? buildVideoPermalink(d.id, d.cloud_video_key) : d.edited_link,
-      caption: buildCaption(videoCode, d.title, composeCaption(d.caption, d.hashtags)),
+      ...buildApprovalMessages(d.title, composeCaption(d.caption, d.hashtags)),
     },
   };
 }
 
 /**
- * The caption the client sees.
+ * How much text can ride along with the video.
  *
- * The reply syntax shown here must stay identical to what the service's parser
- * accepts — if they drift, clients follow instructions that no longer work.
+ * WhatsApp allows about 1024 characters on a media caption and silently
+ * truncates beyond it. Kept under, because the caption on this message is the
+ * copy the client is approving — a truncated one is a client approving
+ * something they were not shown.
  */
-export function buildCaption(
-  videoCode: string,
+const MEDIA_CAPTION_LIMIT = 950;
+
+/**
+ * The two messages a client gets, in the order they should read them.
+ *
+ * One message used to carry the video, the caption and the reply instructions
+ * together, with the instructions glued to the end of the copy. That is the
+ * wrong shape twice over: the thing being approved and the question about it
+ * are different things, and a client who wants to check the caption has to
+ * read past our own words to find where it ends.
+ *
+ * So: the video and its caption first — exactly the post as it will appear —
+ * then a short message asking the question. When the caption is too long to
+ * ride with the video it becomes its own message rather than being cut, since
+ * a truncated caption is a client approving something they were not shown.
+ *
+ * The reply syntax here must stay identical to what the service's parser
+ * accepts. If they drift, clients follow instructions that no longer work.
+ */
+export function buildApprovalMessages(
   title?: string | null,
   postCaption?: string | null
-): string {
-  /*
-   * The caption travels with the video.
-   *
-   * Approving here approves what gets published, and the caption is half of
-   * that — it carries the offer, the phone number and the call to action. Left
-   * out, the client was approving a silent video and first saw the words under
-   * their own live post, which is the worst possible moment to disagree with
-   * them.
-   *
-   * Trimmed, because WhatsApp truncates a long message behind "Read more" and
-   * a caption the client has to expand is one they will skim.
-   */
+): { mediaCaption: string; followUps: string[] } {
   const caption = (postCaption || "").trim();
-  const shown = caption.length > 700 ? `${caption.slice(0, 699)}…` : caption;
+  const heading = `📹 *Video Ready*
+
+${title ? `_${title}_
+
+` : ""}`;
+  const followUps: string[] = [];
+
+  const withCaption = `${heading}${caption}`;
+  let mediaCaption: string;
+
+  if (!caption) {
+    mediaCaption = heading.trimEnd();
+  } else if (withCaption.length <= MEDIA_CAPTION_LIMIT) {
+    mediaCaption = withCaption;
+  } else {
+    // Too long to travel with the video, so it travels on its own. Whole,
+    // because this is the text that goes under their post.
+    mediaCaption = heading.trimEnd();
+    followUps.push(`*The caption:*
+
+${caption}`);
+  }
 
   /*
-   * No video code on the message.
+   * No video code asked for.
    *
    * It was there so a reply could be matched to a video, and clients did not
    * use it — they answer the message in front of them, the way anyone answers
-   * a chat. Asking them to copy a reference first made the common case
-   * awkward and the reply fail when they didn't.
-   *
-   * What replaces it is the group: a reply is matched to whatever this group
-   * was last asked about, so "ok" is enough. `videoCode` is still accepted
-   * when typed, and is the tie-breaker on the rare occasion two videos are
-   * waiting in one group at once.
+   * a chat. What replaces it is the group: a reply is matched to whatever this
+   * group was last asked about, so "ok" is enough. A code is still accepted
+   * when typed, and is the tie-breaker when two videos are waiting at once.
    */
-  void videoCode;
+  followUps.push(
+    `Please review${caption ? " the video and the caption" : ""} and reply:
 
-  return (
-    `📹 *Video Ready*\n\n` +
-    (title ? `_${title}_\n\n` : "") +
-    (shown ? `${shown}\n\n` : "") +
-    `Please review${shown ? " the video and caption" : ""} and reply:\n\n` +
-    `✅ *OK* to approve\n` +
-    `📝 *CHANGE* — then tell us what to adjust\n\n` +
-    `_A voice note works too._`
+` +
+      `✅ *OK* to approve
+` +
+      `📝 *CHANGE* — then tell us what to adjust
+
+` +
+      `_A voice note works too._`
   );
+
+  return { mediaCaption, followUps };
 }
 
 /** Mark a video as handed to the WhatsApp service. */
