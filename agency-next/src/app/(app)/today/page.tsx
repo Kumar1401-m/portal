@@ -17,7 +17,6 @@ import {
   contentStatusLabel,
   editorStatusLabel,
   editorStatusTone,
-  FILTER_STATUSES,
   postStatusLabel,
   postStatusTone,
 } from "@/lib/constants";
@@ -25,11 +24,11 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { ColumnFilter } from "@/components/admin/column-filter";
+import { TaskFilters } from "@/components/admin/task-filters";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
-import { fmtDate, label as pretty } from "@/lib/utils";
+import { fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -114,6 +113,19 @@ export default async function TodayPage({
 
       <ServiceTabs basePath="/today" active={service} counts={counts} params={params} />
 
+      {/* Out in the open, not behind a funnel in the heading.
+          Hiding them saved a strip of screen and cost the thing the strip was
+          for: you could no longer see what the board could be narrowed by
+          without clicking each heading to find out. */}
+      <TaskFilters
+        basePath="/today"
+        params={params}
+        categories={categories}
+        clients={clients}
+        assignees={assignees}
+        showSearch={false}
+        showMonth={false}
+      />
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
@@ -140,19 +152,10 @@ export default async function TodayPage({
             <THead>
               <tr>
                 <th className="w-10 text-right">#</th>
-                <th>
-                  <ColumnFilter label="Organization" name="client" value={params.client || ""} basePath="/today" params={params}
-                    options={clients.map((c) => ({ value: String(c.id), label: c.company_name }))} />
-                </th>
-                <th>
-                  <ColumnFilter label="Creative type" name="category" value={params.category || ""} basePath="/today" params={params}
-                    options={categories.map((c) => ({ value: c, label: c }))} />
-                </th>
+                <th>Organization</th>
+                <th>Creative type</th>
                 <th className="whitespace-nowrap">Schedule date</th>
-                <th>
-                  <ColumnFilter label="Content status" name="status" value={params.status || ""} basePath="/today" params={params}
-                    options={FILTER_STATUSES.map((v) => ({ value: v, label: pretty(v) }))} />
-                </th>
+                <th>Content status</th>
                 <th>Design status</th>
                 <th>Post status</th>
                 <th>Caption</th>

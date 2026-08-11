@@ -21,9 +21,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { ColumnFilter } from "@/components/admin/column-filter";
-import { FILTER_STATUSES } from "@/lib/constants";
-import { label as pretty } from "@/lib/utils";
+import { TaskFilters } from "@/components/admin/task-filters";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -82,6 +80,16 @@ export default async function DeliverablesPage({
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
 
+      {/* The same filter bar Today's Tasks carries, in the same place. Two
+          boards showing the same rows should not be filtered two ways. */}
+      <TaskFilters
+        basePath="/deliverables"
+        params={params}
+        categories={categories}
+        clients={clients}
+        assignees={assignees}
+      />
+
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
           <p className="p-10 text-center text-sm text-muted-foreground">
@@ -100,19 +108,10 @@ export default async function DeliverablesPage({
               <THead>
                 <tr>
                   <th className="w-10 text-right">#</th>
-                  <th>
-                    <ColumnFilter label="Organization" name="client" value={params.client || ""} basePath="/deliverables" params={params}
-                      options={clients.map((c) => ({ value: String(c.id), label: c.company_name }))} />
-                  </th>
-                  <th>
-                    <ColumnFilter label="Creative type" name="category" value={params.category || ""} basePath="/deliverables" params={params}
-                      options={categories.map((c) => ({ value: c, label: c }))} />
-                  </th>
+                  <th>Organization</th>
+                  <th>Creative type</th>
                   <th className="whitespace-nowrap">Schedule date</th>
-                  <th>
-                    <ColumnFilter label="Content status" name="status" value={params.status || ""} basePath="/deliverables" params={params}
-                      options={FILTER_STATUSES.map((v) => ({ value: v, label: pretty(v) }))} />
-                  </th>
+                  <th>Content status</th>
                   <th>Design status</th>
                   <th>Post status</th>
                   <th>Caption</th>
