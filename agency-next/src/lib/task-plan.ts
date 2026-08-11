@@ -14,10 +14,11 @@
  * matters because it is the kind of button people press again when they aren't
  * sure the first press worked.
  *
- * It generates placeholders, not briefs. Every task lands on the first of the
- * month with a plain numbered name, because the dates and the subjects are
- * decided by a person afterwards — that is what the date controls are for. The
- * point is to skip the typing, not to guess the plan.
+ * It generates placeholders, not briefs. Every task gets a plain numbered
+ * name, because the subject is decided by a person afterwards. The dates are
+ * not left to them, though: tasks are spread two days apart from the start of
+ * the month, which is what anyone was going to do by hand anyway. Every one is
+ * still movable from the plan.
  */
 import "server-only";
 import { query, queryOne, execute } from "./db";
@@ -77,6 +78,18 @@ export function firstOfMonth(month: string): string {
  */
 const DUE_DATE_SQL = "IF(DATE_FORMAT(CURDATE(),'%Y-%m') = ?, GREATEST(?, CURDATE()), ?)";
 
+/**
+ * Days between one generated task and the next.
+ *
+ * Everything used to land on the same day, on the reasoning that the dates
+ * were a person's to decide afterwards. In practice nobody wants twelve videos
+ * due on the 1st — they want them through the month, and spreading them by
+ * hand is the tedium this feature exists to remove. Two days is a month's
+ * worth of posting for a client on ten to fifteen pieces, and any date is
+ * still movable from the plan.
+ */
+const SPACING_DAYS = 2;
+
 /** YYYY-MM, validated — anything else falls back to the current month. */
 export function safeMonth(month: string | null | undefined): string {
   const m = String(month || "");
@@ -135,8 +148,8 @@ async function defaultCategory(service: ServiceKey): Promise<string> {
  *
  * Numbered from what is already there — a client with five videos gets "Video
  * 6" upwards — so the names stay unique and reading the list tells you where
- * the month stands. They all share a due date on purpose; moving them is a
- * separate, deliberate step.
+ * the month stands. Dated two days apart, continuing after whatever the month
+ * already holds, and never past its last day.
  */
 export async function generateMonthTasks(
   clientId: number,
@@ -162,6 +175,53 @@ export async function generateMonthTasks(
   );
 
   const due = firstOfMonth(plan.month);
+
+  /*
+   * Where the spacing starts, and where it must stop.
+   *
+   * Both come from the database in one round trip: `DUE_DATE_SQL` so that
+   * "today" means the same thing here as it does on the Today board, and
+   * `LAST_DAY` so the run cannot walk out of the month it is filling.
+   *
+   * `after` is the last date already spoken for. Topping up continues from
+   * there rather than restarting at the first — adding five to a month that
+   * already runs 1st, 3rd, 5th should give the 7th onwards, not five more
+   * tasks piled on the 1st.
+   */
+  const [bounds] = await query<{ base: string; last: string; after: string | null }>(
+    `SELECT ${DUE_DATE_SQL} AS base,
+            LAST_DAY(?) AS last,
+            (SELECT MAX(due_date) FROM deliverables
+              WHERE client_id = ? AND month_key = ? AND due_date IS NOT NULL) AS after`,
+    [plan.month, due, due, due, clientId, plan.month]
+  );
+
+  const day = (s: string) => Date.parse(`${String(s).slice(0, 10)}T00:00:00Z`);
+  const asDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const DAY_MS = 86_400_000;
+
+  const baseMs = day(bounds.base);
+  const lastMs = day(bounds.last);
+  const afterMs = bounds.after ? day(bounds.after) : null;
+
+  // Start after whatever is already there, but never before the base date.
+  let cursorMs = afterMs !== null ? Math.max(baseMs, afterMs + SPACING_DAYS * DAY_MS) : baseMs;
+
+  /*
+   * The next date in the run, spaced and clamped.
+   *
+   * Twenty videos at two days apart need thirty-nine, which no month has — so
+   * once the month runs out the remainder land on its last day rather than
+   * spilling into the next one. A task dated outside its own `month_key` would
+   * count towards one month's target while sitting in another's calendar, and
+   * every tally in the portal reads that key.
+   */
+  const nextDate = (): string => {
+    const at = Math.min(cursorMs, lastMs);
+    cursorMs = at + SPACING_DAYS * DAY_MS;
+    return asDate(at);
+  };
+
   const rows: (string | number | null)[][] = [];
 
   // Numbering continues from the highest number already used, not from how
@@ -196,11 +256,9 @@ export async function generateMonthTasks(
         service,
         category,
         videoType,
-        // The three DUE_DATE_SQL placeholders: the month being filled, then
-        // the first of it twice — once for the clamp, once for the fallback.
-        plan.month,
-        due,
-        due,
+        // Worked out above rather than in SQL, so the spacing is one sequence
+        // across both videos and posters instead of two runs colliding.
+        nextDate(),
         plan.month,
         createdBy,
         assignee,
@@ -216,9 +274,7 @@ export async function generateMonthTasks(
       `INSERT INTO deliverables
          (client_id, title, service, content_category, video_type,
           due_date, month_key, created_by, assigned_to, platform, priority, status)
-       VALUES ${rows
-         .map(() => `(?,?,?,?,?,${DUE_DATE_SQL},?,?,?,'instagram','medium','pending')`)
-         .join(",")}`,
+       VALUES ${rows.map(() => "(?,?,?,?,?,?,?,?,?,'instagram','medium','pending')").join(",")}`,
       rows.flat()
     );
   }
