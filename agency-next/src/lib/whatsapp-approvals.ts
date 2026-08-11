@@ -316,30 +316,29 @@ export async function prepareSend(
 }
 
 /**
- * How much text can ride along with the video.
+ * The messages a client gets, in the order they should read them.
  *
- * WhatsApp allows about 1024 characters on a media caption and silently
- * truncates beyond it. Kept under, because the caption on this message is the
- * copy the client is approving — a truncated one is a client approving
- * something they were not shown.
- */
-const MEDIA_CAPTION_LIMIT = 950;
-
-/**
- * The two messages a client gets, in the order they should read them.
+ *   1. the video, labelled with nothing but its title
+ *   2. the caption, whole, as its own message
+ *   3. the question
  *
- * One message used to carry the video, the caption and the reply instructions
- * together, with the instructions glued to the end of the copy. That is the
- * wrong shape twice over: the thing being approved and the question about it
- * are different things, and a client who wants to check the caption has to
- * read past our own words to find where it ends.
+ * **The video leads, and carries almost no text.** WhatsApp lays a media
+ * caption out beneath the thumbnail and shrinks the preview as that text
+ * grows, so a full post caption riding along turns the video into a small
+ * square above a wall of words — on the one message whose whole job is to
+ * show the video. The title is enough to say which one it is.
  *
- * So: the video and its caption first — exactly the post as it will appear —
- * then a short message asking the question. When the caption is too long to
- * ride with the video it becomes its own message rather than being cut, since
- * a truncated caption is a client approving something they were not shown.
+ * **The caption is its own message** so it can be read, and copied, as the
+ * text it will actually be. Mixed in with a heading and our reply
+ * instructions, a client checking their copy had to work out where ours
+ * ended and theirs began.
  *
- * The reply syntax here must stay identical to what the service's parser
+ * It is never shortened, either. It used to be cut at 700 characters with an
+ * ellipsis, which meant a client could approve copy they had not been shown —
+ * the one thing this flow must not do. A text message takes 4096 characters,
+ * far more than any caption, so on its own it always fits whole.
+ *
+ * The reply syntax here must stay identical to what the service parser
  * accepts. If they drift, clients follow instructions that no longer work.
  */
 export function buildApprovalMessages(
@@ -347,28 +346,12 @@ export function buildApprovalMessages(
   postCaption?: string | null
 ): { mediaCaption: string; followUps: string[] } {
   const caption = (postCaption || "").trim();
-  const heading = `📹 *Video Ready*
-
-${title ? `_${title}_
-
-` : ""}`;
   const followUps: string[] = [];
 
-  const withCaption = `${heading}${caption}`;
-  let mediaCaption: string;
+  // Short by design — this labels the video, it is not the post.
+  const mediaCaption = `📹 *Video Ready*${title ? `\n\n_${title}_` : ""}`;
 
-  if (!caption) {
-    mediaCaption = heading.trimEnd();
-  } else if (withCaption.length <= MEDIA_CAPTION_LIMIT) {
-    mediaCaption = withCaption;
-  } else {
-    // Too long to travel with the video, so it travels on its own. Whole,
-    // because this is the text that goes under their post.
-    mediaCaption = heading.trimEnd();
-    followUps.push(`*The caption:*
-
-${caption}`);
-  }
+  if (caption) followUps.push(`*Caption*\n\n${caption}`);
 
   /*
    * No video code asked for.
@@ -380,14 +363,9 @@ ${caption}`);
    * when typed, and is the tie-breaker when two videos are waiting at once.
    */
   followUps.push(
-    `Please review${caption ? " the video and the caption" : ""} and reply:
-
-` +
-      `✅ *OK* to approve
-` +
-      `📝 *CHANGE* — then tell us what to adjust
-
-` +
+    `Please review${caption ? " the video and the caption" : ""} and reply:\n\n` +
+      `✅ *OK* to approve\n` +
+      `📝 *CHANGE* — then tell us what to adjust\n\n` +
       `_A voice note works too._`
   );
 

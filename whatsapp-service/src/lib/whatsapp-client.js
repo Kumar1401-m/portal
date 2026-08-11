@@ -480,7 +480,15 @@ class WhatsAppService extends EventEmitter {
        */
       if (err?.code !== 'media_too_large' || !watchUrl) throw err;
 
-      log.warn('video too large for WhatsApp — sending the caption and a link', {
+      /*
+       * The link takes the video's place, in the video's position.
+       *
+       * `caption` here is the short label the portal puts on the media — the
+       * title, not the post copy, which arrives as its own message straight
+       * after. So this message stays the first thing in the group and still
+       * says which video it is.
+       */
+      log.warn('video too large for WhatsApp — sending a link in its place', {
         groupId,
         reason: err.message,
       });

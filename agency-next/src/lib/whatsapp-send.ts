@@ -104,8 +104,8 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
 /** One sentence describing what the client received, for the UI to echo back. */
 export function describeDelivery(r: Extract<DeliveryResult, { ok: true }>): string {
   const what = r.sentAsLink
-    ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got the caption and a link to watch it.`
-    : `${r.videoCode} sent to ${r.clientName} on WhatsApp, with the caption.`;
+    ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got a link to watch it, then the caption.`
+    : `${r.videoCode} sent to ${r.clientName} on WhatsApp, followed by the caption.`;
 
   // Said plainly, because it is the one case where the client has the video
   // and does not know what is being asked of them.
