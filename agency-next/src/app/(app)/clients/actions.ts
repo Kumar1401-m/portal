@@ -10,9 +10,9 @@ import { env } from "@/lib/env";
 import { sendOnboardingEmail } from "@/lib/email";
 import { isServiceKey } from "@/lib/services";
 import { setClientCrmAccess } from "@/lib/crm";
-import { generateMonthTasks } from "@/lib/task-plan";
-import { clearClientVideoData } from "@/lib/clear-video-data";
+import { generateMonthTasks, syncMonthToTarget } from "@/lib/task-plan";
 import { monthKey } from "@/lib/utils";
+import { clearClientVideoData } from "@/lib/clear-video-data";
 
 const PAYMENT_PLANS = ["monthly", "quarterly", "half_yearly", "yearly", "one_time"];
 const STATUSES = ["active", "inactive", "paused", "churned"];
@@ -199,7 +199,14 @@ export async function updateClient(formData: FormData): Promise<void> {
     designer_id: number | null;
     caption_settings: unknown;
     placeholder_values: unknown;
-  }>("SELECT id, designer_id, caption_settings, placeholder_values FROM clients WHERE id = ?", [id]);
+    monthly_deliverables: number | null;
+    monthly_posters: number | null;
+  }>(
+    `SELECT id, designer_id, caption_settings, placeholder_values,
+            monthly_deliverables, monthly_posters
+       FROM clients WHERE id = ?`,
+    [id]
+  );
   if (!existing) redirect("/clients");
 
   const { columns, captionSettings, placeholderValues } = await parseClient(formData, isSuperAdmin);
@@ -239,9 +246,48 @@ export async function updateClient(formData: FormData): Promise<void> {
 
   await normalizeInstagramId(id, columns.ig_user_id);
 
+  /*
+   * A changed contract changes this month's work, now.
+   *
+   * The number on the client record is what the month owes, so moving it and
+   * leaving the task list alone made the two disagree until somebody
+   * remembered to press Generate — and going down had no button at all, so a
+   * client cut from twenty to twelve kept twenty tasks and every count
+   * downstream measured against a contract that no longer existed.
+   *
+   * Only when the numbers actually moved: editing a phone number should not
+   * touch anybody's tasks. Only untouched placeholders are ever removed, so a
+   * reduction cannot destroy work that has been started.
+   */
+  let synced = "";
+  const targetsChanged =
+    Number(existing!.monthly_deliverables ?? 0) !== Number(columns.monthly_deliverables) ||
+    Number(existing!.monthly_posters ?? 0) !== Number(columns.monthly_posters);
+
+  if (targetsChanged && columns.status !== "churned") {
+    try {
+      const r = await syncMonthToTarget(id, monthKey(), user.id);
+      const added = r.added.videos + r.added.posters;
+      const removed = r.removed.videos + r.removed.posters;
+      const parts = [
+        added ? `${added} added` : null,
+        removed ? `${removed} removed` : null,
+        r.blocked ? `${r.blocked} kept (already started)` : null,
+      ].filter(Boolean);
+      if (parts.length) synced = parts.join(", ");
+    } catch (err) {
+      // The client's details are saved either way; a failed top-up is a thing
+      // to retry from the plan, not a reason to lose the edit.
+      console.warn("[clients] could not sync the month to the new target:", err instanceof Error ? err.message : err);
+    }
+  }
+
   revalidatePath(`/clients/${id}`);
   revalidatePath("/clients");
-  redirect(`/clients/${id}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/deliverables");
+  revalidatePath("/today");
+  redirect(synced ? `/clients/${id}?synced=${encodeURIComponent(synced)}` : `/clients/${id}`);
 }
 
 /**

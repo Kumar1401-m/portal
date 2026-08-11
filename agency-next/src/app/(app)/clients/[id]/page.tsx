@@ -9,6 +9,7 @@ import {
   Globe,
   Building2,
   IndianRupee,
+  CheckCircle2,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
@@ -65,8 +66,23 @@ export default async function ClientDetailPage({
   const locBits = [ph.location, ph.country].filter(Boolean).join(", ");
   const services = parseClientServices(c.services);
 
+  // What changing the monthly numbers did to this month's tasks. Carried in
+  // the URL because the save redirects here, and a change made silently is a
+  // change nobody trusts happened.
+  const synced = typeof sp.synced === "string" ? sp.synced : null;
+
   return (
     <div className="space-y-6">
+      {synced ? (
+        <p className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 p-3 text-sm">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+          <span>
+            Monthly target changed — this month&apos;s tasks now match it.{" "}
+            <span className="text-muted-foreground">{synced}.</span>
+          </span>
+        </p>
+      ) : null}
+
       {/* Header */}
       <div className="flex flex-wrap items-start gap-3">
         <Link href="/clients" className={buttonClasses({ variant: "ghost", size: "icon" })}>

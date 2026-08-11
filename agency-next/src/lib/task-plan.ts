@@ -363,6 +363,81 @@ export async function setTaskDate(taskId: number, date: string | null): Promise<
   return (res.affectedRows ?? 0) > 0;
 }
 
+export type SyncResult = {
+  month: string;
+  added: { videos: number; posters: number };
+  removed: { videos: number; posters: number };
+  /** Wanted gone but kept, because work had already started on them. */
+  blocked: number;
+};
+
+/**
+ * Make this month's tasks match the client's contract, both ways.
+ *
+ * Changing "Monthly videos" from twelve to twenty used to change one number
+ * and nothing else: the target moved, the month still held twelve tasks, and
+ * someone had to remember to press Generate. Going the other way was worse —
+ * dropping to eight left twelve on the board with no way to trim them except
+ * deleting each by hand, and every count downstream kept measuring against a
+ * contract that no longer existed.
+ *
+ * So the contract is treated as what it is: the number of pieces this month
+ * owes. Raise it and the shortfall appears; lower it and the surplus goes.
+ *
+ * Only the current month. A past month is a record of what was delivered, and
+ * a future one may have been laid out deliberately — neither should be rewritten
+ * because a contract changed today.
+ *
+ * Removal only ever takes untouched placeholders, newest first (`removeTasks`
+ * enforces it). A task somebody has filmed, edited or sent to a client is not
+ * surplus, whatever the contract now says, and `blocked` reports how many were
+ * kept so the caller can say so rather than silently doing less than asked.
+ */
+export async function syncMonthToTarget(
+  clientId: number,
+  month: string,
+  createdBy: number
+): Promise<SyncResult> {
+  const mk = safeMonth(month);
+  const out: SyncResult = {
+    month: mk,
+    added: { videos: 0, posters: 0 },
+    removed: { videos: 0, posters: 0 },
+    blocked: 0,
+  };
+
+  const plan = await monthPlan(clientId, mk);
+  if (!plan) return out;
+
+  // Short: create the difference. `generateMonthTasks` tops up to the target
+  // on its own, so it is handed the same shortfall it would work out anyway.
+  if (plan.videosToAdd > 0 || plan.postersToAdd > 0) {
+    const made = await generateMonthTasks(clientId, mk, createdBy, {
+      videos: plan.videosToAdd,
+      posters: plan.postersToAdd,
+    });
+    out.added = { videos: made.videos, posters: made.posters };
+  }
+
+  // Over: give back what nobody has touched.
+  const surplus = (existing: number, target: number) => Math.max(0, existing - target);
+  const extraVideos = surplus(plan.videosExisting, plan.videoTarget);
+  const extraPosters = surplus(plan.postersExisting, plan.posterTarget);
+
+  if (extraVideos > 0) {
+    const r = await removeTasks(clientId, mk, "video", extraVideos);
+    out.removed.videos = r.removed;
+    out.blocked += r.blocked;
+  }
+  if (extraPosters > 0) {
+    const r = await removeTasks(clientId, mk, "poster", extraPosters);
+    out.removed.posters = r.removed;
+    out.blocked += r.blocked;
+  }
+
+  return out;
+}
+
 /**
  * Fill the month for every active client at once.
  *
