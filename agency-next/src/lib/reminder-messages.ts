@@ -32,6 +32,7 @@ export type ReminderKind =
   | "monthly_plan"
   | "invoice_due"
   | "team_digest"
+  | "how_to_ask"
   | "custom";
 
 /** The reminders a super admin can send by hand, in the order they're offered. */
@@ -71,6 +72,12 @@ export const SENDABLE: {
     label: "Today's work (team)",
     blurb: "What the team owes today. Goes to the agency's own group.",
     perClient: false,
+  },
+  {
+    kind: "how_to_ask",
+    label: "What you can ask us",
+    blurb: "Teaches the group what to type — approvals, footage, and just asking a question.",
+    perClient: true,
   },
   {
     kind: "custom",
@@ -216,6 +223,53 @@ export function invoiceText(items: InvoiceItem[]): string {
   );
 }
 
+/**
+ * The message that teaches a group what it can say to us.
+ *
+ * Every other message here is sent because something is outstanding. This one
+ * is sent once, when a group is quiet and nobody is being chased, and its
+ * whole job is to turn a group people only reply in into one they ask in.
+ *
+ * Grouped by what the client wants rather than by how the portal works —
+ * "approve a video", "send footage", "just ask" — because a client does not
+ * know or care which of those is a keyword and which is the assistant reading
+ * their record. Both work; only one of them needs the exact word, and that is
+ * the only distinction worth putting in front of them.
+ *
+ * The command words here must stay identical to the parser's. A client
+ * following our own instructions and being told they typed it wrong is the
+ * worst outcome this message could have.
+ */
+export function howToAskText(companyName?: string | null): string {
+  return [
+    companyName ? `Hello ${companyName}! 👋` : "Hello! 👋",
+    "",
+    "A quick note on what you can send us here — anything at all, any time.",
+    "",
+    "*When we send you a video*",
+    "✅ *OK* — approve it",
+    "📝 *CHANGE* — then tell us what you'd like different",
+    "_A voice note works too._",
+    "",
+    "*To send us footage*",
+    "Just paste the link. A Drive or WeTransfer link on its own is enough — for any other link, write *raw* in front of it.",
+    "",
+    "*To see where everything stands*",
+    "Type *status* and we'll send this month's progress.",
+    "",
+    "*Or simply ask*",
+    "No special words needed. For example:",
+    "• _When is my next video going out?_",
+    "• _How many videos do I get this month?_",
+    "• _Is anything waiting on me?_",
+    "• _What do I owe?_",
+    "",
+    "You can write in English, Telugu or Hindi — whichever you prefer. If it's something we need to check, we'll say so and someone from our team will come back to you.",
+    "",
+    "Thank you! 🙏",
+  ].join("\n");
+}
+
 export type DigestItem = { company_name: string; title: string; due_date: string | null };
 
 export function teamDigestText(items: DigestItem[], awaiting: number, today: string): string {
@@ -353,6 +407,15 @@ export async function composeReminder(
   if (!clientId) return { text: null, nothing: "Pick a client first." };
 
   switch (kind) {
+    case "how_to_ask": {
+      // Nothing to look up — it is the same message whatever is outstanding.
+      // The client's name is the only thing it needs from the database.
+      const [c] = await query<{ company_name: string }>(
+        "SELECT company_name FROM clients WHERE id = ?",
+        [clientId]
+      );
+      return { text: howToAskText(c?.company_name ?? null) };
+    }
     case "footage_due":
       return composeFootage(clientId);
     case "approval_chase":
