@@ -28,11 +28,12 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
       awaiting: a.awaiting + r.awaiting,
       changes: a.changes + r.changes,
       pending: a.pending + r.pending,
+      notStarted: a.notStarted + r.notStarted,
       posters_required: a.posters_required + r.posters_required,
       posters_designed: a.posters_designed + r.posters_designed,
     }),
     {
-      required: 0, designed: 0, approved: 0, awaiting: 0, changes: 0, pending: 0,
+      required: 0, designed: 0, approved: 0, awaiting: 0, changes: 0, pending: 0, notStarted: 0,
       posters_required: 0, posters_designed: 0,
     }
   );
@@ -46,7 +47,15 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
     <Card className="overflow-hidden">
       <div className="border-b border-border px-5 py-4">
         <h2 className="font-semibold tracking-tight">This month&apos;s production summary</h2>
-        <p className="text-sm text-muted-foreground">Per-client content pipeline for the current month.</p>
+        {/* The two columns people read first are the two that were easiest to
+            misread, so what they count is said rather than guessed at. */}
+        <p className="text-sm text-muted-foreground">
+          Per-client content pipeline for the current month.{" "}
+          <span className="text-muted-foreground/80">
+            <b>Designed</b> is work finished — the edit is done.{" "}
+            <b>Pending</b> is what is still to make.
+          </span>
+        </p>
       </div>
       <div className="w-full overflow-x-auto">
         <table className="w-full text-sm">
@@ -114,7 +123,22 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
                   <td className="px-3 py-2.5 text-center tabular-nums text-rose-600 dark:text-rose-400">
                     {r.changes}
                   </td>
-                  <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{r.pending}</td>
+                  {/* "12 · 8 not started" reads very differently from "12",
+                      and decides whether the answer is to chase the editor or
+                      to generate the month. */}
+                  <td className="px-3 py-2.5 text-center tabular-nums">
+                    <span className={r.pending > 0 ? "font-medium text-foreground" : "text-muted-foreground"}>
+                      {r.pending}
+                    </span>
+                    {r.notStarted > 0 ? (
+                      <span
+                        className="block text-[0.7rem] text-muted-foreground"
+                        title={`${r.notStarted} of these have no task on the board yet`}
+                      >
+                        {r.notStarted} not started
+                      </span>
+                    ) : null}
+                  </td>
                 </tr>
               ))
             )}
@@ -137,7 +161,14 @@ export function ProductionSummary({ rows }: { rows: ProductionRow[] }) {
                 <td className="px-3 py-3 text-center tabular-nums">{totals.approved}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.awaiting}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.changes}</td>
-                <td className="px-3 py-3 text-center tabular-nums">{totals.pending}</td>
+                <td className="px-3 py-3 text-center tabular-nums">
+                  {totals.pending}
+                  {totals.notStarted > 0 ? (
+                    <span className="block text-[0.7rem] font-normal text-muted-foreground">
+                      {totals.notStarted} not started
+                    </span>
+                  ) : null}
+                </td>
               </tr>
             </tfoot>
           ) : null}

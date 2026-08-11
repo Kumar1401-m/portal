@@ -37,6 +37,21 @@ export const MAX_POST_ATTEMPTS = 4;
  */
 export const CLAIM_LEASE_MINUTES = 20;
 
+/**
+ * How long after its slot a post may still go out on its own.
+ *
+ * The posting window is two hours wide (see POSTING_WINDOW in posting.ts), and
+ * a post belongs to its window. Past that it is not "late", it is missed: the
+ * evening it was written for has gone, and publishing it at midnight puts a
+ * reel in front of nobody and leaves an odd timestamp on a client's account
+ * for ever.
+ *
+ * So the publisher stops offering it, the missed-posts board picks it up, and
+ * a person moves it to the next day — a decision, made by someone who can see
+ * whether it is still worth posting at all.
+ */
+export const PUBLISH_WINDOW_HOURS = 2;
+
 /** Content categories eligible for unattended posting. */
 export const AUTO_POST_CATEGORIES = ["Instagram Reel", "Instagram Post"];
 
@@ -236,6 +251,21 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
         -- every post due at the wrong hour. post_locked_at below is written
         -- and read by the database on both sides, so it stays on NOW().
         AND d.scheduled_at IS NOT NULL AND d.scheduled_at <= ?
+        /*
+         * ...and not so long ago that the slot has been and gone.
+         *
+         * "Due" used to mean any time at all after the scheduled minute, so a
+         * reel that missed its evening — the service down, Instagram slow, the
+         * runner not deployed — went out whenever the next successful run
+         * happened. In practice that is the middle of the night, to an
+         * audience that is asleep, on a client's account.
+         *
+         * A post now belongs to its window and nothing else. Miss it and it
+         * stops being due: it appears on the missed-posts board, and someone
+         * moves the date to the next day, which is what was being done by hand
+         * anyway. Late and deliberate beats 3am and automatic.
+         */
+        AND d.scheduled_at > DATE_SUB(?, INTERVAL ? HOUR)
         AND d.post_attempts < ?
         -- Ready to hand out: waiting its turn, or a previous run that took the
         -- row and never came back (expired lease).
@@ -250,7 +280,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
              OR (d.edited_link IS NOT NULL AND d.edited_link <> ''))
       ORDER BY d.scheduled_at ASC, d.id ASC
       LIMIT ${Number(limit) || 10}`,
-    [nowUtc(), MAX_POST_ATTEMPTS, CLAIM_LEASE_MINUTES]
+    [nowUtc(), nowUtc(), PUBLISH_WINDOW_HOURS, MAX_POST_ATTEMPTS, CLAIM_LEASE_MINUTES]
   );
 
   /*
@@ -827,6 +857,13 @@ export type DeliverablePublishInfo = {
   nextLook: string | null;
 };
 
+/** True once a post's slot is far enough past that the publisher has let it go. */
+function missedItsWindow(scheduledAt: string): boolean {
+  const due = Date.parse(`${scheduledAt.replace(" ", "T")}Z`);
+  if (Number.isNaN(due)) return false;
+  return Date.now() - due > PUBLISH_WINDOW_HOURS * 3_600_000;
+}
+
 /**
  * A stored UTC timestamp as "20 Aug 2026, 6:00 pm" in the client's clock.
  *
@@ -932,6 +969,12 @@ export async function getPublishInfo(
     }
     if (!row.scheduled_at) {
       blockers.push("No posting time is set, so it is never due. Approve it, or press Schedule.");
+    } else if (missedItsWindow(row.scheduled_at)) {
+      blockers.push(
+        `Its slot passed more than ${PUBLISH_WINDOW_HOURS} hours ago, so it won't go out on its ` +
+          `own — a reel posted in the middle of the night reaches nobody. Move the date to the ` +
+          `next day, or use Post now.`
+      );
     }
     if (attempts >= MAX_POST_ATTEMPTS || status === "failed") {
       blockers.push(

@@ -204,17 +204,41 @@ export type ProductionRow = {
   approved: number;
   awaiting: number;
   changes: number;
+  /** Still to make: the target less what is finished. */
   pending: number;
+  /** Of those, the ones with no task created yet. */
+  notStarted: number;
   /** Poster work is tracked against its own monthly target. */
   posters_required: number;
   posters_designed: number;
 };
 
 /**
- * Per-client content production summary for the current month — mirrors the
- * old app's "Graphic Videos" board:
- *   Required (monthly target) · Designed (produced) · Approved ·
- *   Pending Approvals (on client's desk) · Changes Recommended · Pending (target − designed).
+ * Statuses where the creative actually exists.
+ *
+ * "Edited" or later in `editorStatusLabel`, which is the portal's existing
+ * answer to "has this been made yet" and what the Tasks board shows in its
+ * Design status column. Reusing it means the summary and the board cannot
+ * disagree about whether a video is done.
+ *
+ * `changes_requested` is deliberately absent. A video sent back is work to do
+ * again, not work finished — it has its own column, and counting it as
+ * designed is how a month looks complete while half of it is being redone.
+ */
+const DESIGNED = "('caption_ready','review','resolved','approved','scheduled','posted','completed')";
+
+/**
+ * Per-client content production summary for the current month.
+ *
+ *   Required (monthly target) · Designed (made) · Approved ·
+ *   Pending approval (on the client's desk) · Changes · Pending (still to make)
+ *
+ * **Designed counts finished work, not tasks that exist.** It used to count
+ * every row for the month, so a client whose twelve placeholders had been
+ * generated but not started read "Designed 12" — and Pending, being
+ * target minus designed, read zero. The table said the month was done on the
+ * day it was created. Now a task counts once the edit is finished, so Pending
+ * answers the question it is asked: how many are still to make.
  *
  * Posters are counted separately. They have their own monthly target
  * (`clients.monthly_posters`), so folding them into "Designed" made the video
@@ -230,16 +254,36 @@ export async function getProductionSummary(clientIds?: number[] | null): Promise
   const hasPosterTarget = await hasColumn("clients", "monthly_posters");
   // `service` is the modern field; `video_type = 'Poster'` is what older rows
   // carry, and `serviceOf()` reads them the same way.
+  /*
+   * Poster or video, decided exactly as `serviceOf()` decides it.
+   *
+   * The previous expression went NULL — not false — for a task with neither
+   * `service` nor `video_type` set: `NULL = 'poster'` is NULL, and `NULL OR
+   * NULL` is NULL, so `SUM(NOT isPoster)` skipped the row and `SUM(isPoster)`
+   * skipped it too. Such a task counted as neither a video nor a poster and
+   * simply vanished from the summary, which is the one thing a summary must
+   * not do.
+   *
+   * COALESCE/IF gives a definite answer for every row, and matches the form
+   * already used by getServiceMix and the monthly plan, so all three agree
+   * about what a poster is.
+   */
   const isPoster = hasService
-    ? `(d.service = 'poster_designing' OR (d.service IS NULL AND LOWER(d.video_type) = 'poster'))`
-    : `(LOWER(d.video_type) = 'poster')`;
+    ? `(COALESCE(NULLIF(d.service,''),
+         IF(LOWER(COALESCE(d.video_type,'')) = 'poster','poster_designing','video_editing'))
+        = 'poster_designing')`
+    : `(LOWER(COALESCE(d.video_type,'')) = 'poster')`;
   const posterTarget = hasPosterTarget ? "c.monthly_posters" : "0";
 
   const rows = await query<Record<string, unknown>>(
     `SELECT c.id, c.company_name, c.monthly_deliverables AS required,
        ${posterTarget} AS posters_required,
-       COALESCE(SUM(d.id IS NOT NULL AND NOT ${isPoster}),0) AS designed,
-       COALESCE(SUM(${isPoster}),0) AS posters_designed,
+       COALESCE(SUM(NOT ${isPoster} AND d.status IN ${DESIGNED}),0) AS designed,
+       COALESCE(SUM(${isPoster} AND d.status IN ${DESIGNED}),0) AS posters_designed,
+       -- Everything on the books for the month, designed or not. Without it
+       -- "Pending 8" is ambiguous between eight half-done tasks and eight that
+       -- nobody has created yet, and those need different responses.
+       COALESCE(SUM(d.id IS NOT NULL AND NOT ${isPoster}),0) AS planned,
        COALESCE(SUM(d.status IN ('approved','scheduled','posted','completed')),0) AS approved,
        COALESCE(SUM(d.status IN ('content_review','review')),0) AS awaiting,
        COALESCE(SUM(d.status = 'changes_requested'),0) AS changes
@@ -253,6 +297,7 @@ export async function getProductionSummary(clientIds?: number[] | null): Promise
   return rows.map((r) => {
     const required = n(r.required);
     const designed = n(r.designed);
+    const planned = n(r.planned);
     return {
       id: n(r.id),
       company_name: String(r.company_name),
@@ -261,7 +306,15 @@ export async function getProductionSummary(clientIds?: number[] | null): Promise
       approved: n(r.approved),
       awaiting: n(r.awaiting),
       changes: n(r.changes),
+      /*
+       * Still to make, against the target — not against what happens to have
+       * been created. A client owed twenty videos with twelve tasks on the
+       * board and five finished has fifteen left to do, and the eight that
+       * were never created are as much of a gap as the seven half-done ones.
+       */
       pending: Math.max(0, required - designed),
+      /** Of those, how many have no task on the board yet. */
+      notStarted: Math.max(0, required - planned),
       posters_required: n(r.posters_required),
       posters_designed: n(r.posters_designed),
     };
