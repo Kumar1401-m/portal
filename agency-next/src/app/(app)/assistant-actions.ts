@@ -6,7 +6,7 @@ import { queryOne, execute } from "@/lib/db";
 import { canAccessClient } from "@/lib/crm";
 import { sendEmail, sendApprovalRequestEmail } from "@/lib/email";
 import { notifyClientById } from "@/lib/notify";
-import { approvalChaseText, invoiceText } from "@/lib/reminder-messages";
+import { approvalChaseText, invoiceText, composeReminder } from "@/lib/reminder-messages";
 import { paymentLinkForInvoice } from "@/lib/payment-links";
 import { sendNow, groupForClient } from "@/lib/reminder-outbox";
 import {
@@ -162,6 +162,96 @@ export async function runAssistantAction(
       return res.ok
         ? { ok: true, text: `Reminded **${d.company_name}** about **${d.title}** on WhatsApp.` }
         : { ok: false, text: `Couldn't send it: ${res.error}. It's queued and will be retried.` };
+    }
+
+    /*
+     * The two whole-client reminders — footage, and the month's plan.
+     *
+     * Both target a client rather than one task, because both are about
+     * everything outstanding: four separate "send us your footage" messages
+     * reads as a malfunction, and the client's job is the same either way.
+     * `composeReminder` already gathers what is outstanding and returns a
+     * reason when there is nothing, so this stays a dispatcher.
+     */
+    if (kind === "footage_reminder" || kind === "send_month_plan") {
+      if (!(await canAccessClient(user, id))) return { ok: false, text: "Not your client." };
+      const c = await queryOne<{ company_name: string }>(
+        "SELECT company_name FROM clients WHERE id = ?",
+        [id]
+      );
+      if (!c) return { ok: false, text: "I can't find that client." };
+
+      const which = kind === "footage_reminder" ? "footage_due" : "monthly_plan";
+      const composed = await composeReminder(which, id);
+      if (!composed.text) {
+        return { ok: false, text: composed.nothing || "There's nothing to send them." };
+      }
+
+      const target = await groupForClient(id);
+      if (!target) {
+        return {
+          ok: false,
+          text: `**${c.company_name}** has no WhatsApp group linked, so there's nowhere to send it.`,
+        };
+      }
+
+      const res = await sendNow({
+        kind: which,
+        clientId: id,
+        groupId: target.groupId,
+        groupLabel: target.label,
+        body: composed.text,
+        createdBy: user.id,
+        createdByName: user.name || user.email,
+      });
+      return res.ok
+        ? {
+            ok: true,
+            text:
+              kind === "footage_reminder"
+                ? `Asked **${c.company_name}** for their footage on WhatsApp.`
+                : `Sent **${c.company_name}** this month's plan on WhatsApp.`,
+          }
+        : { ok: false, text: `Couldn't send it: ${res.error}. It's queued and will be retried.` };
+    }
+
+    /*
+     * Publish to Instagram, now.
+     *
+     * Straight to `publishNow`, which is the same path the Post now button on
+     * the task page uses — including its refusals. It skips the clock and the
+     * client's auto-publish preference, because asking for this is the missing
+     * consent, but it cannot conjure an Instagram account or a video file, and
+     * says so plainly when either is absent.
+     */
+    if (kind === "post_now") {
+      const d = await queryOne<{ title: string; client_id: number; company_name: string }>(
+        `SELECT d.title, d.client_id, c.company_name
+           FROM deliverables d JOIN clients c ON c.id = d.client_id WHERE d.id = ?`,
+        [id]
+      );
+      if (!d) return { ok: false, text: "That task no longer exists." };
+      if (!(await canAccessClient(user, d.client_id))) return { ok: false, text: "Not your client." };
+
+      const { publishNow } = await import("@/lib/instagram-publish");
+      const res = await publishNow(id);
+      revalidatePath("/deliverables");
+      revalidatePath(`/deliverables/${id}`);
+
+      if (res.ok) {
+        return {
+          ok: true,
+          text:
+            `**${d.title}** is live on ${d.company_name}'s Instagram.` +
+            (res.permalink ? `\n\n${res.permalink}` : ""),
+        };
+      }
+      return {
+        ok: false,
+        text: res.pending
+          ? `Instagram is still encoding **${d.title}** — it will go out within 15 minutes.`
+          : `Couldn't post **${d.title}**: ${res.error}`,
+      };
     }
 
     if (kind === "payment_reminder") {

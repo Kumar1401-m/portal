@@ -416,7 +416,10 @@ export function chartsFor(question: string, s: Snapshot): AssistantChart[] {
 export type ActionKind =
   | "request_approval"
   | "approval_reminder"
+  | "footage_reminder"
   | "payment_reminder"
+  | "send_month_plan"
+  | "post_now"
   | "assign"
   | "message_client";
 
@@ -434,7 +437,19 @@ const CAN: Record<ActionKind, SessionUser["role"][]> = {
   // Chasing a decision the client already has in front of them — same people
   // who were allowed to put it there.
   approval_reminder: ["super_admin", "crm"],
+  // Asking for footage is chasing the client too, and the people who chase
+  // them are the ones who talk to them.
+  footage_reminder: ["super_admin", "crm"],
   payment_reminder: ["super_admin", "admin"],
+  send_month_plan: ["super_admin", "crm"],
+  /*
+   * The one irreversible action here.
+   *
+   * It puts a video on a client's public Instagram account the moment it is
+   * confirmed, and nothing in the portal can take it back. Super admin only,
+   * matching the Post now button on the task page.
+   */
+  post_now: ["super_admin"],
   assign: ["super_admin", "admin", "crm"],
   message_client: ["super_admin", "admin", "crm"],
 };
@@ -500,6 +515,77 @@ export async function actionOffers(user: SessionUser, question: string): Promise
       offers.push({
         kind: "approval_reminder",
         label: "Remind the client to approve it",
+        targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
+      });
+  }
+
+  /* Raw footage the client still owes us. */
+  if (canRun(user.role, "footage_reminder") && wants(/footage|raw|shoot|clips|rushes|\bfiles?\b/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT DISTINCT c.id, c.company_name,
+              COUNT(*) OVER (PARTITION BY c.id) AS waiting
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status <> 'churned' AND ${where}
+          AND d.status IN ('pending','waiting_for_raw')
+          AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
+        ORDER BY c.company_name LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "footage_reminder",
+        label: "Ask the client for their footage",
+        targets: rows.map((r) => ({
+          id: n(r.id),
+          label: String(r.company_name),
+          sub: `${n(r.waiting)} waiting on footage`,
+        })),
+      });
+  }
+
+  /* This month's schedule, as the client sees it. */
+  if (canRun(user.role, "send_month_plan") && wants(/plan|schedule|calendar|this month|month.?s work/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT c.id, c.company_name, COUNT(d.id) AS n
+         FROM clients c JOIN deliverables d ON d.client_id = c.id
+        WHERE c.status <> 'churned' AND ${where}
+          AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m')
+          AND d.status NOT IN ('cancelled','rejected')
+        GROUP BY c.id, c.company_name ORDER BY c.company_name LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "send_month_plan",
+        label: "Send them this month's plan",
+        targets: rows.map((r) => ({
+          id: n(r.id),
+          label: String(r.company_name),
+          sub: `${n(r.n)} pieces this month`,
+        })),
+      });
+  }
+
+  /*
+   * Publish now, for work that is genuinely ready.
+   *
+   * Offered only for approved videos that are not already live, so the list
+   * cannot include something still being edited or awaiting a decision. The
+   * confirmation step in the widget is what stands between this and a client's
+   * feed.
+   */
+  if (canRun(user.role, "post_now") && wants(/post|publish|go live|instagram|upload.*insta/)) {
+    const rows = await query<Record<string, unknown>>(
+      `SELECT d.id, d.title, c.company_name
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE c.status <> 'churned' AND ${where}
+          AND d.status IN ('approved','scheduled')
+          AND COALESCE(d.instagram_status,'') <> 'posted'
+          AND c.ig_user_id IS NOT NULL AND c.ig_user_id <> ''
+        ORDER BY d.scheduled_at IS NULL, d.scheduled_at ASC LIMIT 8`
+    );
+    if (rows.length)
+      offers.push({
+        kind: "post_now",
+        label: "Post it to Instagram now",
         targets: rows.map((r) => ({ id: n(r.id), label: String(r.title), sub: String(r.company_name) })),
       });
   }

@@ -27,7 +27,7 @@ import "server-only";
  * happens to keep, and `dateStrings` hands it back as a bare string with no
  * zone on it. A database sitting in IST would report 11:05 while the app means
  * 11:05 UTC, and every scheduled post would be judged due five and a half
- * hours early — going out at half past twelve in the afternoon instead of six
+ * hours early — going out at half past eleven in the morning instead of five
  * in the evening, silently, on a live client account.
  *
  * Comparisons between two database-written columns are fine as they are; it is
@@ -50,7 +50,7 @@ export function nowUtc(): string {
 type PostTiming = { utcOffsetMinutes: number; hour: number; minute?: number };
 
 const COUNTRY_BEST_TIME: Record<string, PostTiming> = {
-  india: { utcOffsetMinutes: 330, hour: 18 }, // 6:00 PM IST
+  india: { utcOffsetMinutes: 330, hour: 17 }, // 5:00 PM IST
   usa: { utcOffsetMinutes: -300, hour: 19 }, // 7:00 PM ET
   unitedstates: { utcOffsetMinutes: -300, hour: 19 },
   america: { utcOffsetMinutes: -300, hour: 19 },
@@ -102,7 +102,7 @@ export function nextBestPostTime(country: string | null | undefined): string {
 /** Countries offered when scheduling by hand, with their best-time default. */
 export const POST_COUNTRIES: { key: string; label: string; offsetMinutes: number; hour: number }[] =
   [
-    { key: "india", label: "India (IST)", offsetMinutes: 330, hour: 18 },
+    { key: "india", label: "India (IST)", offsetMinutes: 330, hour: 17 },
     { key: "usa", label: "United States (ET)", offsetMinutes: -300, hour: 19 },
     { key: "uk", label: "United Kingdom (GMT)", offsetMinutes: 0, hour: 19 },
     { key: "uae", label: "UAE / Dubai (GST)", offsetMinutes: 240, hour: 20 },
@@ -127,15 +127,24 @@ export function localTimeToUtc(localValue: string, country: string | null | unde
 }
 
 /**
- * The evening window every post lands in: 6 PM to 8 PM, the client's clock.
+ * The evening window every post lands in: 5 PM to 7 PM, the client's clock.
  *
  * Scheduling is by date, not by date and time. Nobody was choosing a minute —
  * they were choosing a day and then typing an evening time onto it, which is a
  * decision already made and made the same way every time. The hour comes from
- * the country table above, and every entry in it (18:00 India, 19:00 UK and
- * US, 20:00 Gulf) already falls inside that window.
+ * the country table above.
+ *
+ * Two hours wide, and `PUBLISH_WINDOW_HOURS` matches it: a post belongs to its
+ * window, and one that misses it waits for a person rather than going out at
+ * midnight. Widening one without the other would let posts drift outside the
+ * window the agency tells its clients about.
+ *
+ * The other countries sit at 7 PM and 8 PM local, outside this range — it
+ * describes the Indian window, which is where every client currently is. A
+ * genuinely multi-country roster would want this per country, and would notice
+ * the day it did.
  */
-export const POSTING_WINDOW = { fromHour: 18, toHour: 20 } as const;
+export const POSTING_WINDOW = { fromHour: 17, toHour: 19 } as const;
 
 /** A picked date plus that country's evening slot, as a MySQL DATETIME in UTC. */
 export function scheduleDateToUtc(
@@ -158,7 +167,7 @@ export function utcToLocalDateInput(
   return utcToLocalInput(utc, country).slice(0, 10);
 }
 
-/** "6:00 PM" — the slot a country's posts go out in, for saying so on screen. */
+/** "5:00 PM" — the slot a country's posts go out in, for saying so on screen. */
 export function postingTimeLabel(country: string | null | undefined): string {
   const t = bestPostingTimeFor(country);
   const h = t.hour % 12 === 0 ? 12 : t.hour % 12;
