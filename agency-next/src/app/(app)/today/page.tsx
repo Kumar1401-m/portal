@@ -39,7 +39,15 @@ export default async function TodayPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const user = await requireUser(STAFF_ROLES);
+  /*
+   * Not the editor's screen any more.
+   *
+   * This board is every client's work filtered to one date, and an editor
+   * reaching it — by an old link or a typed URL — got the agency's day rather
+   * than their own. My work is the answer to the question they were asking, so
+   * that is where the guard sends them.
+   */
+  const user = await requireUser(STAFF_ROLES.filter((r) => r !== "video_editor"));
   const isDesigner = user.role === "poster_designer";
   const sp = await searchParams;
   const { params, service, filters, hasFilters } = parseTaskQuery(sp);
