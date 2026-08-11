@@ -121,11 +121,14 @@ export function MonthlyPlan({
   plan,
   tasks,
   usedMonths,
+  canForce = false,
 }: {
   clientId: number;
   plan: MonthPlan;
   tasks: PlannedTask[];
   usedMonths: string[];
+  /** Super admin only — deleting work somebody has started. */
+  canForce?: boolean;
 }) {
   const router = useRouter();
   const [genState, generate, generating] = useActionState<PlanState, FormData>(
@@ -137,6 +140,23 @@ export function MonthlyPlan({
 
   const toAdd = plan.videosToAdd + plan.postersToAdd;
   const noTargets = plan.videoTarget === 0 && plan.posterTarget === 0;
+
+  /*
+   * More on the board than the contract asks for.
+   *
+   * "Nothing missing" is true and useless when a month holds twenty against a
+   * target of ten: nothing is missing, ten are spare, and the badge said the
+   * plan was in order. A month can be wrong in both directions.
+   */
+  const overVideos = Math.max(0, plan.videosExisting - plan.videoTarget);
+  const overPosters = Math.max(0, plan.postersExisting - plan.posterTarget);
+  const over = overVideos + overPosters;
+  const overSummary = [
+    overVideos ? `${overVideos} video${overVideos > 1 ? "s" : ""}` : "",
+    overPosters ? `${overPosters} poster${overPosters > 1 ? "s" : ""}` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
 
   const summary = [
     plan.videosToAdd ? `${plan.videosToAdd} video${plan.videosToAdd > 1 ? "s" : ""}` : "",
@@ -205,6 +225,17 @@ export function MonthlyPlan({
               ) : null}
             </div>
 
+            {over > 0 ? (
+              <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+                <span>
+                  <b>{overSummary} more than the contract.</b> Remove the extras below —
+                  untouched ones go straight away, and anything already started has to be
+                  confirmed.
+                </span>
+              </p>
+            ) : null}
+
             <form action={generate} className="flex flex-wrap items-center gap-2">
               <input type="hidden" name="client_id" value={clientId} />
               <input type="hidden" name="month" value={plan.month} />
@@ -218,7 +249,7 @@ export function MonthlyPlan({
                 ) : (
                   <Wand2 className="h-4 w-4" />
                 )}
-                {toAdd === 0 ? "Nothing missing" : `Add the missing ${summary}`}
+                {toAdd === 0 ? (over ? "Nothing missing" : "Matches the contract") : `Add the missing ${summary}`}
               </button>
               {toAdd > 0 ? (
                 <span className="text-xs text-muted-foreground">
@@ -257,6 +288,48 @@ export function MonthlyPlan({
                 Removing only takes tasks nobody has started — no footage, no video, not sent to the client.
               </p>
               <Note state={adjState} />
+
+              {/* Offered only after the safe attempt has actually been refused,
+                  so deleting started work can never be the first thing tried.
+                  Posted videos are never included, whatever is ticked: that row
+                  holds the permalink and the date it went live. */}
+              {adjState.blockedOnly && canForce ? (
+                <form action={adjust} className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <input type="hidden" name="client_id" value={clientId} />
+                  <input type="hidden" name="month" value={plan.month} />
+                  <input type="hidden" name="include_started" value="1" />
+                  <p className="text-xs">
+                    <b>Delete them anyway?</b> This removes tasks with captions, footage or edits
+                    on them, and ones the client has already been sent. Anything posted to
+                    Instagram is kept.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      name="count"
+                      type="number"
+                      min="1"
+                      max="50"
+                      defaultValue={String(Math.min(50, over || 1))}
+                      className="h-8 w-20"
+                      aria-label="How many to delete"
+                    />
+                    <Select name="kind" defaultValue="video" className="h-8 w-28 text-sm" aria-label="Videos or posters">
+                      <option value="video">videos</option>
+                      <option value="poster">posters</option>
+                    </Select>
+                    <button
+                      type="submit"
+                      name="direction"
+                      value="remove"
+                      disabled={adjusting}
+                      className={buttonClasses({ variant: "destructive", size: "sm" })}
+                    >
+                      {adjusting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Minus className="h-4 w-4" />}
+                      Delete the started ones too
+                    </button>
+                  </div>
+                </form>
+              ) : null}
             </div>
 
         {tasks.length > 0 ? (

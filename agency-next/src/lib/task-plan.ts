@@ -517,11 +517,25 @@ export async function removeTasks(
   clientId: number,
   month: string,
   kind: "video" | "poster",
-  count: number
-): Promise<{ removed: number; blocked: number }> {
+  count: number,
+  /**
+   * Take started work too, when someone has said so explicitly.
+   *
+   * The default refusal is right for the automatic paths — a contract change
+   * must never quietly destroy an edit. But a month can end up genuinely
+   * over-committed with every surplus task already captioned or sent, and then
+   * refusing leaves the only route as deleting them one at a time from the
+   * board. This is the same decision, made once, by a super admin who has been
+   * told what it will delete.
+   *
+   * Posted work is still never touched, whatever this says: its record carries
+   * the permalink and the date something went live on a client's account.
+   */
+  opts: { includeStarted?: boolean } = {}
+): Promise<{ removed: number; blocked: number; startedRemoved: number }> {
   const mk = safeMonth(month);
   const want = Math.max(0, Math.trunc(Number(count) || 0));
-  if (!want) return { removed: 0, blocked: 0 };
+  if (!want) return { removed: 0, blocked: 0, startedRemoved: 0 };
 
   const isPoster = kind === "poster";
   const rows = await query<{ id: number; untouched: number }>(
@@ -534,13 +548,29 @@ export async function removeTasks(
        FROM deliverables d
       WHERE d.client_id = ? AND d.month_key = ?
         AND ${isPoster ? IS_POSTER : `NOT ${IS_POSTER}`}
+        -- Never a video that went out. Deleting that row loses the permalink
+        -- and the date it was published, which is a record, not a task.
+        AND d.status NOT IN ('posted','completed')
+        AND COALESCE(d.instagram_status,'') <> 'posted'
       ORDER BY d.id DESC`,
     [clientId, mk]
   );
 
-  const takeable = rows.filter((r) => Number(r.untouched) === 1).map((r) => r.id);
-  const ids = takeable.slice(0, want);
-  if (!ids.length) return { removed: 0, blocked: want };
+  /*
+   * Untouched ones first, then started ones if allowed.
+   *
+   * Order matters even when everything is permitted: removing five from a
+   * month should cost the five least-progressed tasks, not the five newest
+   * regardless of how much work is in them.
+   */
+  const untouched = rows.filter((r) => Number(r.untouched) === 1).map((r) => r.id);
+  const started = opts.includeStarted
+    ? rows.filter((r) => Number(r.untouched) !== 1).map((r) => r.id)
+    : [];
+
+  const ids = [...untouched, ...started].slice(0, want);
+  const startedTaken = ids.filter((id) => started.includes(id)).length;
+  if (!ids.length) return { removed: 0, blocked: want, startedRemoved: 0 };
 
   const list = ids.join(",");
   // The same orphan-prone tables the bulk clear handles: no foreign key on two
@@ -555,7 +585,11 @@ export async function removeTasks(
   }
   const res = await execute(`DELETE FROM deliverables WHERE id IN (${list})`);
   const removed = res.affectedRows ?? 0;
-  return { removed, blocked: Math.max(0, want - removed) };
+  return {
+    removed,
+    blocked: Math.max(0, want - removed),
+    startedRemoved: Math.min(startedTaken, removed),
+  };
 }
 
 export type PlannedTask = {

@@ -266,6 +266,7 @@ export default async function ClientDetailPage({
               plan={plan}
               tasks={planTasks}
               usedMonths={usedMonths}
+              canForce={user.role === "super_admin"}
             />
           ) : null}
 

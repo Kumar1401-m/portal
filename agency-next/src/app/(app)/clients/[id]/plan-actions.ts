@@ -12,7 +12,19 @@ import {
   removeTasks,
 } from "@/lib/task-plan";
 
-export type PlanState = { ok?: boolean; error?: string; message?: string };
+export type PlanState = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  /**
+   * Some tasks were left only because work had started on them.
+   *
+   * Distinct from a plain failure: it means the override would work, so the
+   * panel can offer it. Nothing else should — a removal that found nothing
+   * there must not invite someone to try harder.
+   */
+  blockedOnly?: boolean;
+};
 
 /**
  * Every action here takes the client id from the form, so each one re-checks
@@ -139,12 +151,32 @@ export async function adjustTasksAction(
   if (!Number.isFinite(count) || count < 1) return { error: "Enter how many." };
   if (count > 50) return { error: "That's more than 50 — do it in smaller batches." };
 
+  /*
+   * Deleting work that has been started, on purpose.
+   *
+   * Only a super admin, and only when the form says so — the checkbox is
+   * rendered after a refusal, so it cannot be the accidental first choice. A
+   * crm removing tasks for their own client still gets the safe behaviour.
+   */
+  const includeStarted =
+    Boolean(formData.get("include_started")) && ok.user.role === "super_admin";
+
   try {
     if (direction === "remove") {
-      const { removed, blocked } = await removeTasks(ok.clientId, month, kind, count);
+      const { removed, blocked, startedRemoved } = await removeTasks(
+        ok.clientId,
+        month,
+        kind,
+        count,
+        { includeStarted }
+      );
       refresh(ok.clientId);
       if (!removed) {
         return {
+          // `blockedOnly` is what makes the override appear: the caller needs
+          // to know this failed because of the safety rule and not because
+          // there was nothing there.
+          blockedOnly: blocked > 0,
           error:
             "Nothing could be removed — the remaining ones have footage, a video, a caption, " +
             "or have already gone to the client.",
@@ -152,8 +184,11 @@ export async function adjustTasksAction(
       }
       return {
         ok: true,
+        blockedOnly: blocked > 0,
         message:
-          `Removed ${removed} ${kind}${removed > 1 ? "s" : ""}.` +
+          `Removed ${removed} ${kind}${removed > 1 ? "s" : ""}` +
+          (startedRemoved ? `, ${startedRemoved} of them already started` : "") +
+          "." +
           (blocked ? ` ${blocked} were left: they have work on them already.` : ""),
       };
     }
