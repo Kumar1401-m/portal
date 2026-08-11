@@ -3,12 +3,11 @@ import { ClipboardList, Plus } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import {
   getDeliverables,
-  getClientsMini,
   getServiceCounts,
   getAssignees,
 } from "@/lib/deliverables";
 import { crmClientIds } from "@/lib/crm";
-import { getCategoryMap, getUsedCategories } from "@/lib/categories";
+import { getCategoryMap } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
 import {
@@ -21,7 +20,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { TaskFilters } from "@/components/admin/task-filters";
+import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -42,20 +41,27 @@ export default async function DeliverablesPage({
   const scopeIds = await crmClientIds(user);
   const filters = { ...parsedFilters, crmClientIds: scopeIds };
 
-  const [rows, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
+  const [all, counts, assignees, categoryMap] = await Promise.all([
     getDeliverables(filters),
     getServiceCounts(filters),
-    getClientsMini(scopeIds),
     getAssignees(),
     getCategoryMap(),
-    getUsedCategories(),
   ]);
 
-  // Inside a service tab the category list is that service's own; on "All
-  // tasks" fall back to every category actually in use.
-  const categories = service
-    ? Array.from(new Set([...categoryMap[service].map((c) => c.name), ...usedCategories]))
-    : usedCategories;
+  /*
+   * Eight to a page, the same as Today's Tasks.
+   *
+   * The board used to print every row it had. Thirty tasks made a page you
+   * scrolled past the window to read, and the heading said "30 tasks" while
+   * the screen showed however many happened to fit — so the ones below the
+   * fold read as missing rather than further down.
+   */
+  const PAGE_SIZE = 8;
+  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  // Clamped, so a hand-edited or stale ?page= lands on a real page instead of
+  // an empty table that looks like the work vanished.
+  const page = Math.min(Math.max(1, Math.trunc(Number(sp.page)) || 1), totalPages);
+  const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const heading = service ? SERVICES[service].label : "All Tasks";
   const newHref = service ? `/deliverables/new?service=${service}` : "/deliverables/new";
@@ -69,7 +75,9 @@ export default async function DeliverablesPage({
             {heading}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} task{rows.length === 1 ? "" : "s"}
+            {/* The real total, not what fits on this page — the heading is
+                how you know there is a second page to go to. */}
+            {all.length} task{all.length === 1 ? "" : "s"}
             {hasFilters ? " (filtered)" : ""}
           </p>
         </div>
@@ -80,18 +88,8 @@ export default async function DeliverablesPage({
 
       <ServiceTabs basePath="/deliverables" active={service} counts={counts} params={params} />
 
-      {/* The same filter bar Today's Tasks carries, in the same place. Two
-          boards showing the same rows should not be filtered two ways. */}
-      <TaskFilters
-        basePath="/deliverables"
-        params={params}
-        categories={categories}
-        clients={clients}
-        assignees={assignees}
-      />
-
       <Card className="overflow-hidden">
-        {rows.length === 0 ? (
+        {all.length === 0 ? (
           <p className="p-10 text-center text-sm text-muted-foreground">
             No {service ? SERVICES[service].label.toLowerCase() : ""} tasks
             {hasFilters ? " match these filters" : " yet"}.
@@ -124,7 +122,9 @@ export default async function DeliverablesPage({
               <TBody>
                 {rows.map((d, i) => (
                   <TR key={d.id}>
-                    <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
+                    <TD className="text-right tabular-nums text-muted-foreground">
+                      {(page - 1) * PAGE_SIZE + i + 1}
+                    </TD>
                     <TD className="max-w-[11rem]">
                       <Link
                         href={`/deliverables/${d.id}`}
@@ -219,6 +219,14 @@ export default async function DeliverablesPage({
               </TBody>
             </Table>
         )}
+        <Pager
+          basePath="/deliverables"
+          params={params}
+          page={page}
+          totalPages={totalPages}
+          totalItems={all.length}
+          pageSize={PAGE_SIZE}
+        />
       </Card>
     </div>
   );

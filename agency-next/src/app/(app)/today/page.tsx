@@ -4,13 +4,12 @@ import { requireUser, STAFF_ROLES } from "@/lib/auth";
 import {
   getDeliverables,
   getServiceCounts,
-  getClientsMini,
   getAssignees,
   boardEmptyReason,
 } from "@/lib/deliverables";
 import { EmptyBoard } from "@/components/admin/empty-board";
 import { crmClientIds } from "@/lib/crm";
-import { getCategoryMap, getUsedCategories } from "@/lib/categories";
+import { getCategoryMap } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
 import {
@@ -24,7 +23,6 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
-import { TaskFilters } from "@/components/admin/task-filters";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
@@ -61,13 +59,11 @@ export default async function TodayPage({
     crmClientIds: scopeIds,
   };
 
-  const [due, counts, clients, assignees, categoryMap, usedCategories] = await Promise.all([
+  const [due, counts, assignees, categoryMap] = await Promise.all([
     getDeliverables(scoped),
     getServiceCounts(scoped),
-    getClientsMini(scopeIds),
     getAssignees(),
     getCategoryMap(),
-    getUsedCategories(),
   ]);
 
   // With nothing due, show what is coming instead of an empty board. A board
@@ -89,10 +85,6 @@ export default async function TodayPage({
   const page = Math.min(Math.max(1, Math.trunc(Number(sp.page)) || 1), totalPages);
   const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const categories = service
-    ? Array.from(new Set([...categoryMap[service].map((c) => c.name), ...usedCategories]))
-    : usedCategories;
-
   return (
     <div className="space-y-5">
       <div>
@@ -112,20 +104,6 @@ export default async function TodayPage({
       </div>
 
       <ServiceTabs basePath="/today" active={service} counts={counts} params={params} />
-
-      {/* Out in the open, not behind a funnel in the heading.
-          Hiding them saved a strip of screen and cost the thing the strip was
-          for: you could no longer see what the board could be narrowed by
-          without clicking each heading to find out. */}
-      <TaskFilters
-        basePath="/today"
-        params={params}
-        categories={categories}
-        clients={clients}
-        assignees={assignees}
-        showSearch={false}
-        showMonth={false}
-      />
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
