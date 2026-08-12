@@ -139,6 +139,33 @@ export function fixFor(code: number | undefined, message: string): string | unde
   return undefined;
 }
 
+/**
+ * Ask Meta what a token can actually do.
+ *
+ * Called only after a permission error, never on the happy path — it is a
+ * second round trip, and the point of it is to tell two very similar failures
+ * apart. "#200 Missing Permissions" is returned both when the token lacks the
+ * `ads_read` scope and when the token has it but its owner was never given the
+ * ad account. The fix is completely different, and the message is identical.
+ *
+ * Silent on failure: this exists to improve an error, and an error while
+ * improving an error is not worth showing anybody.
+ */
+async function tokenScopes(token: string): Promise<{ type?: string; scopes: string[] } | null> {
+  try {
+    const url =
+      `https://graph.facebook.com/${env.meta.apiVersion}/debug_token` +
+      `?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { data?: { type?: string; scopes?: string[] } };
+    if (!j.data) return null;
+    return { type: j.data.type, scopes: j.data.scopes ?? [] };
+  } catch {
+    return null;
+  }
+}
+
 type InsightRow = {
   date_start?: string;
   spend?: string;
@@ -219,12 +246,34 @@ export async function syncClientAds(
       // Meta's own words, kept verbatim — they are precise and searchable —
       // with the fix alongside, because the message names the symptom.
       const message = payload.error?.message || `HTTP ${res.status}`;
-      return {
-        ok: false,
-        rows: 0,
-        error: message,
-        hint: fixFor(payload.error?.code, message),
-      };
+      const code = payload.error?.code;
+
+      /*
+       * A permission error is two different problems wearing one message, so
+       * ask the token which one it is before guessing. Missing scope and
+       * missing asset assignment both come back as "#200 Missing Permissions",
+       * and sending someone to fix the wrong one costs an afternoon.
+       */
+      let hint = fixFor(code, message);
+      if (code === 200 || code === 10 || code === 272) {
+        const info = await tokenScopes(token);
+        if (info && !info.scopes.includes("ads_read")) {
+          hint =
+            `This token has no ads_read permission — its scopes are ${info.scopes.join(", ") || "none"}. ` +
+            `Regenerate it with ads_read ticked` +
+            (info.type === "SYSTEM_USER"
+              ? " (Business Settings → Users → System Users → Generate New Token)."
+              : ".") +
+            " The ad account assignment is separate and also needed: assign that user to the ad" +
+            " account with at least View Performance.";
+        } else if (info?.scopes.includes("ads_read")) {
+          hint =
+            "The token does carry ads_read, so the scope is not the problem — this user has not " +
+            "been given the ad account. In Business Settings → Users, select them, Add Assets → " +
+            "Ad Accounts → this account → View Performance.";
+        }
+      }
+      return { ok: false, rows: 0, error: message, hint };
     }
   } catch (err) {
     return { ok: false, rows: 0, error: err instanceof Error ? err.message : "Request failed" };
