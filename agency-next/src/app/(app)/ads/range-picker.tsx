@@ -12,13 +12,20 @@ import { RANGES } from "@/lib/date-range";
  * drift apart. Navigates rather than posting: the period is a URL either way,
  * and a router push keeps the scroll position.
  */
-export function RangePicker({ current }: { current: string }) {
+export function RangePicker({
+  current,
+  basePath = "/ads",
+}: {
+  current: string;
+  /** Which board it is narrowing — the client page reuses it. */
+  basePath?: string;
+}) {
   const router = useRouter();
   return (
     <Select
       aria-label="Date range"
       value={RANGES.some((r) => r.key === current) ? current : "this_month"}
-      onChange={(e) => router.push(`/ads?range=${e.target.value}`, { scroll: false })}
+      onChange={(e) => router.push(`${basePath}?range=${e.target.value}`, { scroll: false })}
       className="h-9 w-40 text-sm"
     >
       {RANGES.map((r) => (

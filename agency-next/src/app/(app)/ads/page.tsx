@@ -165,8 +165,12 @@ export default async function AdsPage({
                 {data.rows.map((r) => (
                   <TR key={`${r.clientId}-${r.currency}`}>
                     <TD className="max-w-[12rem]">
+                      {/* Through to this client's own account rather than
+                          their general record: someone clicking a cost per
+                          lead wants the days behind it, and the contact to
+                          ring about them, which is what that page carries. */}
                       <Link
-                        href={`/clients/${r.clientId}`}
+                        href={`/ads/${r.clientId}?range=${key}`}
                         className="font-medium transition-colors hover:text-primary hover:underline"
                       >
                         {r.company}

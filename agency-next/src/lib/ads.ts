@@ -417,6 +417,187 @@ export async function adSummary(from: string, to: string): Promise<AdSummary> {
   };
 }
 
+/* ----------------------------- One client, in full --------------------------- */
+
+export type ClientAdDetail = {
+  client: {
+    id: number;
+    company: string;
+    contactPerson: string | null;
+    email: string | null;
+    phone: string | null;
+    accountId: string | null;
+    monthlyPackage: string | null;
+    packageAmount: number;
+    status: string;
+  };
+  from: string;
+  to: string;
+  /** Every day in range that has data, newest first. */
+  days: {
+    date: string;
+    spend: number;
+    currency: string;
+    impressions: number;
+    reach: number;
+    clicks: number;
+    leads: number;
+    costPerLead: number | null;
+    ctr: number | null;
+  }[];
+  /** The same arithmetic as the board, for this client alone. */
+  totals: {
+    currency: string;
+    spend: number;
+    impressions: number;
+    reach: number;
+    clicks: number;
+    leads: number;
+    costPerLead: number | null;
+    cpm: number | null;
+    ctr: number | null;
+    /** Days with any spend — the denominator for "per day" without lying. */
+    activeDays: number;
+  } | null;
+  /** The cheapest and dearest lead in range, when there is more than one day. */
+  best: { date: string; costPerLead: number } | null;
+  worst: { date: string; costPerLead: number } | null;
+};
+
+/**
+ * One client's ad record, day by day.
+ *
+ * The board answers "what is this costing us across the book"; this answers
+ * "what happened on this account", which is the question asked the moment a
+ * client rings up about their own numbers. Their contact details come with it
+ * for the same reason — the person looking at a cost per lead is usually about
+ * to talk to somebody about it.
+ *
+ * Reads the stored daily rows rather than calling Meta: the sync already
+ * fetched them, and a page that hits the Graph API on every load is a page
+ * that is slow when it matters and broken when the token lapses.
+ */
+export async function clientAdDetail(
+  clientId: number,
+  from: string,
+  to: string
+): Promise<ClientAdDetail | null> {
+  const c = await queryOne<{
+    id: number;
+    company_name: string;
+    contact_person: string | null;
+    email: string | null;
+    phone: string | null;
+    meta_ad_account_id: string | null;
+    monthly_package: string | null;
+    package_amount: string | null;
+    status: string;
+  }>(
+    `SELECT id, company_name, contact_person, email, phone, meta_ad_account_id,
+            monthly_package, package_amount, status
+       FROM clients WHERE id = ?`,
+    [clientId]
+  );
+  if (!c) return null;
+
+  const client = {
+    id: c.id,
+    company: c.company_name,
+    contactPerson: c.contact_person,
+    email: c.email,
+    phone: c.phone,
+    accountId: normaliseAccountId(c.meta_ad_account_id),
+    monthlyPackage: c.monthly_package,
+    packageAmount: Number(c.package_amount) || 0,
+    status: c.status,
+  };
+
+  const { ready } = await adsReadiness();
+  if (!ready) return { client, from, to, days: [], totals: null, best: null, worst: null };
+
+  const rows = await query<{
+    date: string;
+    spend: string;
+    currency: string;
+    impressions: string;
+    reach: string;
+    clicks: string;
+    leads: string;
+  }>(
+    `SELECT date, spend, currency, impressions, reach, clicks, leads
+       FROM ad_insights
+      WHERE client_id = ? AND date BETWEEN ? AND ?
+      ORDER BY date DESC`,
+    [clientId, from, to]
+  );
+
+  const days = rows.map((r) => {
+    const spend = Number(r.spend) || 0;
+    const impressions = Number(r.impressions) || 0;
+    const clicks = Number(r.clicks) || 0;
+    const leads = Number(r.leads) || 0;
+    return {
+      date: String(r.date).slice(0, 10),
+      spend,
+      currency: r.currency || "INR",
+      impressions,
+      reach: Number(r.reach) || 0,
+      clicks,
+      leads,
+      costPerLead: div(spend, leads),
+      ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+    };
+  });
+
+  if (!days.length) return { client, from, to, days, totals: null, best: null, worst: null };
+
+  const sum = (pick: (d: (typeof days)[number]) => number) => days.reduce((s, d) => s + pick(d), 0);
+  const spend = sum((d) => d.spend);
+  const impressions = sum((d) => d.impressions);
+  const clicks = sum((d) => d.clicks);
+  const leads = sum((d) => d.leads);
+
+  /*
+   * The best and worst day, by cost per lead.
+   *
+   * Only days that actually produced a lead are eligible. A day that spent
+   * nothing has no cost per lead at all, and a day that spent money for no
+   * leads is the worst kind — but it has no number to rank, and calling it
+   * "₹0" would put it top of a "cheapest" list.
+   */
+  const ranked = days
+    .filter((d) => d.costPerLead !== null)
+    .sort((a, b) => (a.costPerLead as number) - (b.costPerLead as number));
+
+  return {
+    client,
+    from,
+    to,
+    days,
+    totals: {
+      // One account reports one currency; the first day's is the account's.
+      currency: days[0].currency,
+      spend,
+      impressions,
+      reach: sum((d) => d.reach),
+      clicks,
+      leads,
+      costPerLead: div(spend, leads),
+      cpm: impressions > 0 ? (spend / impressions) * 1000 : null,
+      ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+      activeDays: days.filter((d) => d.spend > 0).length,
+    },
+    best: ranked.length > 1 ? { date: ranked[0].date, costPerLead: ranked[0].costPerLead! } : null,
+    worst:
+      ranked.length > 1
+        ? {
+            date: ranked[ranked.length - 1].date,
+            costPerLead: ranked[ranked.length - 1].costPerLead!,
+          }
+        : null,
+  };
+}
+
 /** When the numbers were last refreshed from Meta, for the "as of" line. */
 export async function lastAdSync(): Promise<string | null> {
   if (!(await hasTable("ad_insights"))) return null;
