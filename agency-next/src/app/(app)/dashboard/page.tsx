@@ -21,6 +21,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceDot } from "@/components/ui/service-badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ProductionSummary } from "@/components/admin/production-summary";
+import { TeamEffectiveness } from "@/components/admin/team-effectiveness";
 import { ServiceMix } from "@/components/admin/service-mix";
 import Link from "next/link";
 import { money, label, fmtDate } from "@/lib/utils";
@@ -168,6 +169,11 @@ export default async function DashboardPage() {
 
       {/* Per-client production summary (reference image 4) */}
       <ProductionSummary rows={production} canEditTargets={user.role === "super_admin"} />
+
+      {/* How the team is doing against the targets set for them. Super admin
+          only: it names individuals, and who is behind today is not something
+          a crm or a fellow admin needs on their own dashboard. */}
+      {user.role === "super_admin" ? <TeamEffectiveness /> : null}
 
       <div className="grid gap-6">
         {/* Upcoming tasks */}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { query, queryOne, execute } from "@/lib/db";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { ASSIGNABLE_ROLES, sqlRoleList } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { monthKey } from "@/lib/utils";
 
@@ -93,7 +94,7 @@ export async function getClientBoard(clientId: number): Promise<ClientBoard | nu
 
   const assignees = await query<{ id: number; name: string }>(
     `SELECT id, name FROM users
-      WHERE is_active = 1 AND role IN ('super_admin','admin','poster_designer','crm')
+      WHERE is_active = 1 AND role IN (${sqlRoleList(ASSIGNABLE_ROLES)})
       ORDER BY name`
   );
 
@@ -150,7 +151,7 @@ export async function quickUpdateTask(
     const u = await queryOne<{ id: number }>(
       `SELECT id FROM users
         WHERE id = ? AND is_active = 1
-          AND role IN ('super_admin','admin','poster_designer','crm')`,
+          AND role IN (${sqlRoleList(ASSIGNABLE_ROLES)})`,
       [assignedTo]
     );
     if (!u) return { ok: false, error: "That team member isn't available." };

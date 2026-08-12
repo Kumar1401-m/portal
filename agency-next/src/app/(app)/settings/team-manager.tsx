@@ -8,6 +8,7 @@ import {
   setTeamMemberActive,
   resetTeamPassword,
   renameTeamMember,
+  setDailyTarget,
   deleteTeamMember,
 } from "./actions";
 import { ActionForm } from "./action-form";
@@ -102,6 +103,32 @@ export function TeamManager({ team, currentUserId }: { team: TeamMember[]; curre
                   )}
                 </div>
               </div>
+
+              {/* Always visible rather than behind a menu: a target that is
+                  hard to find is a target nobody sets, and the effectiveness
+                  board is only as useful as these numbers. */}
+              <ActionForm
+                action={setDailyTarget}
+                submitLabel="Set target"
+                size="sm"
+                variant="secondary"
+                formClassName="flex flex-wrap items-center gap-2"
+              >
+                <input type="hidden" name="id" value={m.id} />
+                <label htmlFor={`dt-${m.id}`} className="text-xs text-muted-foreground">
+                  Tasks a day
+                </label>
+                <Input
+                  id={`dt-${m.id}`}
+                  name="daily_target"
+                  type="number"
+                  min={0}
+                  max={50}
+                  defaultValue={m.daily_target ?? 0}
+                  className="h-9 w-20"
+                />
+                <span className="text-xs text-muted-foreground">0 = no target</span>
+              </ActionForm>
 
               {renaming === m.id ? (
                 <ActionForm

@@ -4,6 +4,7 @@ import { query, queryOne, hasColumn } from "./db";
 import { buildVideoPermalink } from "./video-link";
 import type { CaptionSource } from "./ai";
 import { SERVICE_KEYS, serviceOf, type ServiceKey } from "./services";
+import { ASSIGNABLE_ROLES, sqlRoleList } from "./roles";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -228,7 +229,7 @@ export type Assignee = { id: number; name: string; role: string };
 export async function getAssignees(): Promise<Assignee[]> {
   return query<Assignee>(
     `SELECT id, name, role FROM users
-     WHERE role IN ('super_admin','admin','poster_designer') AND is_active = 1
+     WHERE role IN (${sqlRoleList(ASSIGNABLE_ROLES)}) AND is_active = 1
      ORDER BY name`
   );
 }

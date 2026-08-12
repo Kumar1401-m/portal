@@ -187,6 +187,9 @@ async function main() {
   await addColumn('clients', 'designer_id', 'designer_id BIGINT UNSIGNED DEFAULT NULL');
   await addColumn('clients', 'editor_id', 'editor_id BIGINT UNSIGNED DEFAULT NULL');
 
+  // A per-person daily target, for the team effectiveness board.
+  await addColumn('users', 'daily_target', 'daily_target INT UNSIGNED NOT NULL DEFAULT 0');
+
   // Automatic invoice chasing is per client, and off unless chosen.
   await addColumn('clients', 'auto_payment_reminders', 'auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0');
 

@@ -123,6 +123,13 @@ const EXPECTED: ColumnSpec[] = [
     purpose: "Claim lease — stops two automation runs posting the same video twice.",
   },
   {
+    table: "users",
+    column: "daily_target",
+    definition: "daily_target INT UNSIGNED NOT NULL DEFAULT 0",
+    purpose:
+      "How many tasks this person is expected to finish a day. 0 means no target is set for them.",
+  },
+  {
     table: "clients",
     column: "auto_payment_reminders",
     definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",

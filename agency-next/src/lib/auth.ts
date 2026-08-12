@@ -13,17 +13,13 @@ import { cache } from "react";
 import jwt from "jsonwebtoken";
 import { queryOne } from "./db";
 import { env } from "./env";
+import type { Role } from "./roles";
 
 export const COOKIE_NAME = "erp_session";
 
-export type Role =
-  | "super_admin"
-  | "admin"
-  | "poster_designer"
-  /** Cuts the videos. Sees their own tasks and nothing else. */
-  | "video_editor"
-  | "crm"
-  | "client";
+// One definition, in roles.ts, re-exported here so every existing importer
+// keeps working.
+export type { Role } from "./roles";
 
 export type SessionUser = {
   id: number;
@@ -174,14 +170,7 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
   return user;
 }
 
-/** Staff = anyone who isn't a client. */
-export const STAFF_ROLES: Role[] = [
-  "super_admin",
-  "admin",
-  "poster_designer",
-  "video_editor",
-  "crm",
-];
+export { STAFF_ROLES, ASSIGNABLE_ROLES, sqlRoleList } from "./roles";
 /** Staff for the Posters module, which has no per-client scoping. */
 export const POSTER_ROLES: Role[] = ["super_admin", "admin", "poster_designer"];
 /**
@@ -201,3 +190,4 @@ export const ADMIN_OR_CRM_ROLES: Role[] = ["super_admin", "admin", "crm"];
  *  invoicing) are reserved for super_admin even though a plain admin can see
  *  everything else. */
 export const SUPER_ADMIN_ROLES: Role[] = ["super_admin"];
+

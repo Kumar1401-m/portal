@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { queryOne, execute } from "@/lib/db";
+import { queryOne, execute, hasColumn } from "@/lib/db";
 import { requireUser, ADMIN_ROLES, SUPER_ADMIN_ROLES, type Role } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { saveSettings, type Settings } from "@/lib/settings";
@@ -285,6 +285,45 @@ export async function renameTeamMember(
   await execute("UPDATE users SET name = ? WHERE id = ?", [name, id]);
   revalidatePath("/settings");
   return OK(`Renamed to ${name}.`);
+}
+
+/**
+ * How many tasks a day this person is expected to finish.
+ *
+ * Zero means no target, not a target of zero — the effectiveness board shows
+ * someone without one alongside their work and passes no judgement, because a
+ * green tick for having been forgotten is worse than a blank.
+ *
+ * Capped at fifty. Not a real limit, a typo guard: a target of 500 is a slip
+ * that would mark somebody as failing every day until it was noticed.
+ */
+export async function setDailyTarget(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  await requireUser(SUPER_ADMIN_ROLES);
+  const id = Number(fd.get("id"));
+  const raw = Number(fd.get("daily_target"));
+  if (!id) return FAIL("Missing user.");
+  if (!Number.isFinite(raw) || raw < 0) return FAIL("Enter 0 or more.");
+  if (raw > 50) return FAIL("That looks like a typo — 50 a day is the most this accepts.");
+
+  if (!(await hasColumn("users", "daily_target"))) {
+    return FAIL("Apply the pending database changes first (Settings → Database).");
+  }
+
+  const u = await queryOne<{ name: string }>("SELECT name FROM users WHERE id = ?", [id]);
+  if (!u) return FAIL("User not found.");
+
+  const target = Math.trunc(raw);
+  await execute("UPDATE users SET daily_target = ? WHERE id = ?", [target, id]);
+  revalidatePath("/settings");
+  revalidatePath("/dashboard");
+  return OK(
+    target === 0
+      ? `${u.name} has no daily target — they won't be judged against one.`
+      : `${u.name}: ${target} a day.`
+  );
 }
 
 /**

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser, STAFF_ROLES } from "@/lib/auth";
+import { requireUser, STAFF_ROLES, ASSIGNABLE_ROLES, sqlRoleList } from "@/lib/auth";
 import { queryOne, execute } from "@/lib/db";
 import { canAccessClient } from "@/lib/crm";
 import { sendEmail, sendApprovalRequestEmail } from "@/lib/email";
@@ -101,7 +101,8 @@ export async function runAssistantAction(
       if (!d) return { ok: false, text: "That task no longer exists." };
       if (!(await canAccessClient(user, d.client_id))) return { ok: false, text: "Not your client." };
       const u = await queryOne<{ name: string }>(
-        "SELECT name FROM users WHERE id = ? AND is_active = 1 AND role IN ('super_admin','admin','poster_designer','crm')",
+        `SELECT name FROM users WHERE id = ? AND is_active = 1
+          AND role IN (${sqlRoleList(ASSIGNABLE_ROLES)})`,
         [who]
       );
       if (!u) return { ok: false, text: "That team member isn't available." };
@@ -378,7 +379,7 @@ export async function assignableTeam(): Promise<{ id: number; name: string; role
   const { query } = await import("@/lib/db");
   return query<{ id: number; name: string; role: string }>(
     `SELECT id, name, role FROM users
-      WHERE is_active = 1 AND role IN ('super_admin','admin','poster_designer','crm')
+      WHERE is_active = 1 AND role IN (${sqlRoleList(ASSIGNABLE_ROLES)})
       ORDER BY name`
   );
 }
