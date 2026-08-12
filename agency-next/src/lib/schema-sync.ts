@@ -124,6 +124,13 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "auto_payment_reminders",
+    definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",
+    purpose:
+      "Chase this client's overdue invoices on WhatsApp automatically, with a payment link. Off unless chosen.",
+  },
+  {
+    table: "clients",
     column: "ads_access_token",
     definition: "ads_access_token TEXT DEFAULT NULL",
     purpose:

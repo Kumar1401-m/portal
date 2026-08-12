@@ -119,10 +119,27 @@ export async function sendStaffWelcomeEmail(
   );
 }
 
+/**
+ * The invoice itself, when it is first raised.
+ *
+ * `payUrl` is a real payment link when one could be made, and the portal
+ * otherwise. It used to always be the portal, which asked a client to remember
+ * a password in order to give us money — at the one moment they were most
+ * willing to. The WhatsApp reminder chasing this same invoice a week later
+ * carried a payable link, so the friction was worst on the first message and
+ * best on the fourth.
+ */
 export async function sendInvoiceEmail(
   client: { company_name: string; email?: string | null },
-  invoice: { invoice_no: string; total: number | string; due_date?: string | null }
+  invoice: {
+    invoice_no: string;
+    total: number | string;
+    due_date?: string | null;
+    payUrl?: string | null;
+    payable?: boolean;
+  }
 ) {
+  const payable = Boolean(invoice.payable && invoice.payUrl);
   return sendEmail(
     client.email,
     `Invoice ${invoice.invoice_no}`,
@@ -130,7 +147,11 @@ export async function sendInvoiceEmail(
     `<p>Hi ${esc(client.company_name)},</p>
      <p>Your invoice <b>${esc(invoice.invoice_no)}</b> for <b>${money(invoice.total)}</b> is ready${
        invoice.due_date ? ` (due ${esc(invoice.due_date)})` : ""
-     }.</p>${button("/portal", "View & pay")}`
+     }.</p>` +
+      button(invoice.payUrl || "/portal", payable ? "Pay now" : "View & pay") +
+      (payable
+        ? `<p style="color:#6b7280;font-size:13px">Opens straight into UPI, card or net banking — no login needed.</p>`
+        : "")
   );
 }
 

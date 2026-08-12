@@ -187,6 +187,9 @@ async function main() {
   await addColumn('clients', 'designer_id', 'designer_id BIGINT UNSIGNED DEFAULT NULL');
   await addColumn('clients', 'editor_id', 'editor_id BIGINT UNSIGNED DEFAULT NULL');
 
+  // Automatic invoice chasing is per client, and off unless chosen.
+  await addColumn('clients', 'auto_payment_reminders', 'auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0');
+
   // Reading ad spend needs a User/System User token with ads_read — a Page
   // token cannot do it, so it is a separate field from ig_access_token.
   await addColumn("clients", "ads_access_token", "ads_access_token TEXT DEFAULT NULL");

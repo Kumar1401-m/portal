@@ -6,6 +6,7 @@ import { queryOne, transaction, type ResultSetHeader } from "@/lib/db";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
 import { notifyClientById } from "@/lib/notify";
 import { sendInvoiceEmail, sendPaidInvoiceEmail } from "@/lib/email";
+import { paymentLinkForInvoice } from "@/lib/payment-links";
 import { getAgencyInbox } from "@/lib/settings";
 import { money } from "@/lib/utils";
 
@@ -44,8 +45,11 @@ export async function createInvoice(formData: FormData): Promise<void> {
   }
 
   let invoiceNo = "";
+  // Kept from the transaction rather than looked up again afterwards — the
+  // row was just inserted, so its id is already known.
+  let newInvoiceId = 0;
   try {
-    invoiceNo = await transaction(async (conn) => {
+    ({ invoiceNo, newInvoiceId } = await transaction(async (conn) => {
       const year = new Date().getFullYear();
       const [seq] = await conn.execute(
         "SELECT COUNT(*) AS n FROM invoices WHERE invoice_no LIKE ?",
@@ -76,8 +80,8 @@ export async function createInvoice(formData: FormData): Promise<void> {
         "INSERT INTO payments (invoice_id, client_id, amount, status) VALUES (?,?,?,'pending')",
         [invoiceId, clientId, total]
       );
-      return no;
-    });
+      return { invoiceNo: no, newInvoiceId: invoiceId };
+    }));
   } catch {
     redirect("/payments/new?error=failed");
   }
@@ -92,8 +96,28 @@ export async function createInvoice(formData: FormData): Promise<void> {
     "/portal/invoices",
     false
   );
+  /*
+   * The invoice goes out with a link that can actually be paid.
+   *
+   * The same link the weekly WhatsApp chase uses, minted here instead so it
+   * exists from the first message rather than the fourth — the moment a client
+   * is most willing to pay is the moment the invoice lands, and until now that
+   * was the one message that asked them to remember a portal password first.
+   *
+   * Cached on the invoice, so the reminder a week later carries this same
+   * link. Awaited rather than fired off: the email needs it, and it is one
+   * request. Failure falls back to the portal page inside `paymentLinkForInvoice`,
+   * so a Razorpay outage delays nobody's invoice.
+   */
   if (formData.get("send_email") !== null) {
-    sendInvoiceEmail(client!, { invoice_no: invoiceNo, total, due_date: dueDate }).catch(() => {});
+    const link = newInvoiceId ? await paymentLinkForInvoice(newInvoiceId) : null;
+    sendInvoiceEmail(client!, {
+      invoice_no: invoiceNo,
+      total,
+      due_date: dueDate,
+      payUrl: link?.url ?? null,
+      payable: link?.payable ?? false,
+    }).catch(() => {});
   }
 
   revalidatePath("/payments");

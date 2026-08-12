@@ -402,8 +402,25 @@ async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: n
  *
  * The scope key carries the ISO week, so the reminder repeats weekly for as
  * long as it stays unpaid without becoming daily nagging.
+ *
+ * **Only clients who were chosen for it.** Chasing money automatically is not
+ * something to do to a whole book of clients by default — some are invoiced on
+ * a handshake, some have a finance contact who is not in the WhatsApp group,
+ * and some would simply take it badly. `auto_payment_reminders` is off unless
+ * somebody ticks it, per client.
+ *
+ * The gate applies only where the column exists, so a database the migration
+ * has not reached keeps behaving exactly as it did rather than silently going
+ * quiet. Applying the migration is what switches everyone off until chosen —
+ * which is the point of it.
+ *
+ * Sending by hand from Settings → Reminders is unaffected: a person deciding
+ * to chase one client today needs no flag.
  */
-function findUnpaidInvoices() {
+async function findUnpaidInvoices() {
+  const gated = (await hasColumn("clients", "auto_payment_reminders"))
+    ? "AND c.auto_payment_reminders = 1"
+    : "";
   return query<{
     id: number;
     invoice_no: string;
@@ -420,6 +437,7 @@ function findUnpaidInvoices() {
        JOIN ${ONE_GROUP} g ON g.client_id = c.id
       WHERE i.status IN ('sent','overdue','partial')
         AND i.due_date IS NOT NULL AND i.due_date <= CURDATE()
+        ${gated}
       LIMIT 50`
   );
 }

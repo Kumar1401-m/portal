@@ -44,6 +44,7 @@ export type ClientDefaults = Partial<{
   whatsapp_number: string;
   auto_publish: boolean;
   youtube_enabled: boolean;
+  auto_payment_reminders: boolean;
   youtube_channel_id: string;
   meta_ad_account_id: string;
   ads_access_token: string;
@@ -288,6 +289,33 @@ export function ClientForm({
 
           {/* The ad account, which is what the Ad management board reads. It
               is not the Page or the IG account — those cannot report spend. */}
+          {/* Chasing money automatically is not something to do to a whole
+              book of clients. Some are invoiced on a handshake, some have a
+              finance contact who is not in this group, and some would take it
+              badly — so it is per client and off unless chosen. Sending a
+              reminder by hand from Settings → Reminders never needs this. */}
+          <label
+            htmlFor="auto_payment_reminders"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="auto_payment_reminders"
+              type="checkbox"
+              name="auto_payment_reminders"
+              value="1"
+              defaultChecked={d.auto_payment_reminders}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Chase unpaid invoices on WhatsApp</span>
+              <br />
+              <span className="text-muted-foreground">
+                Once the due date passes, this client&apos;s group gets a weekly reminder with a
+                payment link they can tap — no login. Off unless you tick it.
+              </span>
+            </span>
+          </label>
+
           <Field label="Meta ad account id" name="meta_ad_account_id">
             <Input
               id="meta_ad_account_id"
