@@ -187,6 +187,17 @@ async function main() {
   await addColumn('clients', 'designer_id', 'designer_id BIGINT UNSIGNED DEFAULT NULL');
   await addColumn('clients', 'editor_id', 'editor_id BIGINT UNSIGNED DEFAULT NULL');
 
+  // YouTube, published by the n8n runner in the same minute as Instagram.
+  await addColumn('clients', 'youtube_enabled', 'youtube_enabled TINYINT(1) NOT NULL DEFAULT 0');
+  await addColumn('clients', 'youtube_channel_id', 'youtube_channel_id VARCHAR(64) DEFAULT NULL');
+  await addColumn('deliverables', 'youtube_status', "youtube_status VARCHAR(20) NOT NULL DEFAULT 'none'");
+  await addColumn('deliverables', 'youtube_video_id', 'youtube_video_id VARCHAR(32) DEFAULT NULL');
+  await addColumn('deliverables', 'youtube_url', 'youtube_url VARCHAR(255) DEFAULT NULL');
+  await addColumn('deliverables', 'youtube_posted_at', 'youtube_posted_at DATETIME DEFAULT NULL');
+  await addColumn('deliverables', 'youtube_attempts', 'youtube_attempts INT UNSIGNED NOT NULL DEFAULT 0');
+  await addColumn('deliverables', 'youtube_error', 'youtube_error TEXT DEFAULT NULL');
+  await addColumn('deliverables', 'youtube_locked_at', 'youtube_locked_at DATETIME DEFAULT NULL');
+
   /* ---- Cluster E: task discussion (Slack-style comments with attachments) ---- */
   await run('task_comments table', `
     CREATE TABLE IF NOT EXISTS task_comments (

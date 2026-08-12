@@ -122,6 +122,63 @@ const EXPECTED: ColumnSpec[] = [
     definition: "post_locked_at DATETIME DEFAULT NULL",
     purpose: "Claim lease — stops two automation runs posting the same video twice.",
   },
+  /* --- YouTube, posted alongside Instagram by the n8n runner --- */
+  {
+    table: "clients",
+    column: "youtube_enabled",
+    definition: "youtube_enabled TINYINT(1) NOT NULL DEFAULT 0",
+    purpose: "Opt-in to posting this client's videos to YouTube as well. Off unless asked for.",
+  },
+  {
+    table: "clients",
+    column: "youtube_channel_id",
+    definition: "youtube_channel_id VARCHAR(64) DEFAULT NULL",
+    purpose: "Which channel to upload to, when the connected account owns several.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_status",
+    definition:
+      "youtube_status VARCHAR(20) NOT NULL DEFAULT 'none'", // none|scheduled|processing|posted|failed
+    purpose: "Where this video is in the YouTube queue — the column the runner selects on.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_video_id",
+    definition: "youtube_video_id VARCHAR(32) DEFAULT NULL",
+    purpose: "The uploaded video's YouTube id.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_url",
+    definition: "youtube_url VARCHAR(255) DEFAULT NULL",
+    purpose: "Watch link, for the task page and the client's report.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_posted_at",
+    definition: "youtube_posted_at DATETIME DEFAULT NULL",
+    purpose: "When it went live on YouTube.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_attempts",
+    definition: "youtube_attempts INT UNSIGNED NOT NULL DEFAULT 0",
+    purpose: "Upload attempts so far — the budget that stops a broken video retrying for ever.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_error",
+    definition: "youtube_error TEXT DEFAULT NULL",
+    purpose: "Why the last upload failed, in YouTube's own words.",
+  },
+  {
+    table: "deliverables",
+    column: "youtube_locked_at",
+    definition: "youtube_locked_at DATETIME DEFAULT NULL",
+    purpose: "Claim lease — stops two runs uploading the same video twice.",
+  },
+
   {
     table: "clients",
     column: "editor_id",

@@ -74,6 +74,12 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   if (await hasColumn("clients", "editor_id")) {
     columns.editor_id = editor ? Number(editor) : null;
   }
+  // Posting to a second live account is never inferred, only ticked — the same
+  // rule auto_publish follows, and for the same reason.
+  if (await hasColumn("clients", "youtube_enabled")) {
+    columns.youtube_enabled = fd.get("youtube_enabled") ? 1 : 0;
+    columns.youtube_channel_id = orNull(s(fd, "youtube_channel_id"));
+  }
 
   /* ---- Instagram automation. Guarded because these columns arrive with a
      later migration, and a database that has not run it must still be able to

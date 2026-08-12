@@ -1,0 +1,279 @@
+{
+  "name": "Portal — post to YouTube",
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "b7c1e2f3-0001-4000-8000-000000000001",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-620, 0],
+      "notes": "Matches the Instagram runner, so a video due at 5pm goes to both within the same quarter hour. The portal decides what is due; this only asks."
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/youtube/queue?limit=5",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "b7c1e2f3-0002-4000-8000-000000000002",
+      "name": "What is due",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 0],
+      "notes": "Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env — the same value the other portal workflows use.\n\nRead-only. Five at a time, because each one downloads and re-uploads a whole video file and a run that tries twenty will still be going when the next trigger fires."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.items",
+        "options": {}
+      },
+      "id": "b7c1e2f3-0003-4000-8000-000000000003",
+      "name": "One video at a time",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-180, 0],
+      "notes": "An empty queue produces no items and the run simply ends here, which is the normal outcome most of the day."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvkhub.vercel.app/api/automation/youtube/claim",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ deliverable_id: $json.deliverable_id, run_id: $execution.id }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "b7c1e2f3-0004-4000-8000-000000000004",
+      "name": "Claim it",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 0],
+      "notes": "The lock. A conditional UPDATE in the portal decides who gets the row, so two overlapping runs can never both upload the same video.\n\n409 here is normal, not a failure: another run got there first. neverError keeps the run alive so the IF below can skip this one and carry on."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "claimed",
+              "leftValue": "={{ $json.body.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b7c1e2f3-0005-4000-8000-000000000005",
+      "name": "Did we get it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [260, 0],
+      "notes": "False means somebody else has it, it is already up, or it ran out of attempts. All three mean: skip quietly."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.item.video_url }}",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "b7c1e2f3-0006-4000-8000-000000000006",
+      "name": "Download the video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, -100],
+      "onError": "continueErrorOutput",
+      "notes": "The reason this workflow exists rather than the portal doing it. YouTube needs the bytes, not a URL, and a serverless function has neither the time nor the memory to carry a 200MB file.\n\nTen minutes, because that is a slow office connection on a long video. The signed URL from the portal is valid for twelve hours, so it will not expire underneath this."
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Claim it').item.json.body.item.title }}",
+        "regionCode": "IN",
+        "categoryId": "22",
+        "options": {
+          "description": "={{ $('Claim it').item.json.body.item.description }}",
+          "tags": "={{ ($('Claim it').item.json.body.item.tags || []).join(',') }}",
+          "privacyStatus": "={{ $('Claim it').item.json.body.item.privacy_status }}",
+          "selfDeclaredMadeForKids": false,
+          "notifySubscribers": true
+        }
+      },
+      "id": "b7c1e2f3-0007-4000-8000-000000000007",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [740, -180],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "YouTube account"
+        }
+      },
+      "notes": "Set up the credential once: n8n → Credentials → YouTube OAuth2 API, signed in as the account that owns the channel. Scope youtube.upload.\n\nCategory 22 is People & Blogs, the sane default for agency content. A vertical video whose title carries #Shorts becomes a Short automatically — the portal adds that suffix for Reel-format tasks."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvkhub.vercel.app/api/automation/youtube/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ deliverable_id: $('Claim it').item.json.body.item.deliverable_id, status: 'posted', video_id: $json.id, url: 'https://youtu.be/' + $json.id }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "b7c1e2f3-0008-4000-8000-000000000008",
+      "name": "Tell the portal it worked",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, -180],
+      "notes": "Stores the video id and watch link, and marks it posted. Replaying this for something already posted is a no-op."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvkhub.vercel.app/api/automation/youtube/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ deliverable_id: $('Claim it').item.json.body.item.deliverable_id, status: 'failed', error_message: ($json.error && ($json.error.message || $json.error)) ? String($json.error.message || $json.error).slice(0, 500) : 'Upload failed', permanent: /quotaExceeded|forbidden|unauthorized|invalid_grant|not found/i.test(String($json.error && ($json.error.message || $json.error) || '')) }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "b7c1e2f3-0009-4000-8000-000000000009",
+      "name": "Tell the portal it failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, 40],
+      "notes": "Both failure paths land here — a download that would not come and an upload YouTube refused.\n\nThe portal decides whether to try again; this only reports. `permanent` is a hint for the cases where another go plainly cannot help: a revoked credential, a channel that is gone, a daily quota already spent. Getting the hint wrong is safe either way — the attempt budget stops it regardless."
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [[{ "node": "What is due", "type": "main", "index": 0 }]]
+    },
+    "What is due": {
+      "main": [[{ "node": "One video at a time", "type": "main", "index": 0 }]]
+    },
+    "One video at a time": {
+      "main": [[{ "node": "Claim it", "type": "main", "index": 0 }]]
+    },
+    "Claim it": {
+      "main": [[{ "node": "Did we get it?", "type": "main", "index": 0 }]]
+    },
+    "Did we get it?": {
+      "main": [[{ "node": "Download the video", "type": "main", "index": 0 }], []]
+    },
+    "Download the video": {
+      "main": [
+        [{ "node": "Upload to YouTube", "type": "main", "index": 0 }],
+        [{ "node": "Tell the portal it failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upload to YouTube": {
+      "main": [
+        [{ "node": "Tell the portal it worked", "type": "main", "index": 0 }],
+        [{ "node": "Tell the portal it failed", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

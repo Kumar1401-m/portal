@@ -39,6 +39,8 @@ export type ClientFull = {
   whatsapp_number: string | null;
   /** Opt-in to unattended posting. Off unless someone deliberately ticks it. */
   auto_publish: number | null;
+  youtube_enabled: number | null;
+  youtube_channel_id: string | null;
   analytics_enabled: number | null;
   is_personal: number;
   login_email: string | null;

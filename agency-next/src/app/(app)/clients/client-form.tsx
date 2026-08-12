@@ -43,6 +43,8 @@ export type ClientDefaults = Partial<{
   ig_access_token: string;
   whatsapp_number: string;
   auto_publish: boolean;
+  youtube_enabled: boolean;
+  youtube_channel_id: string;
   is_personal: boolean;
   crm_user_ids: number[];
 }>;
@@ -254,6 +256,42 @@ export function ClientForm({
               </span>
             </span>
           </label>
+
+          {/* A second, separate opt-in rather than a consequence of the first.
+              They are different accounts with different consequences: a client
+              may well want the reel and not the Short, and turning on Instagram
+              posting should never quietly start uploading to a YouTube channel
+              nobody mentioned. */}
+          <label
+            htmlFor="youtube_enabled"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="youtube_enabled"
+              type="checkbox"
+              name="youtube_enabled"
+              value="1"
+              defaultChecked={d.youtube_enabled}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Post the same video to YouTube</span>
+              <br />
+              <span className="text-muted-foreground">
+                The same file goes up as a Short in the same minute as the Reel. Reels and
+                Instagram posting are independent — one failing never holds up the other.
+              </span>
+            </span>
+          </label>
+
+          <Field label="YouTube channel ID (optional)" name="youtube_channel_id">
+            <Input
+              id="youtube_channel_id"
+              name="youtube_channel_id"
+              placeholder="UC… — only if the connected account owns more than one channel"
+              defaultValue={d.youtube_channel_id}
+            />
+          </Field>
 
         </CardContent>
       </Card>

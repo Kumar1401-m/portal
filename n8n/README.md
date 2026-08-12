@@ -59,6 +59,30 @@ encoding is resumed rather than started again. A non-200 stops the execution and
 red in n8n's list, because a publisher that quietly stopped working is the failure
 worth catching.
 
+**`youtube-runner.json`** — every 15 minutes, and the odd one out: it does the work
+itself instead of asking the portal to. Instagram is handed a URL and fetches the file,
+so a serverless function can drive it in milliseconds. YouTube takes the bytes —
+`videos.insert` is a resumable upload of the whole video, which is the one thing a
+Vercel function cannot do. So this workflow downloads the file and uploads it from the
+machine n8n already runs on, holding the Google credential n8n already knows how to
+store. The portal decides what and when; n8n does the carrying.
+
+It reads the same `scheduled_at` as the Instagram runner, which is what makes a reel and
+its Short go out in the same minute — not one waiting on the other. They fail
+independently on purpose: Meta rejecting a container should not hold back the Short, and
+a channel out of quota should not stop the reel.
+
+Four steps, the same shape as the Instagram one: `queue` → `claim` → upload →
+`result`. The claim is a conditional `UPDATE`, so two overlapping runs can never put two
+copies on a channel, and a run that dies partway releases its row when the lease
+expires.
+
+**Before it will run**, two things: in n8n, add a **YouTube OAuth2 API** credential
+signed in as the account that owns the channel, and point the *Upload to YouTube* node
+at it; and in the portal, tick **Post the same video to YouTube** on each client that
+wants it. It is off by default, per client, for the same reason auto-publish is —
+uploading to a live channel nobody mentioned is not a thing to infer.
+
 **`nightly-analyse.json`** — 02:30 daily, `GET /api/automation/analyse`. Watches new
 videos so the caption generator has something to work from. Overnight because it costs
 an AI call per video and nobody is waiting on it.

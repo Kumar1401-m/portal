@@ -20,6 +20,7 @@ import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
 import { clientDefaults, defaultAssigneeFor } from "@/lib/clients";
+import { youtubeHandoff } from "@/lib/youtube";
 import { notifyClientById, notifyUser, notifyAdmins } from "@/lib/notify";
 import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
@@ -501,6 +502,9 @@ type WfRow = {
   /** Both are conditions the publish queue insists on — see applyStatus. */
   auto_publish: number | null;
   ig_user_id: string | null;
+  /** The YouTube half of the same handoff. Null on a database without it. */
+  youtube_enabled: number | null;
+  youtube_status: string | null;
 };
 
 /**
@@ -519,9 +523,14 @@ async function applyStatus(
   if (!(STATUS_LIST as readonly string[]).includes(status)) {
     return { ok: false, error: "Invalid status." };
   }
+  // Feature-gated: the portal has to keep working on a database the YouTube
+  // migration has not reached, and a missing column would take down every
+  // status change rather than just the upload it enables.
+  const hasYouTube = await hasColumn("clients", "youtube_enabled");
   const d = await queryOne<WfRow>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
-            d.instagram_status, d.scheduled_at, c.auto_publish, c.ig_user_id
+            d.instagram_status, d.scheduled_at, c.auto_publish, c.ig_user_id,
+            ${hasYouTube ? "c.youtube_enabled, d.youtube_status" : "NULL AS youtube_enabled, NULL AS youtube_status"}
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [id]
@@ -596,6 +605,9 @@ async function applyStatus(
   let scheduleWarning: string | null = null;
   if (effective === "scheduled") {
     Object.assign(updates, publishHandoff(d));
+    // Same slot, both platforms. Writes nothing at all unless the client is
+    // opted in, so a portal that never touches YouTube behaves as before.
+    if (hasYouTube) Object.assign(updates, youtubeHandoff(d));
     const missing = [
       Number(d.auto_publish) === 1 ? null : "auto-publish is off for this client",
       d.ig_user_id ? null : "no Instagram account is linked to this client",
