@@ -151,8 +151,16 @@ export default async function TodayPage({
                 <th>Design status</th>
                 <th>Post status</th>
                 <th className="hidden 2xl:table-cell">Caption</th>
-                <th className="text-center">Shoot</th>
-                <th className="text-center">Video</th>
+                {/* Raw footage and the cut video are the video track's, and a
+                    poster designer has neither — the two columns were a dash
+                    on every row of their board, spending width to say nothing
+                    twice. */}
+                {isDesigner ? null : (
+                  <>
+                    <th className="text-center">Shoot</th>
+                    <th className="text-center">Video</th>
+                  </>
+                )}
                 <th className="hidden 2xl:table-cell">Remarks</th>
                 <th className="text-right">Actions</th>
               </tr>
@@ -206,20 +214,24 @@ export default async function TodayPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="whitespace-nowrap text-center">
-                      {d.raw_drive_link ? (
-                        <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap text-center">
-                      {d.edited_link || d.cloud_video_link ? (
-                        <a href={d.edited_link || d.cloud_video_link!} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TD>
+                    {isDesigner ? null : (
+                      <>
+                        <TD className="whitespace-nowrap text-center">
+                          {d.raw_drive_link ? (
+                            <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TD>
+                        <TD className="whitespace-nowrap text-center">
+                          {d.edited_link || d.cloud_video_link ? (
+                            <a href={d.edited_link || d.cloud_video_link!} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TD>
+                      </>
+                    )}
                     <TD className="hidden max-w-[8rem] truncate text-muted-foreground 2xl:table-cell" title={d.reject_reason ?? d.writer_notes ?? ""}>
                       {d.reject_reason || d.writer_notes || "—"}
                     </TD>

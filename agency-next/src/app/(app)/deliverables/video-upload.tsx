@@ -66,6 +66,7 @@ export function CaptionLine({ note }: { note: NonNullable<CaptionNote> }) {
 export function VideoUpload({
   deliverableId,
   currentUrl,
+  isPoster = false,
   onUploaded,
   onCaption,
   onCaptioningChange,
@@ -73,6 +74,15 @@ export function VideoUpload({
 }: {
   deliverableId: number;
   currentUrl?: string | null;
+  /**
+   * A poster task takes an image, not a video.
+   *
+   * The button said "Upload Video" on a poster, and worse, the file picker
+   * was filtered to video/* and the check below refused anything that was not
+   * one — so a designer's PNG could not be attached at all, and the reason
+   * given was that it did not look like a video.
+   */
+  isPoster?: boolean;
   onUploaded?: (url: string) => void;
   /** Fires when the AI has written a caption for the video just uploaded. */
   onCaption?: (caption: string) => void;
@@ -182,9 +192,10 @@ export function VideoUpload({
     // read as progress on this upload.
     say(null);
 
-    if (!file.type.startsWith("video/")) {
+    const wanted = isPoster ? "image/" : "video/";
+    if (!file.type.startsWith(wanted)) {
       setPhase("error");
-      setError("That doesn't look like a video file.");
+      setError(`That doesn't look like ${isPoster ? "an image" : "a video"} file.`);
       return;
     }
 
@@ -292,7 +303,7 @@ export function VideoUpload({
           className={buttonClasses({ variant: url ? "secondary" : "default", size: "sm" })}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-          {url ? "Upload new" : "Upload Video"}
+          {url ? "Upload new" : isPoster ? "Upload Poster" : "Upload Video"}
         </button>
 
         {filename ? (
@@ -316,7 +327,7 @@ export function VideoUpload({
         <input
           ref={inputRef}
           type="file"
-          accept="video/*"
+          accept={isPoster ? "image/*" : "video/*"}
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0];

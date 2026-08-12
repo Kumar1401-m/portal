@@ -20,9 +20,23 @@ export default async function PosterPage() {
   const posters = await getPosters(user);
   const isDesigner = user.role === "poster_designer";
 
-  const todo = posters.filter((p) => !posterDone(p.status) && !posterInReview(p.status));
-  const inReview = posters.filter((p) => posterInReview(p.status));
-  const done = posters.filter((p) => posterDone(p.status));
+  /*
+   * Counts for the people who don't have them anywhere else.
+   *
+   * A designer already lands on My work, which answers these same three
+   * questions about their own workload — and answers them across every month
+   * rather than only what is on this page. Repeating them here made the screen
+   * they come to *do the work* open with a second, slightly different summary
+   * of it. For a super admin there is no such page: this one spans every
+   * client, so the totals are the only place that shape is visible.
+   */
+  const counts = isDesigner
+    ? null
+    : {
+        todo: posters.filter((p) => !posterDone(p.status) && !posterInReview(p.status)).length,
+        inReview: posters.filter((p) => posterInReview(p.status)).length,
+        done: posters.filter((p) => posterDone(p.status)).length,
+      };
 
   return (
     <div className="space-y-6">
@@ -36,11 +50,13 @@ export default async function PosterPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="To design" value={todo.length} tone="amber" />
-        <StatCard title="In review" value={inReview.length} tone="indigo" />
-        <StatCard title="Completed" value={done.length} tone="emerald" />
-      </div>
+      {counts ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard title="To design" value={counts.todo} tone="amber" />
+          <StatCard title="In review" value={counts.inReview} tone="indigo" />
+          <StatCard title="Completed" value={counts.done} tone="emerald" />
+        </div>
+      ) : null}
 
       {posters.length === 0 ? (
         <Card>

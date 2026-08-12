@@ -53,7 +53,7 @@ await mk("ZZ next week", "pending", nextWeek);
 
 /* ---------------- everything, with the work still to do first ---------------- */
 {
-  const rows = await d.getDeliverables({ openFirst: true, client: clientId });
+  const rows = await d.getDeliverables({ openFirst: true, clientId });
   const titles = rows.map((r) => r.title);
   assert.equal(rows.length, 4, "the board holds every task, finished ones included");
   assert.deepEqual(
@@ -64,14 +64,14 @@ await mk("ZZ next week", "pending", nextWeek);
   ok("open work leads, oldest first — so page one is the day's work");
 
   // Without the flag the old order stands, which is what the Tasks board uses.
-  const plain = await d.getDeliverables({ client: clientId });
+  const plain = await d.getDeliverables({ clientId });
   assert.equal(plain[0].title, "ZZ old and done", "a 2020 date sorts first when nothing reorders it");
   ok("the flag is opt-in — the Tasks board's own order is untouched");
 }
 
 /* ---------------- typing finds it ---------------- */
 {
-  const byTitle = await d.getDeliverables({ q: "overdue", client: clientId });
+  const byTitle = await d.getDeliverables({ q: "overdue", clientId });
   assert.deepEqual(byTitle.map((r) => r.title), ["ZZ overdue"], "a title matches");
 
   // The client's name is the first column on the board, so it is the first

@@ -132,9 +132,18 @@ export default async function MyWorkPage({
         </Card>
       ) : null}
 
-      {/* What to pick up. Across every month, because last month's leftover is
-          the first thing to do, not the thing this page hides. */}
-      {work.upNext.length > 0 ? (
+      {/*
+        What to pick up. Across every month, because last month's leftover is
+        the first thing to do, not the thing this page hides.
+
+        Not for a designer. Their Posters page is already this same list —
+        every poster assigned to them, soonest first — with the box to paste
+        the design link beside each one. Repeating it here gave them the rows
+        without the one control that makes the rows worth having, so it was a
+        worse copy of a page one click away. An editor has no such page: My
+        work is their whole portal, and this is the worklist in it.
+      */}
+      {!isDesigner && work.upNext.length > 0 ? (
         <Card className="overflow-hidden">
           <CardHeader>
             <CardTitle className="text-base">Up next</CardTitle>

@@ -24,7 +24,18 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 
 const TAG = "ZZ mywork";
 const MONTH = new Date().toISOString().slice(0, 7);
-const today = new Date().toISOString().slice(0, 10);
+/*
+ * The database's today, not this process's.
+ *
+ * The queries under test compare against `CURDATE()`, and this database's
+ * clock is IST while `toISOString()` is UTC — so for five and a half hours
+ * each evening they are different dates, and a row created as "due today"
+ * was already overdue by the time the query looked at it. The test then
+ * failed once a day, in the evening, for a reason no one would guess.
+ */
+const today = String(
+  (await db.queryOne("SELECT CURDATE() AS d")).d
+).slice(0, 10);
 const day = (n) => `${MONTH}-${String(n).padStart(2, "0")}`;
 
 const clean = async () => {

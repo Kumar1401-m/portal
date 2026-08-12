@@ -323,9 +323,10 @@ export function EditVideoModal({
 
             {canUploadVideo ? (
             <div className="space-y-2">
-              <Label>Finished video</Label>
+              <Label>{isPoster ? "Finished poster" : "Finished video"}</Label>
               <VideoUpload
                 deliverableId={d.id}
+                isPoster={isPoster}
                 currentUrl={d.cloud_video_link}
                 onUploaded={setEditedLink}
                 // Only fires when the task had no caption, so this can't
