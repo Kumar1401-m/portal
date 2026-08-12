@@ -13,6 +13,7 @@ import { setClientCrmAccess } from "@/lib/crm";
 import { generateMonthTasks, syncMonthToTarget } from "@/lib/task-plan";
 import { monthKey } from "@/lib/utils";
 import { clearClientVideoData } from "@/lib/clear-video-data";
+import { normaliseAccountId } from "@/lib/ads";
 
 const PAYMENT_PLANS = ["monthly", "quarterly", "half_yearly", "yearly", "one_time"];
 const STATUSES = ["active", "inactive", "paused", "churned"];
@@ -76,6 +77,11 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   }
   // Posting to a second live account is never inferred, only ticked — the same
   // rule auto_publish follows, and for the same reason.
+  // Normalised on the way in, so "1234567890" and "act_ 1234567890" both
+  // store the one form the Graph API accepts.
+  if (await hasColumn("clients", "meta_ad_account_id")) {
+    columns.meta_ad_account_id = normaliseAccountId(s(fd, "meta_ad_account_id"));
+  }
   if (await hasColumn("clients", "youtube_enabled")) {
     columns.youtube_enabled = fd.get("youtube_enabled") ? 1 : 0;
     columns.youtube_channel_id = orNull(s(fd, "youtube_channel_id"));

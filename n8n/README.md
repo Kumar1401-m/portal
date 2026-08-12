@@ -83,6 +83,25 @@ at it; and in the portal, tick **Post the same video to YouTube** on each client
 wants it. It is off by default, per client, for the same reason auto-publish is —
 uploading to a live channel nobody mentioned is not a thing to infer.
 
+**`ads-sync.json`** — 03:30 daily, `GET /api/automation/ads/sync`. Pulls each client's
+Meta ad spend, impressions and leads into `ad_insights`, one row per client per day, and
+that is what the Ad management board reads.
+
+Twenty-eight days every night, not just yesterday. Meta keeps restating conversions as
+attribution settles, so a figure fetched once on the day never becomes correct —
+re-pulling the window is what makes the board still agree with Ads Manager a month later.
+Every row is an upsert on (client, day), so running it twice changes nothing.
+
+One client's expired token comes back inside a 200 with a `failures` list rather than
+failing the run: that is a fixable fact for a person, and showing the whole workflow red
+every night for it is how a red workflow stops meaning anything. A non-200 does stop and
+report, because a spend board that quietly stopped updating still looks like a spend
+board.
+
+**Needs `ads_read`.** A Page or Instagram token cannot read ad spend, whatever else it
+can do. The client's `meta_ad_account_id` (the `act_…` from Ads Manager) goes on their
+edit page.
+
 **`nightly-analyse.json`** — 02:30 daily, `GET /api/automation/analyse`. Watches new
 videos so the caption generator has something to work from. Overnight because it costs
 an AI call per video and nobody is waiting on it.

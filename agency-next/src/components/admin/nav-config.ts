@@ -1,6 +1,7 @@
 import type { Role } from "@/lib/auth";
 import {
   Briefcase,
+  Megaphone,
   LayoutDashboard,
   CalendarCheck,
   Users,
@@ -57,6 +58,7 @@ export const NAV: NavItem[] = [
   { label: "Approvals", href: "/approvals", icon: CheckCircle2, roles: ADMIN_OR_CRM, ready: true },
   { label: "Posters", href: "/poster", icon: ImageIcon, roles: ALL_STAFF, ready: true },
   { label: "Payments", href: "/payments", icon: CreditCard, roles: ADMIN, ready: true },
+  { label: "Ad Management", href: "/ads", icon: Megaphone, roles: ADMIN_OR_CRM, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
   { label: "Settings", href: "/settings", icon: Settings, roles: ADMIN, ready: true },
 ];

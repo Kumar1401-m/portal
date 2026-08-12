@@ -66,6 +66,7 @@ export default async function EditClientPage({
     editor_id: client.editor_id ? String(client.editor_id) : "",
     youtube_enabled: Number(client.youtube_enabled) === 1,
     youtube_channel_id: client.youtube_channel_id ?? "",
+    meta_ad_account_id: client.meta_ad_account_id ?? "",
     caption_language: str(cs.language),
     caption_tone: str(cs.tone),
     loc_city: str(ph.location),

@@ -1,0 +1,110 @@
+{
+  "name": "Portal — refresh ad spend from Meta",
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "c9d2a1b4-0001-4000-8000-000000000001",
+      "name": "03:30 daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-380, 0],
+      "notes": "Overnight, because nobody is waiting on it and Meta's own numbers for yesterday settle a few hours after midnight in the account's timezone."
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/ads/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c9d2a1b4-0002-4000-8000-000000000002",
+      "name": "Pull the last 28 days",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0],
+      "notes": "Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env.\n\nTwenty-eight days every night, not just yesterday. Meta keeps restating conversions as attribution settles, so a figure fetched once on the day never becomes correct — re-pulling the window is what makes the board still agree with Ads Manager a month later. Every row is an upsert on (client, day), so running it twice changes nothing."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "http-ok",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c9d2a1b4-0003-4000-8000-000000000003",
+      "name": "Did the run itself work?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [60, 0],
+      "notes": "Only the run. One client's expired token comes back inside a 200 with a `failures` list — that is a fixable fact for a person, not a broken job, and showing the whole workflow red every night for it is how a red workflow stops meaning anything."
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Ad sync failed: HTTP ' + $json.statusCode + ' ' + JSON.stringify($json.body).slice(0, 300) }}"
+      },
+      "id": "c9d2a1b4-0004-4000-8000-000000000004",
+      "name": "Stop and report",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [300, 120],
+      "notes": "A non-200 means the portal or the secret is wrong — worth showing red in n8n's list, because a spend board that quietly stopped updating still looks like a spend board."
+    }
+  ],
+  "connections": {
+    "03:30 daily": {
+      "main": [[{ "node": "Pull the last 28 days", "type": "main", "index": 0 }]]
+    },
+    "Pull the last 28 days": {
+      "main": [[{ "node": "Did the run itself work?", "type": "main", "index": 0 }]]
+    },
+    "Did the run itself work?": {
+      "main": [[], [{ "node": "Stop and report", "type": "main", "index": 0 }]]
+    }
+  }
+}

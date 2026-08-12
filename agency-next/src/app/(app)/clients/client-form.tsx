@@ -45,6 +45,7 @@ export type ClientDefaults = Partial<{
   auto_publish: boolean;
   youtube_enabled: boolean;
   youtube_channel_id: string;
+  meta_ad_account_id: string;
   is_personal: boolean;
   crm_user_ids: number[];
 }>;
@@ -283,6 +284,17 @@ export function ClientForm({
               </span>
             </span>
           </label>
+
+          {/* The ad account, which is what the Ad management board reads. It
+              is not the Page or the IG account — those cannot report spend. */}
+          <Field label="Meta ad account id" name="meta_ad_account_id">
+            <Input
+              id="meta_ad_account_id"
+              name="meta_ad_account_id"
+              placeholder="act_1234567890 — from Ads Manager, for spend and cost per lead"
+              defaultValue={d.meta_ad_account_id}
+            />
+          </Field>
 
           <Field label="YouTube channel ID (optional)" name="youtube_channel_id">
             <Input

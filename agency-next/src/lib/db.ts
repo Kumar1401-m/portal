@@ -132,3 +132,36 @@ export async function hasColumn(table: string, column: string): Promise<boolean>
 export function forgetColumn(table: string, column: string): void {
   columnCache.delete(`${table}.${column}`);
 }
+
+/**
+ * Does a table exist? Same contract as `hasColumn`, and cached the same way.
+ *
+ * A whole feature can arrive with its own table rather than a column, and it
+ * needs the same answer to the same question: the deploy is out, the migration
+ * may not be, and the page should say so instead of 500ing on an unknown
+ * table.
+ */
+const tableCache = new Map<string, boolean>();
+
+export async function hasTable(table: string): Promise<boolean> {
+  const cached = tableCache.get(table);
+  if (cached !== undefined) return cached;
+
+  try {
+    const row = await queryOne<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_name = ?`,
+      [table]
+    );
+    const exists = Number(row?.n ?? 0) > 0;
+    tableCache.set(table, exists);
+    return exists;
+  } catch {
+    return false; // Assume missing; the caller falls back safely.
+  }
+}
+
+/** Forget one table, after creating it at runtime. */
+export function forgetTable(table: string): void {
+  tableCache.delete(table);
+}

@@ -122,6 +122,13 @@ const EXPECTED: ColumnSpec[] = [
     definition: "post_locked_at DATETIME DEFAULT NULL",
     purpose: "Claim lease — stops two automation runs posting the same video twice.",
   },
+  {
+    table: "clients",
+    column: "meta_ad_account_id",
+    definition: "meta_ad_account_id VARCHAR(64) DEFAULT NULL",
+    purpose: "The client's Meta ad account (act_…), so their spend can be read from Meta.",
+  },
+
   /* --- YouTube, posted alongside Instagram by the n8n runner --- */
   {
     table: "clients",
@@ -379,6 +386,28 @@ const EXPECTED: ColumnSpec[] = [
 type TableSpec = { table: string; purpose: string; ddl: string };
 
 const EXPECTED_TABLES: TableSpec[] = [
+  {
+    table: "ad_insights",
+    purpose:
+      "One row per client per day of Meta ad spend, impressions and leads — what the Ad management board reads.",
+    ddl: `CREATE TABLE IF NOT EXISTS ad_insights (
+      id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id   BIGINT UNSIGNED NOT NULL,
+      date        DATE NOT NULL,
+      spend       DECIMAL(14,2) NOT NULL DEFAULT 0,
+      currency    VARCHAR(8) NOT NULL DEFAULT 'INR',
+      impressions BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      reach       BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      clicks      BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      leads       INT UNSIGNED NOT NULL DEFAULT 0,
+      synced_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      -- The upsert key. One row per client per day is what lets a re-sync
+      -- correct a figure Meta has restated instead of adding a second copy.
+      UNIQUE KEY uniq_client_day (client_id, date),
+      KEY idx_date (date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
   {
     table: "publish_attempts",
     purpose: "Audit trail of every Instagram publish attempt, including failures.",
