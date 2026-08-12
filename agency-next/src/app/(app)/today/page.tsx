@@ -14,13 +14,14 @@ import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
 import {
   contentStatusLabel,
+  contentStatusTone,
   editorStatusLabel,
   editorStatusTone,
   postStatusLabel,
   postStatusTone,
 } from "@/lib/constants";
 import { Card } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
 import { SearchBox } from "@/components/admin/search-box";
@@ -186,7 +187,7 @@ export default async function TodayPage({
                       </span>
                     </TD>
                     <TD>
-                      <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
+                      <Badge tone={contentStatusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
                     </TD>
                     <TD>
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>

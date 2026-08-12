@@ -12,6 +12,7 @@ import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
 import {
   contentStatusLabel,
+  contentStatusTone,
   editorStatusLabel,
   editorStatusTone,
   postStatusLabel,
@@ -24,7 +25,7 @@ import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { fmtDate } from "@/lib/utils";
 
@@ -146,7 +147,7 @@ export default async function DeliverablesPage({
                       {fmtDate(d.scheduled_at ?? d.due_date)}
                     </TD>
                     <TD>
-                      <Badge tone={statusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
+                      <Badge tone={contentStatusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
                     </TD>
                     <TD>
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>

@@ -3,10 +3,11 @@ import { requireUser } from "@/lib/auth";
 import { getPortalInvoices, getPortalClientInfo } from "@/lib/portal";
 import { isRazorpayEnabled } from "@/lib/razorpay";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
+import { invoiceStatusLabel, invoiceStatusTone } from "@/lib/constants";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { PayButton } from "./pay-button";
-import { money, label, fmtDate } from "@/lib/utils";
+import { money, fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Invoices · NVK Media" };
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ export default async function PortalInvoicesPage() {
                   <TD className="text-muted-foreground">{fmtDate(inv.due_date)}</TD>
                   <TD className="tabular-nums">{money(inv.total)}</TD>
                   <TD>
-                    <Badge tone={statusTone(inv.status)}>{label(inv.status)}</Badge>
+                    <Badge tone={invoiceStatusTone(inv.status)}>{invoiceStatusLabel(inv.status)}</Badge>
                   </TD>
                   <TD className="text-right">
                     {inv.status === "paid" ? (

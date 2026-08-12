@@ -13,11 +13,11 @@ import { requireUser } from "@/lib/auth";
 import { getMyWork, myMonths, awaitingAdminReview } from "@/lib/my-work";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
 import { MonthPicker } from "./month-picker";
-import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
+import { contentStatusLabel, editorStatusLabel, editorStatusTone } from "@/lib/constants";
 import { fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "My work · NVK Hub" };
@@ -161,7 +161,7 @@ export default async function MyWorkPage({
                     </TD>
                     <TD className="text-muted-foreground">{t.company}</TD>
                     <TD>
-                      <Badge tone={statusTone(t.status)}>{editorStatusLabel(t.status)}</Badge>
+                      <Badge tone={editorStatusTone(t.status)}>{editorStatusLabel(t.status)}</Badge>
                     </TD>
                     <TD className="whitespace-nowrap tabular-nums">
                       <span className={t.overdue ? "font-medium text-destructive" : "text-muted-foreground"}>

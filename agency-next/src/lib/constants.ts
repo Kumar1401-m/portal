@@ -89,7 +89,16 @@ export function contentStatusLabel(status: string): string {
   return map[status] ?? "Yet to start";
 }
 
-export type BadgeTone = "default" | "success" | "warning" | "danger" | "info" | "muted";
+/** Mirrors the Badge component's tones — see there for what each one means. */
+export type BadgeTone =
+  | "default"
+  | "success"
+  | "warning"
+  | "danger"
+  | "info"
+  | "waiting"
+  | "active"
+  | "muted";
 
 /**
  * Colour for the content track, matching how contentStatusLabel folds it.
@@ -133,12 +142,80 @@ export function postStatusTone(status: string, posting?: string | null): BadgeTo
   return "muted";
 }
 
+/**
+ * Colour for the design track, one meaning per colour.
+ *
+ * Every one of these used to be "info" — approved, scheduled, in review,
+ * resolved and *changes requested* all came out the same orange. Those are the
+ * two outcomes it matters most to tell apart, and the column is scanned rather
+ * than read, so they were effectively unlabelled.
+ *
+ *   green  — signed off
+ *   red    — needs doing again, or is not going out
+ *   blue   — someone is working on it now
+ *   violet — sitting with a person for a decision
+ *   grey   — not started, or over
+ */
 export function editorStatusTone(status: string): BadgeTone {
-  if (["posted", "completed"].includes(status)) return "success";
-  if (["editing", "raw_uploaded"].includes(status)) return "warning";
-  if (["approved", "scheduled", "caption_ready", "review", "resolved", "changes_requested"].includes(status))
-    return "info";
-  if (["rejected", "cancelled"].includes(status)) return "muted";
+  if (["approved", "scheduled", "posted", "completed"].includes(status)) return "success";
+  if (["changes_requested", "rejected"].includes(status)) return "danger";
+  if (["raw_uploaded", "editing", "resolved"].includes(status)) return "active";
+  if (["waiting_for_raw", "caption_ready", "review"].includes(status)) return "waiting";
+  return "muted";
+}
+
+/**
+ * How far the making has got, and whether it was signed off.
+ *
+ * Three things were wrong, and all three showed on the board at once.
+ *
+ * `changes_requested` said **"Edited"**. Somebody had asked for the work to be
+ * done again and the column reported it as done — the single most misleading
+ * cell on the board.
+ *
+ * `rejected` and `cancelled` said **"—"**, so the two outcomes worth noticing
+ * were the two that looked like missing data.
+ *
+ * And `posted` said **"Posted"**, repeating the Post status column next to it.
+ * Three columns are only worth the width if they answer three questions; this
+ * one ends at approval, because that is where the design work ends. Whether it
+ * then went out is the next column's business.
+ */
+/**
+ * An invoice, answering the question it is actually opened for.
+ *
+ * The column showed the workflow status — "Sent" — which says we posted it and
+ * nothing about whether the money arrived. Every one of draft, sent, partial
+ * and overdue means unpaid, and only one of them said so.
+ *
+ * The workflow value is kept underneath: `sent` and `overdue` are different
+ * things to do about the same fact, so the label carries both — what is owed,
+ * and how late.
+ */
+export function invoiceStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    paid: "Paid",
+    partial: "Part paid",
+    overdue: "Unpaid · overdue",
+    sent: "Unpaid",
+    draft: "Draft",
+    cancelled: "Cancelled",
+  };
+  return map[status] ?? "Unpaid";
+}
+
+/**
+ * Green is paid and nothing else is.
+ *
+ * Draft is grey because nothing is owed yet — it has not been sent. Everything
+ * between is money outstanding, and overdue is the one that needs chasing
+ * today rather than this month.
+ */
+export function invoiceStatusTone(status: string): BadgeTone {
+  if (status === "paid") return "success";
+  if (status === "overdue") return "danger";
+  if (status === "partial") return "warning";
+  if (status === "sent") return "waiting";
   return "muted";
 }
 
@@ -149,16 +226,18 @@ export function editorStatusLabel(status: string): string {
     waiting_for_raw: "Awaiting raw",
     raw_uploaded: "Raw uploaded",
     editing: "Editing",
-    caption_ready: "Edited",
-    review: "Edited",
-    changes_requested: "Edited",
-    resolved: "Edited",
-    approved: "Ready",
-    scheduled: "Scheduled",
-    posted: "Posted",
-    completed: "Posted",
-    rejected: "—",
-    cancelled: "—",
+    caption_ready: "With super admin",
+    review: "With client",
+    changes_requested: "Changes requested",
+    resolved: "Changes done",
+    // Approved is the end of this column. Scheduled and posted are still
+    // approved work — the Post status column says where they got to.
+    approved: "Approved",
+    scheduled: "Approved",
+    posted: "Approved",
+    completed: "Approved",
+    rejected: "Rejected",
+    cancelled: "Cancelled",
   };
   return map[status] ?? "Yet to start";
 }

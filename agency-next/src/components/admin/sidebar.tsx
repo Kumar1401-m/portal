@@ -1,11 +1,32 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkles, Lock } from "lucide-react";
+import { Sparkles, Lock, Loader2 } from "lucide-react";
 import type { Role } from "@/lib/auth";
-import { navForRole } from "./nav-config";
+import { navForRole, type NavItem } from "./nav-config";
 import { cn } from "@/lib/utils";
+
+/**
+ * The clicked item's own icon becomes a spinner while the page is on its way.
+ *
+ * `loading.tsx` covers the main panel, but the eye is still on the thing that
+ * was just clicked, and a menu item that looks identical a moment after you
+ * press it is what made people press it twice. This turns the icon over the
+ * instant the navigation starts.
+ *
+ * Its own component because `useLinkStatus` only reports for the `<Link>` it
+ * sits inside — read from the parent it would report nothing, silently.
+ */
+function NavIcon({ item }: { item: NavItem }) {
+  const { pending } = useLinkStatus();
+  if (pending) {
+    return <Loader2 className="h-[18px] w-[18px] shrink-0 animate-spin" aria-hidden />;
+  }
+  return (
+    <item.icon className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110" />
+  );
+}
 
 export function Sidebar({
   role,
@@ -46,7 +67,7 @@ export function Sidebar({
               {active ? (
                 <span className="animate-fade-in absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-current" />
               ) : null}
-              <item.icon className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <NavIcon item={item} />
               <span className="flex-1">{item.label}</span>
               {!item.ready ? (
                 <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-label="Coming soon" />

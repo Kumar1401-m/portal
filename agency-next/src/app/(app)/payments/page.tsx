@@ -8,6 +8,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { invoiceStatusLabel, invoiceStatusTone } from "@/lib/constants";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { Select } from "@/components/ui/select";
 import { money, label, fmtDate } from "@/lib/utils";
@@ -81,7 +82,7 @@ export default async function PaymentsPage() {
                     <TD>{inv.company_name}</TD>
                     <TD className="tabular-nums">{money(inv.total)}</TD>
                     <TD>
-                      <Badge tone={statusTone(inv.status)}>{label(inv.status)}</Badge>
+                      <Badge tone={invoiceStatusTone(inv.status)}>{invoiceStatusLabel(inv.status)}</Badge>
                     </TD>
                     <TD className="text-muted-foreground">{fmtDate(inv.due_date)}</TD>
                     <TD>
