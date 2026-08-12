@@ -338,6 +338,11 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   );
   assert.match(lib2, /This token has no ads_read permission — its scopes are/,
     "a missing scope names the scopes it does have");
+  // The step before that, and the one that actually stops people: the token
+  // generator only offers scopes for products the app has, so with no
+  // Marketing API there is nothing to tick and no explanation on the screen.
+  assert.match(lib2, /has not got the Marketing API product yet/,
+    "and it says why ads_read might not be offered at all");
   assert.match(lib2, /so the scope is not the problem/,
     "and a token that has the scope is told the assignment is what is missing");
   ok("a permission error is diagnosed against the real token, not guessed at");

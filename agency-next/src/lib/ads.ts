@@ -264,6 +264,14 @@ export async function syncClientAds(
             (info.type === "SYSTEM_USER"
               ? " (Business Settings → Users → System Users → Generate New Token)."
               : ".") +
+            /*
+             * The step before that one, and the one that stops people: the
+             * token generator only offers scopes belonging to products the app
+             * has. With no Marketing API on the app, ads_read is not in the
+             * list to tick and there is nothing on that screen saying why.
+             */
+            " If ads_read is not in the list, the app has not got the Marketing API product yet —" +
+            " add it in the App Dashboard first, then come back and generate the token." +
             " The ad account assignment is separate and also needed: assign that user to the ad" +
             " account with at least View Performance.";
         } else if (info?.scopes.includes("ads_read")) {
