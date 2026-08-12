@@ -124,6 +124,13 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "ads_access_token",
+    definition: "ads_access_token TEXT DEFAULT NULL",
+    purpose:
+      "A User or System User token with ads_read for this client. A Page token cannot read spend.",
+  },
+  {
+    table: "clients",
     column: "meta_ad_account_id",
     definition: "meta_ad_account_id VARCHAR(64) DEFAULT NULL",
     purpose: "The client's Meta ad account (act_…), so their spend can be read from Meta.",

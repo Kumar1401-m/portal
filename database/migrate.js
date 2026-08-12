@@ -187,6 +187,10 @@ async function main() {
   await addColumn('clients', 'designer_id', 'designer_id BIGINT UNSIGNED DEFAULT NULL');
   await addColumn('clients', 'editor_id', 'editor_id BIGINT UNSIGNED DEFAULT NULL');
 
+  // Reading ad spend needs a User/System User token with ads_read — a Page
+  // token cannot do it, so it is a separate field from ig_access_token.
+  await addColumn("clients", "ads_access_token", "ads_access_token TEXT DEFAULT NULL");
+
   // YouTube, published by the n8n runner in the same minute as Instagram.
   await addColumn('clients', 'youtube_enabled', 'youtube_enabled TINYINT(1) NOT NULL DEFAULT 0');
   await addColumn('clients', 'youtube_channel_id', 'youtube_channel_id VARCHAR(64) DEFAULT NULL');

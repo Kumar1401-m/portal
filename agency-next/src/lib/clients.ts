@@ -42,6 +42,7 @@ export type ClientFull = {
   youtube_enabled: number | null;
   youtube_channel_id: string | null;
   meta_ad_account_id: string | null;
+  ads_access_token: string | null;
   analytics_enabled: number | null;
   is_personal: number;
   login_email: string | null;

@@ -46,6 +46,7 @@ export type ClientDefaults = Partial<{
   youtube_enabled: boolean;
   youtube_channel_id: string;
   meta_ad_account_id: string;
+  ads_access_token: string;
   is_personal: boolean;
   crm_user_ids: number[];
 }>;
@@ -294,6 +295,23 @@ export function ClientForm({
               placeholder="act_1234567890 — from Ads Manager, for spend and cost per lead"
               defaultValue={d.meta_ad_account_id}
             />
+          </Field>
+
+          {/* Separate from the Page token above, and it has to be: a Page
+              token cannot read an ad account whatever permissions are granted
+              to it. Reading spend needs a User or System User token carrying
+              ads_read, from somebody with a role on that ad account. */}
+          <Field label="Ads token (optional)" name="ads_access_token">
+            <Input
+              id="ads_access_token"
+              name="ads_access_token"
+              type="password"
+              placeholder="needs ads_read — blank uses the agency ads token"
+            />
+            <p className="text-xs text-muted-foreground">
+              Not the Page token — that one can never read ad spend. Type{" "}
+              <span className="font-mono">none</span> to clear a stored one.
+            </p>
           </Field>
 
           <Field label="YouTube channel ID (optional)" name="youtube_channel_id">

@@ -67,6 +67,9 @@ export default async function EditClientPage({
     youtube_enabled: Number(client.youtube_enabled) === 1,
     youtube_channel_id: client.youtube_channel_id ?? "",
     meta_ad_account_id: client.meta_ad_account_id ?? "",
+    // Deliberately not the stored token: a password field that echoes the
+    // secret back into the page is a secret in every screenshot.
+    ads_access_token: "",
     caption_language: str(cs.language),
     caption_tone: str(cs.tone),
     loc_city: str(ph.location),

@@ -7,8 +7,15 @@ import { syncAllAds, adsReadiness } from "@/lib/ads";
 export type SyncState = {
   ok: boolean;
   message?: string;
-  /** Per-client failures, named. One revoked token is a fixable fact. */
-  failures?: { client: string; error: string }[];
+  /**
+   * Per-client failures, named, each with what to do about it.
+   *
+   * Meta's own message is kept because it is precise and searchable, but on
+   * its own it names the symptom: "#200 Ad account owner has NOT grant
+   * ads_read" reads as "go and ask the client", when almost always the token
+   * is simply the wrong kind and there is nobody to ask.
+   */
+  failures?: { client: string; error: string; hint?: string }[];
 };
 
 /**

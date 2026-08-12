@@ -31,8 +31,13 @@ export function SyncButton() {
           ? { title: "Refreshed from Meta", description: res.message }
           : {
               title: "Meta would not give us everything",
+              // Meta's words, then what to do about them. The message alone
+              // sends people to ask the client for a permission that is not
+              // the problem.
               description:
-                res.failures?.map((f) => `${f.client}: ${f.error}`).join("\n") || res.message,
+                res.failures
+                  ?.map((f) => `${f.client}: ${f.error}${f.hint ? `\n\n→ ${f.hint}` : ""}`)
+                  .join("\n\n") || res.message,
               tone: "error",
               ack: true,
             }

@@ -98,6 +98,47 @@ export function leadsFromActions(
   return 0;
 }
 
+/**
+ * What to actually do about a Meta error, in one line.
+ *
+ * Meta's own message is kept — it is precise and it is what a search engine
+ * will match — but on its own it names the symptom and not the cure. "#200 Ad
+ * account owner has NOT grant ads_read" reads as "ask the client for
+ * permission", when nine times out of ten the token is simply the wrong kind
+ * and there is nothing to ask anybody for.
+ *
+ * Exported so the test can hold the mapping to the codes Meta documents rather
+ * than to whatever this function happens to do.
+ */
+export function fixFor(code: number | undefined, message: string): string | undefined {
+  const m = message.toLowerCase();
+
+  if (code === 200 || code === 10 || code === 272 || m.includes("ads_read")) {
+    return (
+      "The token cannot read this ad account. It needs to be a User or System User token with " +
+      "the ads_read permission — a Page or Instagram token will never work, whatever is granted " +
+      "to it. In Business Settings → Users → System Users, assign that user to this ad account " +
+      "(View Performance is enough), generate a token with ads_read, and paste it in."
+    );
+  }
+  if (code === 190) {
+    return (
+      "The token has expired or been revoked. Generate a new one and paste it in — a System User " +
+      "token does not expire, which is why it is worth using here."
+    );
+  }
+  if (code === 803 || m.includes("does not exist") || m.includes("unsupported get request")) {
+    return (
+      "Meta cannot see an ad account with that id. Check the act_… number against Ads Manager — " +
+      "it is the ad account id, not the Page id or the Instagram account id."
+    );
+  }
+  if (code === 4 || code === 17 || code === 613 || m.includes("rate limit")) {
+    return "Meta is rate limiting us. Nothing to fix — the nightly run will pick it up.";
+  }
+  return undefined;
+}
+
 type InsightRow = {
   date_start?: string;
   spend?: string;
@@ -121,14 +162,17 @@ type InsightRow = {
 export async function syncClientAds(
   clientId: number,
   days = RESTATEMENT_DAYS
-): Promise<{ ok: boolean; rows: number; error?: string }> {
+): Promise<{ ok: boolean; rows: number; error?: string; hint?: string }> {
+  const hasAdsToken = await hasColumn("clients", "ads_access_token");
   const c = await queryOne<{
     id: number;
     company_name: string;
     meta_ad_account_id: string | null;
-    ig_access_token: string | null;
+    ads_access_token: string | null;
   }>(
-    "SELECT id, company_name, meta_ad_account_id, ig_access_token FROM clients WHERE id = ?",
+    `SELECT id, company_name, meta_ad_account_id,
+            ${hasAdsToken ? "ads_access_token" : "NULL AS ads_access_token"}
+       FROM clients WHERE id = ?`,
     [clientId]
   );
   if (!c) return { ok: false, rows: 0, error: "Client not found." };
@@ -136,8 +180,26 @@ export async function syncClientAds(
   const account = normaliseAccountId(c.meta_ad_account_id);
   if (!account) return { ok: false, rows: 0, error: "No ad account connected." };
 
-  const token = (c.ig_access_token || "").trim() || env.meta.accessToken;
-  if (!token) return { ok: false, rows: 0, error: "No Meta access token configured." };
+  /*
+   * The client's own ads token, else the agency's. Never the Page token.
+   *
+   * This used to fall back to `ig_access_token`, and that was the bug behind
+   * every "(#200) Ad account owner has NOT grant ads_read" anyone saw: a Page
+   * token cannot read an ad account at all, no matter what permissions are
+   * granted to it, so the request was certain to fail and the message pointed
+   * at the ad account rather than at the token being the wrong kind.
+   */
+  const token = (c.ads_access_token || "").trim() || env.meta.adsAccessToken.trim();
+  if (!token) {
+    return {
+      ok: false,
+      rows: 0,
+      error: "No ads token configured.",
+      hint:
+        "Reading spend needs a User or System User token with the ads_read permission — a Page " +
+        "token cannot do it. Add one as META_ADS_ACCESS_TOKEN, or per client on their edit page.",
+    };
+  }
 
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const until = new Date().toISOString().slice(0, 10);
@@ -154,10 +216,15 @@ export async function syncClientAds(
     const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     payload = (await res.json()) as typeof payload;
     if (!res.ok || payload.error) {
-      // Meta's own words. "(#278) Reading advertisements requires an access
-      // token with the extended permission ads_read" is the message someone
-      // needs to see, and paraphrasing it as "sync failed" hides the fix.
-      return { ok: false, rows: 0, error: payload.error?.message || `HTTP ${res.status}` };
+      // Meta's own words, kept verbatim — they are precise and searchable —
+      // with the fix alongside, because the message names the symptom.
+      const message = payload.error?.message || `HTTP ${res.status}`;
+      return {
+        ok: false,
+        rows: 0,
+        error: message,
+        hint: fixFor(payload.error?.code, message),
+      };
     }
   } catch (err) {
     return { ok: false, rows: 0, error: err instanceof Error ? err.message : "Request failed" };
@@ -204,9 +271,11 @@ export async function syncClientAds(
 }
 
 /** Every client with an ad account, synced one at a time. */
-export async function syncAllAds(
-  days = RESTATEMENT_DAYS
-): Promise<{ synced: number; rows: number; failures: { client: string; error: string }[] }> {
+export async function syncAllAds(days = RESTATEMENT_DAYS): Promise<{
+  synced: number;
+  rows: number;
+  failures: { client: string; error: string; hint?: string }[];
+}> {
   const { ready } = await adsReadiness();
   if (!ready) return { synced: 0, rows: 0, failures: [] };
 
@@ -219,14 +288,14 @@ export async function syncAllAds(
 
   let synced = 0;
   let rows = 0;
-  const failures: { client: string; error: string }[] = [];
+  const failures: { client: string; error: string; hint?: string }[] = [];
   for (const c of clients) {
     const r = await syncClientAds(c.id, days);
     if (r.ok) {
       synced++;
       rows += r.rows;
     } else {
-      failures.push({ client: c.company_name, error: r.error || "Unknown error" });
+      failures.push({ client: c.company_name, error: r.error || "Unknown error", hint: r.hint });
     }
   }
   return { synced, rows, failures };

@@ -113,6 +113,17 @@ export const env = {
     accessToken: process.env.META_ACCESS_TOKEN || "",
     apiVersion: process.env.META_API_VERSION || "v21.0",
     enabled: Boolean(process.env.META_ACCESS_TOKEN),
+    /*
+     * Reading ad spend needs a different token, not a wider one.
+     *
+     * `accessToken` is a Page token: it publishes reels and reads Instagram,
+     * and it can never read an ad account whatever permissions are added to
+     * it. Ads need a User or System User token carrying `ads_read`, from
+     * somebody with a role on that ad account. Two separate settings, because
+     * they are two separate things and quietly trying the Page token for ads
+     * produces Meta error #200 and an afternoon of confusion.
+     */
+    adsAccessToken: process.env.META_ADS_ACCESS_TOKEN || "",
   },
 
   /**

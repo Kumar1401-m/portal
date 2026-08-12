@@ -75,13 +75,20 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   if (await hasColumn("clients", "editor_id")) {
     columns.editor_id = editor ? Number(editor) : null;
   }
-  // Posting to a second live account is never inferred, only ticked — the same
-  // rule auto_publish follows, and for the same reason.
   // Normalised on the way in, so "1234567890" and "act_ 1234567890" both
   // store the one form the Graph API accepts.
   if (await hasColumn("clients", "meta_ad_account_id")) {
     columns.meta_ad_account_id = normaliseAccountId(s(fd, "meta_ad_account_id"));
   }
+  if (await hasColumn("clients", "ads_access_token")) {
+    // Blank leaves the stored token alone — the field is a password input and
+    // is never populated, so treating blank as a clear would wipe it on every
+    // unrelated edit. "none" clears it, the same rule the Page token follows.
+    const adsToken = s(fd, "ads_access_token");
+    if (adsToken) columns.ads_access_token = adsToken.toLowerCase() === "none" ? null : adsToken;
+  }
+  // Posting to a second live account is never inferred, only ticked — the same
+  // rule auto_publish follows, and for the same reason.
   if (await hasColumn("clients", "youtube_enabled")) {
     columns.youtube_enabled = fd.get("youtube_enabled") ? 1 : 0;
     columns.youtube_channel_id = orNull(s(fd, "youtube_channel_id"));
