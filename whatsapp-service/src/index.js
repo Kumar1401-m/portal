@@ -174,5 +174,12 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 // beats dying: a rejected promise deep in the browser driver is usually
 // recoverable, and the reconnect logic handles the cases that aren't.
 process.on('unhandledRejection', (reason) => {
-  log.error('unhandled rejection', { reason: reason?.message || String(reason) });
+  const text = reason?.message || String(reason);
+  // Chromium being torn down rejects whatever call was in flight. It is
+  // expected during a logout or a reconnect, both of which already logged
+  // their real cause — reporting it at error level as well trains everyone
+  // to ignore the level that matters.
+  const noise = /target closed|protocol error|detached frame|session closed|execution context was destroyed/i;
+  if (noise.test(text)) log.debug('browser teardown rejection', { reason: text });
+  else log.error('unhandled rejection', { reason: text });
 });

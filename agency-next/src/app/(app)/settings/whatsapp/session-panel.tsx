@@ -227,7 +227,16 @@ export function SessionPanel({
           </div>
         ) : null}
 
-        {snapshot.lastError && !isConnected ? (
+        {/*
+          Not while there is a QR on screen.
+
+          A waiting login is not a fault, and the last error is by definition
+          older than it — usually the teardown of the session that just ended.
+          Shown together, the red line answers "what is wrong" over the top of
+          the panel already answering "what to do", and the answer it gives is
+          one nobody can act on.
+        */}
+        {snapshot.lastError && !isConnected && !qr ? (
           <p className="text-xs text-destructive">{snapshot.lastError}</p>
         ) : null}
 

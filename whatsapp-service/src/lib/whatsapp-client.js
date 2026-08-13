@@ -32,6 +32,22 @@ const { createLogger } = require('./logger');
 
 const log = createLogger('whatsapp');
 
+/**
+ * Errors that describe the browser being torn down, not a problem to act on.
+ *
+ * whatsapp-web.js drives a real Chromium, and closing it mid-call throws from
+ * whichever call was in flight. Every one of these is a symptom of a shutdown
+ * that already had a cause — a logout, a reconnect — and recording one as the
+ * session's last error displaces the cause with its own echo.
+ *
+ * The visible damage was on the settings page: a session sitting healthily at
+ * "scan the QR" showed "Protocol error (Runtime.callFunctionOn): Target
+ * closed" in red, so the one screen that exists to say what to do next said
+ * something alarming and unactionable instead.
+ */
+const TEARDOWN_NOISE =
+  /target closed|protocol error|detached frame|session closed|execution context was destroyed|browser has disconnected/i;
+
 /** Connection states surfaced to the portal and the settings UI. */
 const STATE = {
   BOOTING: 'booting',
@@ -169,11 +185,28 @@ class WhatsAppService extends EventEmitter {
     try {
       await this.client.initialize();
     } catch (err) {
-      this.lastError = err.message;
+      this.noteError(err.message);
       log.error('initialize failed', { error: err.message });
       this.setState(STATE.FAILED);
       this.scheduleReconnect();
     }
+  }
+
+  /**
+   * Record a failure, unless it is the browser closing.
+   *
+   * Kept in one place so every path that sets an error goes through the same
+   * filter — and so a genuine failure is never lost to it: noise is only
+   * dropped, never allowed to overwrite a real reason that is already there.
+   */
+  noteError(message) {
+    const text = message ? String(message) : null;
+    if (!text) return;
+    if (TEARDOWN_NOISE.test(text)) {
+      log.debug('ignoring a browser teardown error', { error: text });
+      return;
+    }
+    this.lastError = text;
   }
 
   registerHandlers() {
@@ -186,6 +219,14 @@ class WhatsAppService extends EventEmitter {
       try {
         this.qrDataUrl = await qrcode.toDataURL(qr, { width: 320, margin: 2 });
         this.qrGeneratedAt = new Date();
+        /*
+         * A QR means the browser is up and WhatsApp Web is asking to be logged
+         * in — the session is healthy and waiting on a person, which is not a
+         * failure state. Whatever went wrong before this is history, and
+         * leaving it on screen tells someone to fix something instead of
+         * telling them to scan.
+         */
+        this.lastError = null;
         this.setState(STATE.QR);
         log.warn('QR code required — scan it from the WhatsApp app to log in');
         this.emit('qr', { dataUrl: this.qrDataUrl });
@@ -201,7 +242,7 @@ class WhatsAppService extends EventEmitter {
     });
 
     c.on('auth_failure', (message) => {
-      this.lastError = message;
+      this.noteError(message);
       this.setState(STATE.FAILED);
       log.error('authentication failed — the saved session is no longer valid', { message });
       this.emit('auth_failure', { message });
@@ -227,7 +268,7 @@ class WhatsAppService extends EventEmitter {
     });
 
     c.on('disconnected', (reason) => {
-      this.lastError = String(reason);
+      this.noteError(reason);
       this.setState(STATE.DISCONNECTED);
       log.warn('disconnected', { reason });
       this.emit('disconnected', { reason });
