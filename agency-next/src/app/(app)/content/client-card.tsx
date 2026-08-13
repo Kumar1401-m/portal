@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import {
   Building2,
+  Home,
   Check,
   ChevronDown,
   Loader2,
@@ -17,6 +18,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { fmtDate } from "@/lib/utils";
 import {
@@ -33,6 +35,15 @@ export type CardRow = {
   dueDate: string | null;
   description: string | null;
   assigneeName: string | null;
+  /** What it is about — a property, a project. "" when it belongs to none. */
+  property: string;
+};
+
+export type CardProperty = {
+  name: string;
+  toWrite: CardRow[];
+  ready: CardRow[];
+  withClient: CardRow[];
 };
 
 export type CardGroup = {
@@ -40,6 +51,7 @@ export type CardGroup = {
   companyName: string;
   hasGroup: boolean;
   approvesContent: boolean;
+  properties: CardProperty[];
   toWrite: CardRow[];
   ready: CardRow[];
   withClient: CardRow[];
@@ -108,21 +120,30 @@ export function ClientCard({
       </CardHeader>
 
       {open ? (
-        <CardContent className="space-y-4 pt-0">
-          <WriteList rows={[...group.toWrite, ...group.ready]} />
-          {/* Handing work to our own team is not the same act as putting
-              something in front of a client, so it is not held to the same
-              rule — otherwise an admin who wrote the month has nowhere to
-              take it. */}
-          {group.ready.length > 0 && (canSend || !group.approvesContent) ? (
-            <SendBar group={group} />
-          ) : group.ready.length > 0 ? (
-            <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-              {group.ready.length} ready to go out. A super admin sends content to the client.
-            </p>
-          ) : null}
-          {group.withClient.length > 0 ? (
-            <WithClient group={group} canSend={canSend} />
+        <CardContent className="space-y-5 pt-0">
+          {/*
+            One section per property, because that is the unit a client reads
+            and answers in: four posts about this flat, six about that one.
+            Each carries its own send, so "just this property" needs no ticking.
+
+            A client with nothing but unnamed content gets one unheaded
+            section — the grouping should not announce itself where there is
+            nothing to group.
+          */}
+          {group.properties.map((p) => (
+            <PropertySection
+              key={p.name || "__none"}
+              group={group}
+              property={p}
+              canSend={canSend}
+              showHeading={group.properties.length > 1 || Boolean(p.name)}
+            />
+          ))}
+
+          {/* And the whole month at once, for the client who is sent the plan
+              rather than each property as it comes up. */}
+          {group.properties.length > 1 && group.ready.length > 0 && (canSend || !group.approvesContent) ? (
+            <SendBar group={group} rows={group.ready} label="everything above" />
           ) : null}
         </CardContent>
       ) : null}
@@ -131,6 +152,59 @@ export function ClientCard({
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * One property's content: its briefs, its own send, its own answer panel.
+ *
+ * Self-contained on purpose. A client with six properties is six of these,
+ * and each is a complete piece of work — write it, send it, record what came
+ * back — without ticking anything or scrolling to a shared button.
+ */
+function PropertySection({
+  group,
+  property,
+  canSend,
+  showHeading,
+}: {
+  group: CardGroup;
+  property: CardProperty;
+  canSend: boolean;
+  showHeading: boolean;
+}) {
+  const name = property.name || "No property";
+  const label = property.name ? `${property.name}'s content` : "these";
+
+  return (
+    <section className="space-y-3">
+      {showHeading ? (
+        <div className="flex items-center gap-2 border-b border-border pb-1.5">
+          <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{name}</h3>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {property.toWrite.length + property.ready.length + property.withClient.length}
+          </span>
+        </div>
+      ) : null}
+
+      <WriteList rows={[...property.toWrite, ...property.ready]} />
+
+      {/* Handing work to our own team is not the same act as putting something
+          in front of a client, so it is not held to the same rule — otherwise
+          an admin who wrote the month has nowhere to take it. */}
+      {property.ready.length > 0 && (canSend || !group.approvesContent) ? (
+        <SendBar group={group} rows={property.ready} label={label} />
+      ) : property.ready.length > 0 ? (
+        <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+          {property.ready.length} ready to go out. A super admin sends content to the client.
+        </p>
+      ) : null}
+
+      {property.withClient.length > 0 ? (
+        <WithClient group={group} rows={property.withClient} canSend={canSend} />
+      ) : null}
+    </section>
+  );
+}
 
 /** The briefs themselves, each one editable where it sits. */
 function WriteList({ rows }: { rows: CardRow[] }) {
@@ -148,6 +222,7 @@ function BriefRow({ row }: { row: CardRow }) {
   const written = Boolean((row.description ?? "").trim());
   const [editing, setEditing] = useState(!written);
   const [body, setBody] = useState(row.description ?? "");
+  const [property, setProperty] = useState(row.property);
   const [saved, setSaved] = useState(written);
   const [pending, start] = useTransition();
   const toast = useToast();
@@ -157,6 +232,7 @@ function BriefRow({ row }: { row: CardRow }) {
       const fd = new FormData();
       fd.set("deliverable_id", String(row.id));
       fd.set("description", body);
+      fd.set("campaign", property);
       const res: ContentState = await saveBriefAction({ ok: false }, fd);
       if (res.ok) {
         setSaved(Boolean(body.trim()));
@@ -197,6 +273,16 @@ function BriefRow({ row }: { row: CardRow }) {
             onChange={(e) => setBody(e.target.value)}
             rows={5}
             placeholder="The content for this piece, exactly as the client should read it."
+            className="text-sm"
+          />
+          {/* Named here rather than on a separate screen, because it is
+              decided while writing: you know which property the post is about
+              before you know what it says. Blank is allowed — not everything
+              a client posts is about one. */}
+          <Input
+            value={property}
+            onChange={(e) => setProperty(e.target.value)}
+            placeholder="Property or project this is about — optional"
             className="text-sm"
           />
           <div className="flex gap-2">
@@ -244,13 +330,23 @@ function BriefRow({ row }: { row: CardRow }) {
  * approved — a client reads the plan, not fifteen notifications. "One at a
  * time" is there for the piece that needed rewriting after the rest went.
  */
-function SendBar({ group }: { group: CardGroup }) {
+function SendBar({
+  group,
+  rows,
+  label,
+}: {
+  group: CardGroup;
+  /** Exactly what this bar sends — one property's, or the client's whole month. */
+  rows: CardRow[];
+  /** Named on the button, so two bars on one card cannot be confused. */
+  label: string;
+}) {
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
   const [pending, start] = useTransition();
   const toast = useToast();
   const direct = !group.approvesContent;
-  const ids = picking ? picked : group.ready.map((r) => r.id);
+  const ids = picking ? picked : rows.map((r) => r.id);
   const blocked = !direct && !group.hasGroup;
 
   const run = () => {
@@ -276,8 +372,8 @@ function SendBar({ group }: { group: CardGroup }) {
     <div className="rounded-lg border border-border bg-muted/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm">
-          <span className="font-medium">{group.ready.length}</span>{" "}
-          {group.ready.length === 1 ? "piece is" : "pieces are"} written and ready
+          <span className="font-medium">{rows.length}</span>{" "}
+          {rows.length === 1 ? "piece is" : "pieces are"} written and ready
           {direct ? " for the team." : " for the client."}
         </p>
         <div className="flex flex-wrap gap-2">
@@ -292,10 +388,10 @@ function SendBar({ group }: { group: CardGroup }) {
             {picking
               ? `Send ${picked.length} selected`
               : direct
-                ? "Hand all to the team"
-                : "Send all to the group"}
+                ? `Hand ${label} to the team`
+                : `Send ${label} to the group`}
           </Button>
-          {group.ready.length > 1 ? (
+          {rows.length > 1 ? (
             <Button
               size="sm"
               variant="outline"
@@ -313,7 +409,7 @@ function SendBar({ group }: { group: CardGroup }) {
 
       {picking ? (
         <div className="mt-3 space-y-1.5 border-t border-border pt-3">
-          {group.ready.map((r) => (
+          {rows.map((r) => (
             <label key={r.id} className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -351,8 +447,17 @@ function SendBar({ group }: { group: CardGroup }) {
  * it here. Without this the content gate could only be opened one task at a
  * time from fifteen separate task pages.
  */
-function WithClient({ group, canSend }: { group: CardGroup; canSend: boolean }) {
-  const [picked, setPicked] = useState<number[]>(group.withClient.map((r) => r.id));
+function WithClient({
+  group,
+  rows,
+  canSend,
+}: {
+  group: CardGroup;
+  /** This property's pieces, not the client's whole month. */
+  rows: CardRow[];
+  canSend: boolean;
+}) {
+  const [picked, setPicked] = useState<number[]>(rows.map((r) => r.id));
   const [reason, setReason] = useState("");
   const [asking, setAsking] = useState(false);
   const [pending, start] = useTransition();
@@ -387,12 +492,12 @@ function WithClient({ group, canSend }: { group: CardGroup; canSend: boolean }) 
     <div className="rounded-lg border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] p-3">
       <p className="flex items-center gap-2 text-sm font-medium">
         <MessageCircle className="h-4 w-4" />
-        With {group.companyName} — {group.withClient.length}{" "}
-        {group.withClient.length === 1 ? "piece" : "pieces"} awaiting their answer
+        With {group.companyName} — {rows.length}{" "}
+        {rows.length === 1 ? "piece" : "pieces"} awaiting their answer
       </p>
 
       <div className="mt-2 space-y-1.5">
-        {group.withClient.map((r) => (
+        {rows.map((r) => (
           <label key={r.id} className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"

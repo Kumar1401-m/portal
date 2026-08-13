@@ -108,6 +108,15 @@ const transcribeVoice = (payload) => post('/api/whatsapp/transcribe', payload, {
  */
 const askSummary = (payload) => post('/api/whatsapp/summary', payload, { attempts: 1 });
 
+/**
+ * What a message meant, when the parser could not tell.
+ *
+ * One attempt, same reasoning: the client is in the group waiting, and this
+ * runs on a message we have already decided we do not understand — a slow
+ * second opinion is worth less than a quick "no".
+ */
+const askIntent = (payload) => post('/api/whatsapp/intent', payload, { attempts: 1 });
+
 /** A link shared in a group, offered to the portal as footage. */
 const reportFootage = (payload) => post('/api/whatsapp/footage', payload, { attempts: 2 });
 
@@ -119,5 +128,6 @@ module.exports = {
   reportSession,
   transcribeVoice,
   askSummary,
+  askIntent,
   reportFootage,
 };

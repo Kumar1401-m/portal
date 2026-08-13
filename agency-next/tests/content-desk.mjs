@@ -161,4 +161,69 @@ const piece = (title, body, dueDate = "2026-08-20") => ({ title, dueDate, body }
   ok("the super admin records the client's answer, through the same gate as everywhere else");
 }
 
+/* ---------------- content is cut by property, not just by client ---------------- */
+{
+  // A client with six properties does not have one month of content — they
+  // have six, and they read and answer about one at a time.
+  const msgs = content.buildContentMessages("Acme", "Ravi", [
+    piece("Walkthrough", "aaa"),
+    piece("Price drop", "bbb"),
+  ].map((p) => ({ ...p, property: "Green Meadows" })));
+  assert.match(msgs[0], /Content for your approval — Green Meadows/, "the batch is named by it");
+  assert.ok(
+    !/· Green Meadows/.test(msgs.join(" ")),
+    "and not repeated on every line, since the whole message is about it"
+  );
+
+  // A mixed batch names each piece instead, so an answer can point at one.
+  const mixed = content.buildContentMessages("Acme", "Ravi", [
+    { ...piece("Walkthrough", "aaa"), property: "Green Meadows" },
+    { ...piece("Offer", "bbb"), property: "Lake View" },
+  ]);
+  assert.ok(!/approval — /.test(mixed[0]), "no single property to name in the heading");
+  assert.match(mixed.join(" "), /· Green Meadows/);
+  assert.match(mixed.join(" "), /· Lake View/);
+
+  // Content belonging to no property is not forced into one.
+  const plain = content.buildContentMessages("Acme", null, [piece("Festival post", "ccc")]);
+  assert.ok(!/—/.test(plain[0].split(/\r?\n/)[0]), "an unnamed batch keeps the plain heading");
+  ok("a batch is named by its property, and a mixed one names each piece");
+}
+
+/* ---------------- and the board splits the same way ---------------- */
+{
+  // Literal source checks rather than regexes: every line below contains
+  // `?`, `$` or `{`, and an escaping slip in the pattern would quietly make
+  // the assertion pass against nothing.
+  const has = (src, needle, why) => assert.ok(src.includes(needle), why);
+
+  const lib = readFileSync(`${SRC}/lib/content.ts`, "utf8");
+  has(lib, 'const name = (r.campaign ?? "").trim()', "property is the campaign column");
+  has(
+    lib,
+    "const key = `${r.client_id}::${name}`",
+    "grouped within a client, so two clients' identical property names stay apart"
+  );
+  has(lib, "g[bucket].push(r);", "the client keeps its whole month");
+  has(lib, "p[bucket].push(r);", "and the property holds the same rows");
+
+  const card = readFileSync(`${SRC}/app/(app)/content/client-card.tsx`, "utf8");
+  has(card, "function PropertySection", "each property is a section of its own");
+  has(card, "<SendBar group={group} rows={property.ready}", "with its own send");
+  has(
+    card,
+    "group.properties.length > 1 && group.ready.length > 0",
+    "and a send-everything only where there is more than one property to gather"
+  );
+  has(card, 'fd.set("campaign", property)', "the property is written where the copy is");
+
+  const actions = readFileSync(`${SRC}/app/(app)/content/actions.ts`, "utf8");
+  has(
+    actions,
+    'fd.has("campaign") ? String(fd.get("campaign") ?? "").trim() : null',
+    "and a form that omits it cannot silently clear it"
+  );
+  ok("the board, the send and the message all cut on the same property");
+}
+
 await finish(pass);

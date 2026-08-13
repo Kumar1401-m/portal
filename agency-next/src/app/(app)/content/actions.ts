@@ -29,7 +29,26 @@ export async function saveBriefAction(
     return { ok: false, error: "Not authorized." };
   }
 
-  await execute("UPDATE deliverables SET description = ? WHERE id = ?", [body || null, id]);
+  /*
+   * The property is saved with the brief, not on its own.
+   *
+   * They are written in the same breath — you name what the post is about as
+   * you write it — and a separate save for a one-line field is a second thing
+   * to remember and a second thing to forget.
+   *
+   * Absent from the form means "leave it alone", so a caller that only sends
+   * the copy cannot silently clear it.
+   */
+  const property = fd.has("campaign") ? String(fd.get("campaign") ?? "").trim() : null;
+  if (property === null) {
+    await execute("UPDATE deliverables SET description = ? WHERE id = ?", [body || null, id]);
+  } else {
+    await execute("UPDATE deliverables SET description = ?, campaign = ? WHERE id = ?", [
+      body || null,
+      property || null,
+      id,
+    ]);
+  }
   revalidatePath("/content");
   revalidatePath(`/deliverables/${id}`);
   return { ok: true, message: body ? "Saved." : "Cleared." };

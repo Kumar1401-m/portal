@@ -31,10 +31,29 @@ export type ContentRow = {
   description: string | null;
   assigned_to: number | null;
   assignee_name: string | null;
+  /**
+   * What this content is about — a property, a project, a launch.
+   *
+   * The `campaign` column, which is what it has always been; "property" is
+   * what it is called on screen because that is what it holds for the clients
+   * who needed the grouping. A client's month is not one undifferentiated
+   * list: it is four posts about this flat and six about that one, and the
+   * client reads and approves them that way.
+   */
+  campaign: string | null;
   /** 0 only where the client has the sign-off switched off. Null pre-migration. */
   content_approval: number | null;
   /** When the brief last went out, so a re-send is a deliberate one. */
   content_sent_at: string | null;
+};
+
+/** One property's content, within one client. */
+export type PropertyGroup = {
+  /** The empty string is the real, unnamed group — not a missing one. */
+  name: string;
+  toWrite: ContentRow[];
+  ready: ContentRow[];
+  withClient: ContentRow[];
 };
 
 /** One client's briefs, which is how the work is actually done. */
@@ -45,6 +64,7 @@ export type ContentGroup = {
   /** False when nothing can be sent to WhatsApp, so the button can say why. */
   hasGroup: boolean;
   approvesContent: boolean;
+  properties: PropertyGroup[];
   toWrite: ContentRow[];
   ready: ContentRow[];
   withClient: ContentRow[];
@@ -66,14 +86,15 @@ export async function getContentBoard(
   const rows = await query<ContentRow>(
     `SELECT d.id, d.client_id, c.company_name, c.contact_person, d.title,
             d.service, d.video_type, d.content_category, d.status, d.due_date,
-            d.description, d.assigned_to, u.name AS assignee_name,
+            d.description, d.assigned_to, u.name AS assignee_name, d.campaign,
             ${hasContentApproval ? "c.content_approval" : "NULL AS content_approval"},
             ${hasSentAt ? "d.content_sent_at" : "NULL AS content_sent_at"}
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
        LEFT JOIN users u ON u.id = d.assigned_to
       WHERE d.status IN ('pending','content_review')${scope}
-      ORDER BY c.company_name ASC, d.due_date IS NULL, d.due_date ASC, d.id ASC`
+      ORDER BY c.company_name ASC, d.campaign IS NULL, d.campaign ASC,
+               d.due_date IS NULL, d.due_date ASC, d.id ASC`
   );
   if (rows.length === 0) return [];
 
@@ -86,6 +107,8 @@ export async function getContentBoard(
   );
 
   const out = new Map<number, ContentGroup>();
+  const byProperty = new Map<string, PropertyGroup>();
+
   for (const r of rows) {
     let g = out.get(r.client_id);
     if (!g) {
@@ -95,15 +118,30 @@ export async function getContentBoard(
         contactPerson: r.contact_person,
         hasGroup: groups.get(r.client_id) ?? false,
         approvesContent: r.content_approval === null || Number(r.content_approval) === 1,
+        properties: [],
         toWrite: [],
         ready: [],
         withClient: [],
       };
       out.set(r.client_id, g);
     }
-    if (r.status === "content_review") g.withClient.push(r);
-    else if ((r.description ?? "").trim()) g.ready.push(r);
-    else g.toWrite.push(r);
+
+    // Two views of the same rows: the client's whole month, and the month cut
+    // by property. Both are needed — "send everything" and "send this one" are
+    // both things people do, and neither is a special case of the other.
+    const name = (r.campaign ?? "").trim();
+    const key = `${r.client_id}::${name}`;
+    let p = byProperty.get(key);
+    if (!p) {
+      p = { name, toWrite: [], ready: [], withClient: [] };
+      byProperty.set(key, p);
+      g.properties.push(p);
+    }
+
+    const bucket =
+      r.status === "content_review" ? "withClient" : (r.description ?? "").trim() ? "ready" : "toWrite";
+    g[bucket].push(r);
+    p[bucket].push(r);
   }
   return [...out.values()];
 }
@@ -119,7 +157,13 @@ export async function getContentBoard(
  */
 const MAX_CHARS = 3500;
 
-export type ContentPiece = { title: string; dueDate: string | null; body: string };
+export type ContentPiece = {
+  title: string;
+  dueDate: string | null;
+  body: string;
+  /** The property this is about, or "" when it belongs to no particular one. */
+  property?: string | null;
+};
 
 /**
  * The messages one client gets, in the order they should read them.
@@ -140,17 +184,36 @@ export function buildContentMessages(
   const greeting = contactPerson?.trim() ? `Hello ${contactPerson.trim()},` : `Hello ${companyName},`;
   const single = pieces.length === 1;
 
+  /*
+   * Named by what it is about, when everything in the batch is about one thing.
+   *
+   * A client with six properties does not want "here is your content" — they
+   * want to know which one they are reading about before they read it, and to
+   * be able to answer about that one. When a batch spans several, the headings
+   * below do the same job inside the message.
+   */
+  const properties = [...new Set(pieces.map((p) => (p.property ?? "").trim()).filter(Boolean))];
+  const onlyProperty = properties.length === 1 && pieces.every((p) => (p.property ?? "").trim())
+    ? properties[0]
+    : null;
+
+  const title = onlyProperty
+    ? `📝 *Content for your approval — ${onlyProperty}*`
+    : `📝 *Content for your approval*`;
   const header = single
-    ? `📝 *Content for your approval*\n\n${greeting}\n\nHere is the content we have planned. Please have a look whenever you have a moment.`
-    : `📝 *Content for your approval*\n\n${greeting}\n\nHere is the content we have planned — ${pieces.length} pieces in all. Please have a look whenever you have a moment.`;
+    ? `${title}\n\n${greeting}\n\nHere is the content we have planned. Please have a look whenever you have a moment.`
+    : `${title}\n\n${greeting}\n\nHere is the content we have planned — ${pieces.length} pieces in all. Please have a look whenever you have a moment.`;
 
   const block = (p: ContentPiece, i: number) => {
     const n = single ? "" : `*${i + 1}. `;
     const close = single ? "" : "*";
     const due = p.dueDate ? ` _(${fmtDate(p.dueDate)})_` : "";
+    // Only where it adds something: repeating the property on every line of a
+    // batch that is entirely about that property is noise.
+    const where = !onlyProperty && (p.property ?? "").trim() ? ` · ${(p.property ?? "").trim()}` : "";
     return single
       ? `*${p.title}*${due}\n\n${p.body.trim()}`
-      : `${n}${p.title}${close}${due}\n${p.body.trim()}`;
+      : `${n}${p.title}${close}${where}${due}\n${p.body.trim()}`;
   };
 
   const ask =
@@ -215,10 +278,16 @@ export async function sendContentForApproval(
   );
   if (!client) return { ok: false, error: "Client not found." };
 
-  const rows = await query<{ id: number; title: string; due_date: string | null; description: string | null }>(
-    `SELECT id, title, due_date, description FROM deliverables
+  const rows = await query<{
+    id: number;
+    title: string;
+    due_date: string | null;
+    description: string | null;
+    campaign: string | null;
+  }>(
+    `SELECT id, title, due_date, description, campaign FROM deliverables
       WHERE client_id = ? AND id IN (${ids.join(",")}) AND status = 'pending'
-      ORDER BY due_date IS NULL, due_date ASC, id ASC`,
+      ORDER BY campaign IS NULL, campaign ASC, due_date IS NULL, due_date ASC, id ASC`,
     [clientId]
   );
   const written = rows.filter((r) => (r.description ?? "").trim());
@@ -238,7 +307,12 @@ export async function sendContentForApproval(
   const messages = buildContentMessages(
     client.company_name,
     client.contact_person,
-    written.map((r) => ({ title: r.title, dueDate: r.due_date, body: r.description ?? "" }))
+    written.map((r) => ({
+      title: r.title,
+      dueDate: r.due_date,
+      body: r.description ?? "",
+      property: r.campaign,
+    }))
   );
 
   /*

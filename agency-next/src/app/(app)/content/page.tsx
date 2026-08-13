@@ -43,6 +43,12 @@ export default async function ContentPage() {
     companyName: g.companyName,
     hasGroup: g.hasGroup,
     approvesContent: g.approvesContent,
+    properties: g.properties.map((p) => ({
+      name: p.name,
+      toWrite: p.toWrite.map(row),
+      ready: p.ready.map(row),
+      withClient: p.withClient.map(row),
+    })),
     toWrite: g.toWrite.map(row),
     ready: g.ready.map(row),
     withClient: g.withClient.map(row),
@@ -90,6 +96,7 @@ function row(r: {
   due_date: string | null;
   description: string | null;
   assignee_name: string | null;
+  campaign: string | null;
 }) {
   return {
     id: r.id,
@@ -97,5 +104,6 @@ function row(r: {
     dueDate: r.due_date,
     description: r.description,
     assigneeName: r.assignee_name,
+    property: (r.campaign ?? "").trim(),
   };
 }

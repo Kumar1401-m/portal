@@ -15,7 +15,13 @@
 const { createLogger } = require('./logger');
 const { parseCommand, findCode } = require('./command-parser');
 const { transcribeVoice } = require('./portal-client');
-const { reportApproval, logMessage, askSummary, reportFootage } = require('./portal-client');
+const {
+  reportApproval,
+  logMessage,
+  askSummary,
+  askIntent,
+  reportFootage,
+} = require('./portal-client');
 
 const log = createLogger('router');
 
@@ -47,7 +53,25 @@ class MessageRouter {
       }
     }
 
-    const parsed = parseCommand(msg.body);
+    let parsed = parseCommand(msg.body);
+
+    /*
+     * A second reading, for a client who did not answer in English.
+     *
+     * The parser knows "ok", "approve", "change" and a short list around them,
+     * which is what a client types because it is what the message asked them
+     * to type. It is not what a client *says*: a voice note comes back in
+     * their own language, and "సరే పంపించండి" is none of those words. Those
+     * replies were logged and then ignored — the client had answered, and
+     * nothing happened.
+     *
+     * The parser stays first and stays literal. This only runs on what it
+     * could not read, so a typed "ok" never depends on a model being up.
+     */
+    if (parsed.command === 'none' && String(msg.body || '').trim()) {
+      const guessed = await this.readIntent(msg);
+      if (guessed) parsed = guessed;
+    }
 
     // A client who replies to the video message itself doesn't need to type the
     // code — recover it from the quoted caption, which contains "Video ID: V245".
@@ -202,6 +226,66 @@ class MessageRouter {
     } catch (err) {
       log.warn('could not send the acknowledgement', { groupId, error: err.message });
     }
+  }
+
+  /**
+   * What the message meant, when the parser could not tell — or null.
+   *
+   * Never throws, and never guesses at an approval. Two guards, both
+   * deliberate:
+   *
+   *   - a floor on confidence, because the cost of being wrong is not
+   *     symmetric. A missed approval is a client asked again; a wrong one is
+   *     a post on their page they did not agree to.
+   *   - approval only from a message short enough to be an answer. "Yes lovely,
+   *     and by the way about next month…" is a conversation, and a model
+   *     reading the first two words of it is not permission.
+   *
+   * A change or a rejection is safe at a lower bar: neither publishes
+   * anything, and both are recoverable by a person reading the transcript.
+   */
+  async readIntent(msg) {
+    let res;
+    try {
+      res = await askIntent({ text: msg.body });
+    } catch (err) {
+      log.warn('could not read the intent', { error: err.message });
+      return null;
+    }
+    const d = res?.data;
+    if (!d?.ok || !d.intent || d.intent === 'none') return null;
+
+    const confidence = Number(d.confidence) || 0;
+    const floor = d.intent === 'approve' ? 0.8 : 0.6;
+    if (confidence < floor) {
+      log.info('intent read but not acted on', { intent: d.intent, confidence });
+      return null;
+    }
+    if (d.intent === 'approve' && String(msg.body).length > 300) {
+      log.info('approval-shaped, but too long to be an answer', { chars: msg.body.length });
+      return null;
+    }
+
+    log.info('intent understood from a non-English reply', {
+      intent: d.intent,
+      confidence,
+      voice: Boolean(msg.transcribed),
+    });
+
+    /*
+     * Shaped exactly like the parser's own result, so everything downstream —
+     * the approval payload, the acknowledgement, the socket event — cannot
+     * tell the two apart and has no second path to get wrong.
+     *
+     * The note carries what they asked for, in English, because it is read by
+     * whoever redoes the work. Their own words are already in the transcript.
+     */
+    return {
+      command: d.intent,
+      videoCode: null,
+      comment: d.note || d.summary || null,
+      link: null,
+    };
   }
 
   /**

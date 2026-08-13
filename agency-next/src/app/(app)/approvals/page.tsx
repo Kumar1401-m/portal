@@ -21,7 +21,7 @@ import { fmtDate, cn } from "@/lib/utils";
 export const metadata = { title: "Approvals · NVK Hub" };
 export const dynamic = "force-dynamic";
 
-type TabKey = "content" | "final" | "changes" | "approved" | "scheduled";
+type TabKey = "content" | "final" | "changes" | "approved" | "scheduled" | "posted";
 
 const TABS: {
   key: TabKey;
@@ -37,6 +37,17 @@ const TABS: {
   // left the board entirely and there was nowhere to see what is queued to go
   // out.
   { key: "scheduled", label: "Scheduled", status: "scheduled", action: { label: "Mark posted", status: "posted" } },
+  /*
+   * And where "Mark posted" sends them.
+   *
+   * The board ran out one step early: a video was scheduled, marked posted,
+   * and vanished — the last tab was a list of things about to go, with no way
+   * to see what had gone. Which is the question actually asked at the end of
+   * a month.
+   *
+   * "Mark completed" is the last move, and the one that files it away.
+   */
+  { key: "posted", label: "Posted", status: "posted", action: { label: "Mark completed", status: "completed" } },
 ];
 
 export default async function ApprovalsPage({

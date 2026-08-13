@@ -86,7 +86,14 @@ export async function POST(request: Request) {
             ],
           },
         ],
-        generationConfig: { temperature: 0, maxOutputTokens: 400 },
+        generationConfig: {
+          temperature: 0,
+          // A minute of speech is comfortably more than 400 tokens, and the
+          // budget is also what a thinking model spends before it writes a
+          // word — too tight and the reply comes back empty, which reads as
+          // "the client said nothing" rather than "we cut them off".
+          maxOutputTokens: 1200,
+        },
       }),
       signal: AbortSignal.timeout(45_000),
     });
@@ -101,12 +108,18 @@ export async function POST(request: Request) {
     }
 
     const j = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
     };
-    const text = (j.candidates?.[0]?.content?.parts || [])
+    const cand = j.candidates?.[0];
+    const text = (cand?.content?.parts || [])
       .map((p) => p.text || "")
       .join("")
       .trim();
+
+    // Said out loud, because the symptom of an empty transcript — a client
+    // whose voice notes are simply never acted on — looks nothing like its
+    // cause, and the cause is usually the token budget above.
+    if (!text) console.warn("[whatsapp] transcription came back empty", { finishReason: cand?.finishReason });
 
     return Response.json({ ok: true, text });
   } catch (err) {
