@@ -56,6 +56,8 @@ export type TeamEfficiency = {
     deliveries: number;
     /** Deliveries by people who have a capacity. The numerator. */
     deliveriesMeasured: number;
+    /** Everyone's capacity per day, added up — the totals row's own column. */
+    capacityPerDay: number;
     capacity: number;
     efficiency: number | null;
   };
@@ -72,6 +74,7 @@ const EMPTY = (from: string, to: string): TeamEfficiency => ({
     measured: 0,
     deliveries: 0,
     deliveriesMeasured: 0,
+    capacityPerDay: 0,
     capacity: 0,
     efficiency: null,
   },
@@ -159,6 +162,7 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
       measured: measured.length,
       deliveries: members.reduce((s, m) => s + m.deliveries, 0),
       deliveriesMeasured,
+      capacityPerDay: measured.reduce((s, m) => s + m.capacityPerDay, 0),
       capacity,
       efficiency: pct(deliveriesMeasured, capacity),
     },

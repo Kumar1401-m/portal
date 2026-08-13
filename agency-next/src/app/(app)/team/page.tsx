@@ -182,6 +182,67 @@ export default async function TeamPage({
                 </TR>
               ))}
             </TBody>
+
+            {/*
+              The column added up.
+
+              Deliveries is everyone's, because "how many did we do" is a
+              question about the whole team. The percentage beside it is not
+              that number over the capacity total, though — it counts only
+              people who have a capacity, or someone nobody set one for would
+              push the team's figure up on their behalf.
+
+              When those two differ the row says so ("401 scored") rather than
+              printing a total that visibly refuses to divide.
+            */}
+            <tfoot className="border-t-2 border-border bg-muted/40 font-medium">
+              <tr>
+                <td className="px-2 py-3" />
+                <td className="px-2 py-3">Total</td>
+                <td className="px-2 py-3 text-xs font-normal text-muted-foreground">
+                  {data.totals.people} {data.totals.people === 1 ? "person" : "people"}
+                  {data.totals.measured < data.totals.people
+                    ? ` · ${data.totals.measured} with capacity`
+                    : ""}
+                </td>
+                <td className="px-2 py-3 text-center tabular-nums">
+                  {data.totals.deliveries}
+                  {data.totals.deliveries !== data.totals.deliveriesMeasured ? (
+                    <div className="text-xs font-normal text-muted-foreground">
+                      {data.totals.deliveriesMeasured} scored
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-2 py-3 text-center tabular-nums">
+                  {data.totals.capacityPerDay > 0 ? (
+                    <>
+                      {data.totals.capacityPerDay}
+                      <div className="text-xs font-normal text-muted-foreground">
+                        {data.totals.capacity} over {data.days} day
+                        {data.days === 1 ? "" : "s"}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="px-2 py-3 text-center">
+                  {data.totals.efficiency === null ? (
+                    <span className="text-xs font-normal text-muted-foreground">Not set</span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "inline-block min-w-[3.5rem] rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums",
+                        band(data.totals.efficiency)
+                      )}
+                      title={`${data.totals.deliveriesMeasured} of ${data.totals.capacity} possible`}
+                    >
+                      {data.totals.efficiency}%
+                    </span>
+                  )}
+                </td>
+              </tr>
+            </tfoot>
           </Table>
 
           {/* The definition beside the numbers. Leaves and holidays are not

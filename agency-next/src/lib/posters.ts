@@ -51,3 +51,25 @@ export async function getPosters(user: SessionUser): Promise<PosterRow[]> {
 
 export const posterDone = (status: string) => DONE_STATUSES.includes(status as never);
 export const posterInReview = (status: string) => ["caption_ready", "review"].includes(status);
+
+/**
+ * The content is still being written, or is with the client.
+ *
+ * Not the designer's yet. A poster starts as a brief the super admin writes
+ * and the client approves; only then is there anything to design. The
+ * designer's queue used to include these, so a poster appeared on their screen
+ * before its copy existed — and designing from a blank brief means designing
+ * twice.
+ */
+export const posterAwaitingContent = (status: string) =>
+  ["pending", "content_review"].includes(status);
+
+/**
+ * The designer's turn: content approved, poster not yet submitted.
+ *
+ * `waiting_for_raw` is where the content gate leaves a task. On a video that
+ * means "we need the footage"; on a poster there is no footage, so it simply
+ * means the brief is signed off and the design can start.
+ */
+export const posterWithDesigner = (status: string) =>
+  ["waiting_for_raw", "raw_uploaded", "editing", "changes_requested", "resolved"].includes(status);

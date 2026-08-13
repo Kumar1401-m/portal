@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { ExternalLink, MessageSquareWarning } from "lucide-react";
-import { getPosters, posterDone, posterInReview } from "@/lib/posters";
+import {
+  getPosters,
+  posterInReview,
+  posterWithDesigner,
+  posterAwaitingContent,
+} from "@/lib/posters";
 import type { SessionUser } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -25,10 +30,20 @@ export async function PosterQueue({ user }: { user: SessionUser }) {
   const posters = await getPosters(user);
   if (posters.length === 0) return null;
 
-  // Waiting on somebody else is not work to do. Sorted behind the rest rather
-  // than hidden, because "did that go through?" is a fair question.
-  const todo = posters.filter((p) => !posterDone(p.status) && !posterInReview(p.status));
+  /*
+   * Three groups, and only the first is work.
+   *
+   * A poster starts as a brief the super admin writes and the client signs
+   * off. Until that happens there is nothing to design, so it is not in the
+   * to-do — it used to be, and a designer opening a poster with no copy in it
+   * either waits or designs the wrong thing.
+   *
+   * Submitted work is kept visible behind the rest rather than hidden,
+   * because "did that go through?" is a fair question.
+   */
+  const todo = posters.filter((p) => posterWithDesigner(p.status));
   const waiting = posters.filter((p) => posterInReview(p.status));
+  const notYet = posters.filter((p) => posterAwaitingContent(p.status));
 
   return (
     <Card>
@@ -37,7 +52,9 @@ export async function PosterQueue({ user }: { user: SessionUser }) {
         <p className="text-xs text-muted-foreground">
           {todo.length > 0
             ? `${todo.length} to design. Paste the link when each one is ready.`
-            : "Nothing left to design — everything is with the super admin."}
+            : notYet.length > 0
+              ? "Nothing to design yet — the content for these is still being approved."
+              : "Nothing left to design — everything is with the super admin."}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -97,6 +114,16 @@ export async function PosterQueue({ user }: { user: SessionUser }) {
             </div>
           );
         })}
+
+        {/* Coming, but not theirs yet. Named rather than hidden, so the month
+            ahead is visible without looking like work that can be started. */}
+        {notYet.length > 0 ? (
+          <p className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+            {notYet.length} more {notYet.length === 1 ? "poster is" : "posters are"} waiting on
+            content approval. {notYet.length === 1 ? "It" : "They"} will appear here once the
+            brief is signed off.
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

@@ -505,6 +505,10 @@ type WfRow = {
   /** The YouTube half of the same handoff. Null on a database without it. */
   youtube_enabled: number | null;
   youtube_status: string | null;
+  /** Who to tell when the content gate opens and the work becomes theirs. */
+  assigned_to: number | null;
+  service: string | null;
+  company_name: string;
 };
 
 /**
@@ -529,7 +533,8 @@ async function applyStatus(
   const hasYouTube = await hasColumn("clients", "youtube_enabled");
   const d = await queryOne<WfRow>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
-            d.instagram_status, d.scheduled_at, c.auto_publish, c.ig_user_id,
+            d.instagram_status, d.scheduled_at, d.assigned_to, d.service,
+            c.company_name, c.auto_publish, c.ig_user_id,
             ${hasYouTube ? "c.youtube_enabled, d.youtube_status" : "NULL AS youtube_enabled, NULL AS youtube_status"}
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
@@ -698,6 +703,30 @@ async function applyStatus(
       "general",
       "🎬 Ready for your review",
       `${user.name} finished "${d.title}". Check it, then send it to the client.`,
+      link
+    );
+  }
+
+  /*
+   * The content gate opening is the moment the work becomes the maker's.
+   *
+   * Nothing told them. The brief was written, sent to the client, approved —
+   * and the task simply appeared in a queue they had no reason to be looking
+   * at. For a poster especially: it is not in their list at all until this
+   * happens, so without a word they would never know it had arrived.
+   */
+  if (contentGate && d.assigned_to) {
+    const isPoster =
+      d.service === "poster_designing" ||
+      (!d.service && String(d.video_type ?? "").toLowerCase() === "poster");
+    await notifyUser(
+      d.assigned_to,
+      "general",
+      isPoster ? "🎨 A poster is ready to design" : "✏️ Content approved — over to you",
+      `${d.company_name} approved the content for "${d.title}". ` +
+        (isPoster
+          ? "It's in your posters list now — paste the design link when it's ready."
+          : "You can start on it."),
       link
     );
   }
