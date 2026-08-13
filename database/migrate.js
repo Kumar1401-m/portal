@@ -190,6 +190,9 @@ async function main() {
   // A per-person daily target, for the team effectiveness board.
   await addColumn('users', 'daily_target', 'daily_target INT UNSIGNED NOT NULL DEFAULT 0');
 
+  // The content desk: when the brief was last sent to the client.
+  await addColumn('deliverables', 'content_sent_at', 'content_sent_at DATETIME DEFAULT NULL');
+
   // Some clients sign off the written content first; some do not.
   await addColumn('clients', 'content_approval', 'content_approval TINYINT(1) NOT NULL DEFAULT 1');
 

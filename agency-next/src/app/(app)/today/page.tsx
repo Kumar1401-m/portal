@@ -1,17 +1,13 @@
 import Link from "next/link";
 import { CalendarCheck, CalendarClock, Hourglass, PenLine } from "lucide-react";
 import { requireUser, STAFF_ROLES } from "@/lib/auth";
-import {
-  getDeliverables,
-  getServiceCounts,
-  getAssignees,
-  boardEmptyReason,
-} from "@/lib/deliverables";
+import { getDeliverables, getAssignees, boardEmptyReason } from "@/lib/deliverables";
+import type { ServiceCounts } from "@/lib/deliverables";
 import { EmptyBoard } from "@/components/admin/empty-board";
 import { crmClientIds } from "@/lib/crm";
 import { getCategoryMap } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
-import { SERVICES } from "@/lib/services";
+import { SERVICES, SERVICE_KEYS, serviceOf } from "@/lib/services";
 import {
   contentStageLabel,
   contentStageTone,
@@ -73,12 +69,37 @@ export default async function TodayPage({
     crmClientIds: scopeIds,
   };
 
-  const [all, counts, assignees, categoryMap] = await Promise.all([
+  const [board, assignees, categoryMap] = await Promise.all([
     getDeliverables(scoped),
-    getServiceCounts(scoped),
     getAssignees(),
     getCategoryMap(),
   ]);
+
+  /*
+   * Briefs nobody has written are not on this board.
+   *
+   * They were, and they were the bulk of it: a month is created as thirty
+   * tasks at once, all of them `pending`, none of them workable — and thirty
+   * rows of "yet to start" is what the four late ones were hiding behind.
+   * Writing them is a real job with its own screen now, so this board holds
+   * what is moving: sent to the client, being made, waiting to go out.
+   *
+   * Sent to the client stays. That is the one content state that is waiting on
+   * somebody, which is exactly what this board is for.
+   */
+  const all = board.filter((d) => d.status !== "pending");
+  const onContentDesk = board.length - all.length;
+
+  /*
+   * The tab counts are counted from the same rows the table shows.
+   *
+   * `getServiceCounts` counts what the filters select, which now includes the
+   * briefs this board deliberately leaves out — a tab reading 34 above a board
+   * holding 4 is a bug report waiting to happen.
+   */
+  const counts = { all: all.length } as ServiceCounts;
+  for (const k of SERVICE_KEYS) counts[k] = 0;
+  for (const d of all) counts[serviceOf(d)]++;
 
   // How much of it is actually due — the number the heading used to be about,
   // and still worth saying now that the board holds more than that.
@@ -91,22 +112,16 @@ export default async function TodayPage({
   ).length;
 
   /*
-   * The content half of the board, counted.
+   * Content that has gone out and is waiting on an answer.
    *
-   * Writing the brief is a job like any other, and it is the one the whole
-   * month waits behind — nothing can be designed or edited until it is done.
-   * But it has no row of its own: it is a status on a task that already
-   * exists, so thirty unwritten briefs look exactly like thirty tasks, and
-   * "content" only became visible once somebody scrolled to the column.
+   * Said at the top rather than left to a column, because it is the state
+   * nobody owns: the work is not ours and not moving, and a piece can sit
+   * there for a week without anyone noticing. The link is into the content
+   * desk, where the answer is recorded.
    *
-   * So it is said at the top, in the two states that need a person: ours to
-   * write, and theirs to approve. Both link back into this same board filtered
-   * to that status, so the count is also the way to work through them.
-   *
-   * A designer's board is their own posters and never carries this — writing
-   * content is not their job and the counts would be nought.
+   * A designer's board is their own posters and never carries this — content
+   * is not their job and the count would be nought.
    */
-  const contentTodo = isDesigner ? 0 : all.filter((d) => d.status === "pending").length;
   const withClient = isDesigner ? 0 : all.filter((d) => d.status === "content_review").length;
   const statusHref = (s: string) => {
     const qs = new URLSearchParams();
@@ -146,21 +161,12 @@ export default async function TodayPage({
 
       <SearchBox basePath="/today" params={params} />
 
-      {/* The content queue, above the table rather than inside a column of it.
-          Two links, and only the ones that have something in them — a strip
-          that always reads "0 · 0" is a strip people stop seeing. */}
-      {contentTodo > 0 || withClient > 0 ? (
+      {/* The content strip, above the table rather than inside a column of it.
+          Only shown when there is something in it — a strip that always reads
+          "0" is a strip people stop seeing. */}
+      {withClient > 0 || (onContentDesk > 0 && !isDesigner) ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Content:</span>
-          {contentTodo > 0 ? (
-            <Link
-              href={statusHref("pending")}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--primary)_35%,transparent)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)] px-3 py-1 font-medium text-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--primary)_18%,transparent)]"
-            >
-              <PenLine className="h-3.5 w-3.5 text-primary" />
-              {contentTodo} to write
-            </Link>
-          ) : null}
           {withClient > 0 ? (
             <Link
               href={statusHref("content_review")}
@@ -168,6 +174,15 @@ export default async function TodayPage({
             >
               <Hourglass className="h-3.5 w-3.5" />
               {withClient} waiting on client approval
+            </Link>
+          ) : null}
+          {onContentDesk > 0 && !isDesigner ? (
+            <Link
+              href="/content"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-muted-foreground transition-colors hover:bg-muted"
+            >
+              <PenLine className="h-3.5 w-3.5" />
+              {onContentDesk} not sent to the client yet
             </Link>
           ) : null}
         </div>

@@ -137,6 +137,12 @@ const EXPECTED: ColumnSpec[] = [
       "Does this client sign off the written content before work starts? On by default; off hands it straight to the team.",
   },
   {
+    table: "deliverables",
+    column: "content_sent_at",
+    definition: "content_sent_at DATETIME DEFAULT NULL",
+    purpose: "When the written brief went to the client, so a second send is a deliberate one.",
+  },
+  {
     table: "clients",
     column: "auto_payment_reminders",
     definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",
