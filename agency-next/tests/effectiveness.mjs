@@ -1,9 +1,11 @@
 /**
- * The team board: a daily target per person, and whether they hit it.
+ * Team efficiency: delivered, against what could have been delivered.
  *
- * The arithmetic is trivial. What is worth pinning is what it refuses to say:
- * nobody is judged against a target they were never given, and "done today"
- * means today, not ever.
+ *     efficiency = deliveries ÷ (days in range × capacity per day)
+ *
+ * The arithmetic is checked against the figures on the report this was built
+ * to match, so a change to the formula fails here rather than in front of
+ * whoever is being measured by it.
  */
 import assert from "node:assert/strict";
 import { finish } from "./finish.mjs";
@@ -31,167 +33,159 @@ const clientId = Number(
 );
 const month = new Date().toISOString().slice(0, 7);
 
-const mk = async (name, role, target) =>
+const mk = async (name, role, capacity) =>
   Number(
     (await db.execute(
       `INSERT INTO users (name, email, password_hash, role, is_active, daily_target)
        VALUES (?, ?, 'x', ?, 1, ?)`,
-      [name, `zz-eff-${name}@example.com`, role, target]
+      [name, `zz-eff-${name}@example.com`, role, capacity]
     )).insertId
   );
 
-/** `doneToday` decides whether updated_at lands on today or long ago. */
-const task = (uid, title, status, due, doneToday) =>
-  db.execute(
-    `INSERT INTO deliverables
-       (client_id, title, status, due_date, month_key, assigned_to, instagram_status, updated_at)
-     VALUES (?,?,?,?,?,?, 'none', ${doneToday ? "NOW()" : "'2020-01-01 10:00:00'"})`,
-    [clientId, title, status, due, month, uid]
+/** `n` delivered tasks for `uid`, all stamped on `day`. */
+const deliver = async (uid, day, n, tag) => {
+  for (let i = 0; i < n; i++) {
+    await db.execute(
+      `INSERT INTO deliverables
+         (client_id, title, status, month_key, assigned_to, instagram_status, updated_at)
+       VALUES (?, ?, 'approved', ?, ?, 'none', ?)`,
+      [clientId, `ZZ-EFF ${tag} ${i}`, month, uid, `${day} 12:00:00`]
+    );
+  }
+};
+
+/* ---------------- the range is the multiplier ---------------- */
+{
+  assert.equal(eff.daysBetween("2026-08-01", "2026-08-11"), 11, "both ends counted");
+  assert.equal(eff.daysBetween("2026-08-01", "2026-08-01"), 1, "a single day is one day");
+  assert.equal(eff.daysBetween("2026-08-11", "2026-08-01"), 0, "backwards is nothing to report");
+  assert.equal(eff.daysBetween("nonsense", "2026-08-01"), 0);
+  ok("the number of days in the range is what capacity is multiplied by");
+}
+
+/* ---------------- the report's own numbers ---------------- */
+{
+  // Straight off the design this replaces. Eleven days, 01–11 August.
+  const from = "2026-08-01";
+  const to = "2026-08-11";
+
+  const dariya = await mk("dariya", "video_editor", 8); // 147 → 167%
+  const siva = await mk("siva", "video_editor", 8); //     33 → 37%
+  const naga = await mk("naga", "video_editor", 8); //     86 → 97%
+  const hadassa = await mk("hadassa", "poster_designer", 50); // 34 → 6%
+
+  await deliver(dariya, "2026-08-05", 147, "dariya");
+  await deliver(siva, "2026-08-05", 33, "siva");
+  await deliver(naga, "2026-08-05", 86, "naga");
+  await deliver(hadassa, "2026-08-05", 34, "hadassa");
+
+  const r = await eff.teamEfficiency(from, to);
+  assert.equal(r.days, 11);
+  const find = (n) => r.members.find((m) => m.name === n);
+
+  assert.equal(find("dariya").efficiency, 167, "147 ÷ (11 × 8) is 167%");
+  assert.equal(find("siva").efficiency, 37, "33 ÷ 88 is 37%");
+  assert.equal(find("naga").efficiency, 97, "86 ÷ 88 is 97%");
+  assert.equal(find("hadassa").efficiency, 6, "34 ÷ (11 × 50) is 6%");
+  assert.equal(find("dariya").capacity, 88, "capacity is per-day × days");
+  ok("every figure matches the report this was built from");
+
+  // Over capacity is shown as it happened. Capping at 100 would make 167%
+  // indistinguishable from 100% — the one comparison a capacity is for.
+  assert.ok(find("dariya").efficiency > 100, "beyond capacity is not clamped");
+  ok("beyond capacity reads as beyond capacity");
+
+  /*
+   * Floored, never rounded.
+   *
+   * Both of these round *up* across a line that matters: 33/88 is 37.5 and
+   * 86/88 is 97.7, and rounding would print 38 and 98. The second is the
+   * dangerous one — at 99.6% rounding says 100%, which reads as "cleared
+   * capacity" about somebody who did not. A figure people are measured by
+   * should never round in their favour past the line.
+   */
+  assert.notEqual(find("siva").efficiency, 38, "37.5% is 37, not 38");
+  assert.notEqual(find("naga").efficiency, 98, "97.7% is 97, not 98");
+
+  const nearly = await mk("nearly", "video_editor", 1);
+  await deliver(nearly, "2026-08-05", 10, "nearly"); // 10 of 11 = 90.9%
+  const again = await eff.teamEfficiency(from, to);
+  assert.equal(
+    again.members.find((m) => m.name === "nearly").efficiency,
+    90,
+    "90.9% is 90 — short of capacity stays visibly short of it"
   );
-
-const asha = await mk("asha", "video_editor", 3);
-const bala = await mk("bala", "poster_designer", 4);
-const chandu = await mk("chandu", "video_editor", 0);
-
-for (let i = 1; i <= 3; i++) await task(asha, `ZZ-EFF asha ${i}`, "approved", null, true);
-await task(asha, "ZZ-EFF asha late", "editing", "2020-01-01", false);
-await task(bala, "ZZ-EFF bala done", "review", null, true);
-await task(bala, "ZZ-EFF bala late", "pending", "2020-01-01", false);
-await task(chandu, "ZZ-EFF chandu open", "editing", null, false);
-
-const find = (r, name) => r.members.find((m) => m.name === name);
-
-/* ---------------- hitting the target, and missing it ---------------- */
-{
-  const r = await eff.teamEffectiveness();
-  assert.ok(r.ready, "the board is available");
-
-  const a = find(r, "asha");
-  assert.equal(a.target, 3);
-  assert.equal(a.done, 3, "three moved forward today");
-  assert.equal(a.hit, true, "target met");
-  assert.equal(a.overdue, 1, "and one of theirs is late, which the board still says");
-
-  const b = find(r, "bala");
-  assert.equal(b.done, 1);
-  assert.equal(b.hit, false, "one of four is not four");
-  ok("done today is counted per person, and measured against their own target");
+  ok("percentages are floored, so nothing rounds up to look like capacity was met");
 }
 
-/* ---------------- nobody is judged against a target they were not given ---------------- */
+/* ---------------- deliveries are counted inside the range only ---------------- */
 {
-  const r = await eff.teamEffectiveness();
-  const c = find(r, "chandu");
-  assert.equal(c.target, 0);
-  // The point: not `false`, and not `true`. A green tick for having been
-  // forgotten is worse than a blank, and a red mark is unfair.
-  assert.equal(c.hit, null, "no target set means no verdict");
-  assert.equal(c.open, 1, "though their work is still shown");
+  const outside = await mk("outside", "video_editor", 1);
+  await deliver(outside, "2026-08-05", 3, "in");
+  await deliver(outside, "2026-07-05", 9, "before");
+  await deliver(outside, "2026-09-05", 9, "after");
 
-  assert.equal(r.totals.withTarget, 2, "only people with a target are in the denominator");
-  assert.equal(r.totals.onTarget, 1, "one of the two hit it");
-  assert.equal(r.totals.target, 7, "3 + 4, ignoring the person with none");
-  ok("someone with no target is shown with their work and no judgement");
-}
+  const r = await eff.teamEfficiency("2026-08-01", "2026-08-11");
+  const m = r.members.find((x) => x.name === "outside");
+  assert.equal(m.deliveries, 3, "work either side of the range is not in it");
+  assert.equal(m.efficiency, 27, "3 ÷ 11 is 27%");
 
-/* ---------------- today means today ---------------- */
-{
-  // Every one of bala's other tasks was last touched in 2020. If the count
-  // ignored the date, "done today" would only ever grow.
-  const r = await eff.teamEffectiveness();
-  assert.equal(find(r, "bala").done, 1, "yesterday's work is not today's");
-
-  // And the date shown is the database's, not this process's — the count uses
-  // CURDATE(), and this database's clock is IST while toISOString() is UTC.
-  const dbToday = String((await db.queryOne("SELECT CURDATE() AS d")).d).slice(0, 10);
-  assert.equal(r.date, dbToday, "the date labels the same day it counted");
-  ok("the day resets at the database's midnight, not this process's");
-}
-
-/* ---------------- who is even on it ---------------- */
-{
-  const r = await eff.teamEffectiveness();
-  const names = r.members.map((m) => m.name);
-  assert.ok(names.includes("asha") && names.includes("bala"), "the people who make the work");
-
-  // A deactivated member is off the board — they are not failing a target,
-  // they have left.
-  await db.execute("UPDATE users SET is_active = 0 WHERE id = ?", [chandu]);
-  const after = await eff.teamEffectiveness();
-  assert.ok(!after.members.some((m) => m.name === "chandu"), "someone deactivated drops off");
-  await db.execute("UPDATE users SET is_active = 1 WHERE id = ?", [chandu]);
-  ok("only active people who can be assigned work appear");
-}
-
-/* ---------------- effectiveness is a percentage of the target ---------------- */
-{
-  const r = await eff.teamEffectiveness();
-
-  // The whole ask: three of three is 100%.
-  assert.equal(find(r, "asha").percent, 100, "3 done against a target of 3 is 100%");
-  assert.equal(find(r, "bala").percent, 25, "1 against 4 is 25%");
-  assert.equal(find(r, "chandu").percent, null, "and no target is no percentage");
-
-  // Team: 4 done by people with targets, against 7 asked for.
-  assert.equal(r.totals.doneWithTarget, 4);
-  assert.equal(r.totals.target, 7);
-  assert.equal(r.totals.percent, 57, "4 of 7 rounds to 57%");
-  ok("effectiveness is done ÷ target, per person and for the team");
-}
-
-/* ---------------- beating a target is not the same as meeting it ---------------- */
-{
-  // Capping at 100 would make four-of-three look identical to three-of-three,
-  // which is the one comparison a target exists to make.
-  const asha = Number(
-    (await db.queryOne("SELECT id FROM users WHERE email = 'zz-eff-asha@example.com'")).id
+  const wider = await eff.teamEfficiency("2026-07-01", "2026-09-30");
+  assert.equal(
+    wider.members.find((x) => x.name === "outside").deliveries,
+    21,
+    "and a wider range picks all of it up"
   );
-  await task(asha, "ZZ-EFF asha extra", "approved", null, true);
-  const r = await eff.teamEffectiveness();
-  assert.equal(find(r, "asha").done, 4);
-  assert.equal(find(r, "asha").percent, 133, "4 of 3 is 133%, not 100%");
-  assert.equal(find(r, "asha").hit, true);
-  await db.execute("DELETE FROM deliverables WHERE title = 'ZZ-EFF asha extra'");
-  ok("over-achievement is shown as it happened, not rounded down to the target");
+  ok("a delivery counts on the day it moved, inside the range asked for");
 }
 
-/* ---------------- an untargeted person cannot inflate the team ---------------- */
+/* ---------------- nobody is scored against a capacity they lack ---------------- */
 {
-  // chandu has no target. Work of theirs must not count towards a total built
-  // from other people's targets, or the number climbs because somebody was
-  // forgotten.
-  const chanduId = Number(
-    (await db.queryOne("SELECT id FROM users WHERE email = 'zz-eff-chandu@example.com'")).id
-  );
-  const before = (await eff.teamEffectiveness()).totals;
-  await task(chanduId, "ZZ-EFF chandu done", "approved", null, true);
-  const after = (await eff.teamEffectiveness()).totals;
+  const nocap = await mk("nocap", "video_editor", 0);
+  await deliver(nocap, "2026-08-05", 5, "nocap");
 
-  assert.equal(after.percent, before.percent, "the team percentage does not move");
-  assert.equal(after.doneWithTarget, before.doneWithTarget, "nor the numerator");
-  assert.equal(after.done, before.done + 1, "though the raw count does");
-  await db.execute("DELETE FROM deliverables WHERE title = 'ZZ-EFF chandu done'");
-  ok("work by someone with no target is counted, but never scored against targets");
+  const r = await eff.teamEfficiency("2026-08-01", "2026-08-11");
+  const m = r.members.find((x) => x.name === "nocap");
+  assert.equal(m.capacityPerDay, 0);
+  assert.equal(m.capacity, 0);
+  // Not 0%. A red zero for someone nobody set a capacity for is a claim about
+  // them that the data does not support.
+  assert.equal(m.efficiency, null, "no capacity means no percentage");
+  assert.equal(m.deliveries, 5, "their work is still counted and shown");
+
+  // And their deliveries must not lift the team figure, which is built from
+  // other people's capacities.
+  assert.ok(
+    r.totals.deliveriesMeasured < r.totals.deliveries,
+    "the team numerator excludes them"
+  );
+  const expected = Math.floor((r.totals.deliveriesMeasured / r.totals.capacity) * 100);
+  assert.equal(r.totals.efficiency, expected, "the team figure is measured over measured");
+  ok("someone without a capacity is listed, never scored, and never inflates the team");
 }
 
-/* ---------------- it says what it is counting, on its own page ---------------- */
+/* ---------------- the page shows what it can defend ---------------- */
 {
   const page = readFileSync(`${SRC}/app/(app)/team/page.tsx`, "utf8");
-  assert.match(page, /Resets at midnight/, "the definition sits next to the numbers");
-  assert.match(page, /No target set/, "and an unset target is labelled, not scored");
-  assert.match(page, /requireUser\(SUPER_ADMIN_ROLES\)/, "super admin only — it names individuals");
-  assert.match(page, /Team effectiveness/, "and it is the page's own subject");
 
-  // Days met, never a weekly target invented by multiplying the daily one.
-  assert.match(page, /\{m\.hitDays\}\/\{HISTORY_DAYS\} days/, "the week is shown as days met");
-  assert.ok(!/daily_target \* 7|target \* 7/.test(page), "no fabricated weekly target");
+  // Removed on purpose: the portal tracks no attendance, so a figure under
+  // any of these headings would be invented — and an invented denominator
+  // makes every percentage on the page quietly wrong.
+  for (const gone of ["Leaves", "Holidays", "Working Days"]) {
+    assert.ok(!new RegExp(`>${gone}<`).test(page), `${gone} is not a column`);
+  }
+  for (const kept of ["Employee", "Role", "Deliveries", "Capacity / day", "Efficiency"]) {
+    assert.ok(page.includes(kept), `${kept} is`);
+  }
+  assert.match(page, /Efficiency is deliveries ÷ \(days in range × capacity per day\)/,
+    "and the formula is printed next to the numbers");
+  assert.match(page, /requireUser\(SUPER_ADMIN_ROLES\)/, "super admin only — it names people");
 
-  const nav = readFileSync(`${SRC}/components/admin/nav-config.ts`, "utf8");
-  assert.match(nav, /href: "\/team".*roles: SUPER_ADMIN/, "it has its own nav entry");
-
-  const dash = readFileSync(`${SRC}/app/(app)/dashboard/page.tsx`, "utf8");
-  assert.ok(!/TeamEffectiveness/.test(dash), "and is no longer a card on the dashboard");
-  ok("the board is its own page, super admin only, and defines its own numbers");
+  const filter = readFileSync(`${SRC}/app/(app)/team/date-filter.tsx`, "utf8");
+  assert.match(filter, /name="from"/);
+  assert.match(filter, /name="to"/);
+  assert.match(filter, /method="GET"/, "the range is a URL, so a report can be shared");
+  ok("the report has a date range, and no column it cannot stand behind");
 }
 
 await clean();

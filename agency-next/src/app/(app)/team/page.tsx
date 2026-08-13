@@ -1,241 +1,209 @@
 import Link from "next/link";
-import { Gauge, CheckCircle2, AlertTriangle, TriangleAlert, Users } from "lucide-react";
+import { Gauge, TriangleAlert, Users, ListChecks, Briefcase, BarChart3 } from "lucide-react";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
-import { teamEffectiveness, HISTORY_DAYS } from "@/lib/effectiveness";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { teamEfficiency } from "@/lib/effectiveness";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
+import { DateFilter } from "./date-filter";
 import { label, fmtDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-export const metadata = { title: "Team effectiveness · NVK Hub" };
+export const metadata = { title: "Team efficiency · NVK Hub" };
 export const dynamic = "force-dynamic";
 
-/**
- * Which side of the target a percentage falls on.
- *
- * Amber rather than red below target: a target is a plan for the day, and
- * being short of it at eleven in the morning is not a failure. Red is kept for
- * work that is actually late.
- */
-function toneFor(percent: number | null) {
-  if (percent === null) return "muted" as const;
-  if (percent >= 100) return "success" as const;
-  if (percent >= 60) return "warning" as const;
-  return "danger" as const;
-}
+/** ISO date, this process's clock only for defaulting the form. */
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const looksLikeDate = (s?: string) => Boolean(s && /^\d{4}-\d{2}-\d{2}$/.test(s));
 
-/** The bar behind a percentage. Over 100 fills it and stops. */
-function Bar({ percent }: { percent: number | null }) {
-  if (percent === null) return null;
-  const tone = toneFor(percent);
-  const fill =
-    tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : "bg-destructive";
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="img"
-      aria-label={`${percent}% of target`}>
-      <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.min(percent, 100)}%` }} />
-    </div>
-  );
+/**
+ * The colour of a percentage.
+ *
+ * Four bands, because "did they clear their capacity" and "how far past it did
+ * they get" are different questions and one colour cannot answer both. Beyond
+ * capacity is violet rather than a brighter green: it is not more correct than
+ * hitting it, it is a different thing, and often means the capacity is wrong.
+ */
+function band(pct: number) {
+  if (pct >= 100) return "bg-violet-600 text-white";
+  if (pct >= 80) return "bg-emerald-600 text-white";
+  if (pct >= 50) return "bg-amber-500 text-white";
+  return "bg-rose-600 text-white";
 }
 
 /**
- * Team effectiveness, as a percentage of what was asked for.
+ * Team efficiency: what was delivered against what could have been.
  *
- * Its own page rather than a card on the dashboard: it names individuals, it
- * is read deliberately rather than glanced at, and it was making the dashboard
- * a scroll.
+ * `deliveries ÷ (days × capacity per day)`. Eight a day across eleven days is
+ * a capacity of 88, so 147 against it is 167%. Never capped — a capacity
+ * exists to show who is past it, and rounding everyone down to 100% throws
+ * away the only interesting half of the answer.
  *
- * The number is done ÷ target. Three of three is 100%; four of three is 133%,
- * shown as 133% and not rounded down, because otherwise beating a target looks
- * identical to scraping it — which is the thing a target exists to find out.
- *
- * The team figure counts only people who have a target. Including someone's
- * work when nobody set them a target would push the percentage up for a
- * management oversight.
+ * Leaves, holidays and working days are deliberately not here. The portal does
+ * not track attendance, so any figure it printed under those headings would be
+ * invented, and an invented denominator quietly makes every percentage wrong.
+ * Days in the range is a number it actually knows.
  */
-export default async function TeamPage() {
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   await requireUser(SUPER_ADMIN_ROLES);
-  const data = await teamEffectiveness();
+  const sp = await searchParams;
 
-  if (!data.ready) {
-    return (
-      <div className="space-y-5">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Gauge className="h-6 w-6 text-primary" /> Team effectiveness
+  const now = new Date();
+  const defaultFrom = iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
+  const defaultTo = iso(now);
+  const rawFrom = looksLikeDate(sp.from) ? sp.from! : defaultFrom;
+  const rawTo = looksLikeDate(sp.to) ? sp.to! : defaultTo;
+  // Backwards dates are swapped rather than refused: it is obvious what was
+  // meant, and an empty report looks like a month with no work in it.
+  const [from, to] = rawFrom <= rawTo ? [rawFrom, rawTo] : [rawTo, rawFrom];
+
+  const data = await teamEfficiency(from, to);
+
+  return (
+    <div className="space-y-5">
+      {/* A titled band rather than a bare heading — this is a report, and it
+          is read as one thing rather than scanned with the rest of the page. */}
+      <div className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-5 text-white shadow-sm">
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <Gauge className="h-5 w-5" />
+          Team Efficiency Report
         </h1>
+        <p className="mt-0.5 text-sm text-white/85">
+          {fmtDate(from)} – {fmtDate(to)} · {data.days} day{data.days === 1 ? "" : "s"}
+          {data.totals.efficiency !== null ? (
+            <>
+              {" "}
+              · team {data.totals.efficiency}% ({data.totals.deliveriesMeasured} of{" "}
+              {data.totals.capacity} possible)
+            </>
+          ) : null}
+        </p>
+      </div>
+
+      <DateFilter from={from} to={to} />
+
+      {!data.ready ? (
         <Card>
           <CardContent className="space-y-3 p-8 text-center">
             <TriangleAlert className="mx-auto h-8 w-8 text-warning" />
             <p className="text-sm text-muted-foreground">
-              The daily target column is missing.
+              The capacity column is missing from the database.
             </p>
             <Link href="/settings" className="text-sm text-primary hover:underline">
               Settings → Database → apply pending changes
             </Link>
           </CardContent>
         </Card>
-      </div>
-    );
-  }
-
-  const t = data.totals;
-  const noTargets = t.withTarget === 0;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Gauge className="h-6 w-6 text-primary" /> Team effectiveness
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {data.date ? fmtDate(data.date) : "Today"} · against the daily target set for each
-            person.
-          </p>
-        </div>
-        <Link href="/settings" className={buttonClasses({ variant: "outline", size: "sm" })}>
-          <Users className="h-4 w-4" /> Set targets
-        </Link>
-      </div>
-
-      {noTargets ? (
+      ) : data.members.length === 0 ? (
         <Card>
-          <CardContent className="space-y-2 p-10 text-center">
-            <Gauge className="mx-auto h-7 w-7 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              Nobody has a daily target yet, so there is nothing to measure against. Set one
-              per person in Settings → Team — a target of 3 met three times is 100%.
-            </p>
+          <CardContent className="p-10 text-center text-sm text-muted-foreground">
+            No active team members to report on.
           </CardContent>
         </Card>
       ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              title="Team effectiveness"
-              value={t.percent === null ? "—" : `${t.percent}%`}
-              icon={Gauge}
-              tone={t.percent !== null && t.percent >= 100 ? "emerald" : "amber"}
-              hint={`${t.doneWithTarget} finished against ${t.target} asked for`}
-            />
-            <StatCard
-              title="On target"
-              value={`${t.onTarget} of ${t.withTarget}`}
-              icon={CheckCircle2}
-              tone="emerald"
-            />
-            <StatCard
-              title="Open work"
-              value={t.open}
-              icon={Users}
-              tone="sky"
-              hint="assigned and not finished"
-            />
-            <StatCard
-              title="Overdue"
-              value={t.overdue}
-              icon={AlertTriangle}
-              tone={t.overdue > 0 ? "rose" : "sky"}
-            />
-          </div>
+        <Card className="overflow-hidden">
+          <Table dense>
+            <THead>
+              <tr>
+                <th className="w-10 text-right">#</th>
+                <th>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5" /> Employee
+                  </span>
+                </th>
+                <th>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Briefcase className="h-3.5 w-3.5" /> Role
+                  </span>
+                </th>
+                <th className="text-center">
+                  <span className="inline-flex items-center gap-1.5">
+                    <ListChecks className="h-3.5 w-3.5" /> Deliveries
+                  </span>
+                </th>
+                <th className="text-center">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Gauge className="h-3.5 w-3.5" /> Capacity / day
+                  </span>
+                </th>
+                <th className="text-center">
+                  <span className="inline-flex items-center gap-1.5">
+                    <BarChart3 className="h-3.5 w-3.5" /> Efficiency
+                  </span>
+                </th>
+              </tr>
+            </THead>
+            <TBody>
+              {data.members.map((m, i) => (
+                <TR key={m.id}>
+                  <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
+                  <TD className="font-medium">{m.name}</TD>
+                  <TD>
+                    <span className="rounded-md bg-sky-500/12 px-2 py-1 text-xs font-medium text-sky-700 dark:text-sky-300">
+                      {label(m.role)}
+                    </span>
+                  </TD>
+                  <TD className="text-center">
+                    <span className="rounded-md bg-emerald-500/12 px-2 py-0.5 text-sm font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
+                      {m.deliveries}
+                    </span>
+                  </TD>
+                  <TD className="text-center tabular-nums">
+                    {m.capacityPerDay > 0 ? (
+                      m.capacityPerDay
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TD>
+                  {/*
+                    No capacity means no percentage. A red 0% for someone
+                    nobody set a capacity for is a lie about them, not a
+                    measurement.
+                  */}
+                  <TD className="text-center">
+                    {m.efficiency === null ? (
+                      <span className="text-xs text-muted-foreground">Not set</span>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-block min-w-[3.5rem] rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums",
+                          band(m.efficiency)
+                        )}
+                        title={`${m.deliveries} of ${m.capacity} possible over ${data.days} days`}
+                      >
+                        {m.efficiency}%
+                      </span>
+                    )}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
 
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle className="text-base">By person</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Each percentage is that person&apos;s own: what they finished today divided by
-                what was asked of them.
-              </p>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table dense>
-                <THead>
-                  <tr>
-                    <th>Member</th>
-                    <th className="text-right">Target</th>
-                    <th className="text-right">Done</th>
-                    <th className="w-40">Effectiveness</th>
-                    <th className="text-right">Last {HISTORY_DAYS} days</th>
-                    <th className="text-right">Open</th>
-                    <th className="text-right">Overdue</th>
-                  </tr>
-                </THead>
-                <TBody>
-                  {data.members.map((m) => (
-                    <TR key={m.id}>
-                      <TD>
-                        <span className="font-medium">{m.name}</span>
-                        <div className="text-xs text-muted-foreground">{label(m.role)}</div>
-                      </TD>
-                      <TD className="text-right tabular-nums">
-                        {m.target > 0 ? m.target : <span className="text-muted-foreground">—</span>}
-                      </TD>
-                      <TD className="text-right font-medium tabular-nums">{m.done}</TD>
-                      <TD>
-                        {/* No target means no verdict — a green tick for having
-                            been forgotten is worse than a blank. */}
-                        {m.percent === null ? (
-                          <span className="text-xs text-muted-foreground">No target set</span>
-                        ) : (
-                          <div className="space-y-1">
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span
-                                className={
-                                  m.percent >= 100
-                                    ? "text-sm font-semibold text-success"
-                                    : "text-sm font-semibold text-warning"
-                                }
-                              >
-                                {m.percent}%
-                              </span>
-                              {m.percent < 100 ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {m.target - m.done} to go
-                                </span>
-                              ) : null}
-                            </div>
-                            <Bar percent={m.percent} />
-                          </div>
-                        )}
-                      </TD>
-                      {/* Days met, not a weekly total: there is no weekly
-                          target, and inventing one would score Sundays. */}
-                      <TD className="text-right tabular-nums text-muted-foreground">
-                        {m.target > 0 ? (
-                          <Badge tone={m.hitDays >= 5 ? "success" : "muted"}>
-                            {m.hitDays}/{HISTORY_DAYS} days
-                          </Badge>
-                        ) : (
-                          "—"
-                        )}
-                      </TD>
-                      <TD className="text-right tabular-nums text-muted-foreground">{m.open}</TD>
-                      <TD className="text-right tabular-nums">
-                        {m.overdue > 0 ? (
-                          <span className="font-medium text-destructive">{m.overdue}</span>
-                        ) : (
-                          <span className="text-muted-foreground">0</span>
-                        )}
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-
-              {/* The definition, beside the numbers rather than in someone's
-                  head. `updated_at` is the closest thing the schema has to
-                  "when it moved", and an unrelated edit touches it too. */}
-              <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-                A task counts on the day it reached editing hand-off, review, approval or
-                posting. The team figure counts only people who have a target, so nobody&apos;s
-                work inflates it on their behalf. Resets at midnight.
-              </p>
-            </CardContent>
-          </Card>
-        </>
+          {/* The definition beside the numbers. Leaves and holidays are not
+              here because nothing in the portal tracks them, and a denominator
+              nobody measured would make every row quietly wrong. */}
+          <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+            Efficiency is deliveries ÷ (days in range × capacity per day). A task counts on the
+            day it reached editing hand-off, review, approval or posting. Capacity is set per
+            person in{" "}
+            <Link href="/settings" className="text-primary hover:underline">
+              Settings → Team
+            </Link>
+            ; anyone without one is listed but not scored.
+          </p>
+        </Card>
       )}
+
+      <div className="flex justify-end">
+        <Link href="/settings" className={buttonClasses({ variant: "outline", size: "sm" })}>
+          <Users className="h-4 w-4" /> Set capacity
+        </Link>
+      </div>
     </div>
   );
 }

@@ -1,217 +1,167 @@
 /**
- * How the team is doing against what was asked of them.
+ * Team efficiency over a date range.
  *
- * A daily target per person, and whether they hit it. Deliberately narrow:
- * this answers "is the work getting done" and nothing else. It is not a
- * ranking, and the numbers are only as fair as the targets somebody set.
+ * One number per person: what they delivered, against what they could have
+ * delivered in the same days.
  *
- * **What counts as done.** A task counts on the day it *moved forward*, not
- * the day it was created or the day it is due. For the person doing the work
- * that is the honest measure — an editor who cut four videos today did four
- * days' work whatever their due dates say.
+ *     efficiency = deliveries ÷ (days in range × capacity per day)
  *
- * `updated_at` is the closest thing to "when it moved" the schema has. It is
- * imperfect: an unrelated edit touches it too. Said plainly here rather than
- * presented as precision it does not have, and the board says the same to
- * whoever reads it.
+ * So eight a day over eleven days is a capacity of 88, and 147 against it is
+ * 167%. Under 100% is short of capacity, over it is beyond — and the figure is
+ * never capped, because the whole point of a capacity is to see who is past it.
  *
- * **Nobody is measured against a target they were not given.** A person with
- * `daily_target = 0` is shown with their work and no verdict — an unset target
- * is not a target of zero, and rendering them as "0 of 0, achieved" would be a
- * green tick for having been forgotten.
+ * **What counts as a delivery.** A task counts on the day it *moved forward* —
+ * reached editing hand-off, review, approval or posting — not the day it was
+ * created or the day it is due. For the person doing the work that is the
+ * honest measure. `updated_at` is the closest thing the schema has to "when it
+ * moved", and an unrelated edit touches it too; that is said on the page
+ * rather than implied away.
+ *
+ * **Nobody is scored against a capacity they were not given.** Capacity 0
+ * means unset, not zero — such a person is listed with their deliveries and no
+ * percentage, because a red 0% for having been forgotten is a lie about them.
  */
 import "server-only";
 import { query, hasColumn } from "./db";
 import { ASSIGNABLE_ROLES, sqlRoleList } from "./roles";
 
-/** Statuses that mean the person's own part is finished. */
-const DONE_TODAY =
+/** Statuses that mean the person's own part of a task is finished. */
+const DELIVERED =
   "('caption_ready','review','approved','scheduled','posted','completed','resolved')";
 
-export type MemberDay = {
+export type MemberEfficiency = {
   id: number;
   name: string;
   role: string;
-  /** 0 when nobody has set one. Never treated as a target of zero. */
-  target: number;
-  /** Tasks they moved forward today. */
-  done: number;
-  /** Still open and assigned to them, whatever the date. */
-  open: number;
-  /** Open, assigned to them, and past its due date. */
-  overdue: number;
-  /** null when there is no target to judge against. */
-  hit: boolean | null;
-  /**
-   * Today's effectiveness: done ÷ target, as a percentage. Null without a
-   * target.
-   *
-   * Not capped at 100. Four against a target of three is 133%, and rounding
-   * that down to "100%" would make beating a target indistinguishable from
-   * scraping it — which is exactly the thing a target is set to find out.
-   */
-  percent: number | null;
-  /**
-   * Days out of the last seven on which they met their target.
-   *
-   * Counted as days, never as a weekly target. Multiplying a daily figure by
-   * seven would invent a target nobody set and quietly count Sundays as
-   * failures.
-   */
-  hitDays: number;
-  /** Days in that window with any finished work, so hitDays has a denominator. */
-  activeDays: number;
+  /** Tasks they moved forward inside the range. */
+  deliveries: number;
+  /** Their expected output per day. 0 means nobody set one. */
+  capacityPerDay: number;
+  /** capacityPerDay × days in range. 0 when no capacity is set. */
+  capacity: number;
+  /** deliveries ÷ capacity, as a percentage. Null without a capacity. */
+  efficiency: number | null;
 };
 
-export type Effectiveness = {
-  /** The database's today, so it matches the rows it is counting. */
-  date: string;
-  members: MemberDay[];
+export type TeamEfficiency = {
+  from: string;
+  to: string;
+  /** Days in the range, both ends counted. The multiplier behind capacity. */
+  days: number;
+  members: MemberEfficiency[];
   totals: {
     people: number;
-    /** People who have a target set. The denominator for "on target". */
-    withTarget: number;
-    onTarget: number;
-    target: number;
-    done: number;
-    /**
-     * Done by people who have a target — the numerator for the team figure.
-     *
-     * Separate from `done` on purpose. Counting an untargeted person's work
-     * against the team's targets would let the number climb past 100% because
-     * somebody was never given a target, which is the opposite of measuring
-     * anything.
-     */
-    doneWithTarget: number;
-    open: number;
-    overdue: number;
-    /** Team effectiveness: doneWithTarget ÷ target. Null when no targets are set. */
-    percent: number | null;
+    /** People with a capacity set — the only ones in the team figure. */
+    measured: number;
+    deliveries: number;
+    /** Deliveries by people who have a capacity. The numerator. */
+    deliveriesMeasured: number;
+    capacity: number;
+    efficiency: number | null;
   };
   ready: boolean;
 };
 
-const EMPTY: Effectiveness = {
-  date: "",
+const EMPTY = (from: string, to: string): TeamEfficiency => ({
+  from,
+  to,
+  days: 0,
   members: [],
   totals: {
     people: 0,
-    withTarget: 0,
-    onTarget: 0,
-    target: 0,
-    done: 0,
-    doneWithTarget: 0,
-    open: 0,
-    overdue: 0,
-    percent: null,
+    measured: 0,
+    deliveries: 0,
+    deliveriesMeasured: 0,
+    capacity: 0,
+    efficiency: null,
   },
   ready: false,
-};
-
-/** How far back the day-by-day record goes. */
-const HISTORY_DAYS = 7;
-
-const pct = (done: number, target: number): number | null =>
-  target > 0 ? Math.round((done / target) * 100) : null;
+});
 
 /**
- * Today's scoreboard.
+ * Floored, not rounded.
  *
- * One query. Counting per person in SQL rather than pulling every task and
- * grouping in JS keeps this a single round trip whatever the team size, and
- * the board is on the super admin's dashboard where it is loaded constantly.
+ * Rounding would show 99.6% as 100% — "cleared capacity" for somebody who did
+ * not — and 37.5% as 38%. A figure people are measured by should never round
+ * in their favour across the line that matters, so it always reports the
+ * percentage actually reached.
  */
-export async function teamEffectiveness(): Promise<Effectiveness> {
-  if (!(await hasColumn("users", "daily_target"))) return EMPTY;
-  if (!(await hasColumn("deliverables", "updated_at"))) return EMPTY;
+const pct = (done: number, capacity: number): number | null =>
+  capacity > 0 ? Math.floor((done / capacity) * 100) : null;
+
+/** Whole days from `from` to `to`, both ends counted. */
+export function daysBetween(from: string, to: string): number {
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+/**
+ * The report for one date range.
+ *
+ * Deliveries are counted in SQL per person rather than pulled and grouped
+ * here, so this stays one round trip however large the team gets.
+ */
+export async function teamEfficiency(from: string, to: string): Promise<TeamEfficiency> {
+  if (!(await hasColumn("users", "daily_target"))) return EMPTY(from, to);
+  if (!(await hasColumn("deliverables", "updated_at"))) return EMPTY(from, to);
+
+  const days = daysBetween(from, to);
+  if (days === 0) return { ...EMPTY(from, to), ready: true };
 
   const rows = await query<{
     id: number;
     name: string;
     role: string;
     daily_target: number;
-    done: number;
-    open: number;
-    overdue: number;
-    today: string;
+    deliveries: number;
   }>(
     `SELECT u.id, u.name, u.role, u.daily_target,
-            CURDATE() AS today,
-            COALESCE(SUM(d.status IN ${DONE_TODAY} AND DATE(d.updated_at) = CURDATE()), 0) AS done,
-            COALESCE(SUM(d.status NOT IN ('posted','completed','cancelled','rejected')), 0) AS open,
-            COALESCE(SUM(d.status NOT IN ('posted','completed','cancelled','rejected')
-                         AND d.due_date IS NOT NULL AND d.due_date < CURDATE()), 0) AS overdue
+            COALESCE(SUM(
+              d.status IN ${DELIVERED}
+              AND DATE(d.updated_at) BETWEEN ? AND ?
+            ), 0) AS deliveries
        FROM users u
        LEFT JOIN deliverables d ON d.assigned_to = u.id
       WHERE u.is_active = 1 AND u.role IN (${sqlRoleList(ASSIGNABLE_ROLES)})
       GROUP BY u.id, u.name, u.role, u.daily_target
-      ORDER BY u.daily_target = 0, u.name`
+      ORDER BY u.daily_target = 0, u.name`,
+    [from, to]
   );
 
-  /*
-   * The last week, a day at a time.
-   *
-   * Kept as "days they hit it" rather than a weekly total, because there is no
-   * weekly target — multiplying the daily one by seven would invent a figure
-   * nobody set and score every Sunday as a failure. One extra query rather
-   * than seven: the grouping is done in SQL and folded per person here.
-   */
-  const history = await query<{ uid: number; day: string; done: number }>(
-    `SELECT d.assigned_to AS uid, DATE(d.updated_at) AS day, COUNT(*) AS done
-       FROM deliverables d
-      WHERE d.assigned_to IS NOT NULL
-        AND d.status IN ${DONE_TODAY}
-        AND d.updated_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-      GROUP BY d.assigned_to, DATE(d.updated_at)`,
-    [HISTORY_DAYS]
-  );
-
-  const byUser = new Map<number, { day: string; done: number }[]>();
-  for (const h of history) {
-    const uid = Number(h.uid);
-    byUser.set(uid, [...(byUser.get(uid) ?? []), { day: String(h.day), done: Number(h.done) }]);
-  }
-
-  const members: MemberDay[] = rows.map((r) => {
-    const target = Number(r.daily_target) || 0;
-    const done = Number(r.done) || 0;
-    const days = byUser.get(Number(r.id)) ?? [];
+  const members: MemberEfficiency[] = rows.map((r) => {
+    const capacityPerDay = Number(r.daily_target) || 0;
+    const deliveries = Number(r.deliveries) || 0;
+    const capacity = capacityPerDay * days;
     return {
       id: r.id,
       name: r.name,
       role: r.role,
-      target,
-      done,
-      open: Number(r.open) || 0,
-      overdue: Number(r.overdue) || 0,
-      // No target set is no verdict, not a pass.
-      hit: target > 0 ? done >= target : null,
-      percent: pct(done, target),
-      hitDays: target > 0 ? days.filter((d) => d.done >= target).length : 0,
-      activeDays: days.length,
+      deliveries,
+      capacityPerDay,
+      capacity,
+      efficiency: pct(deliveries, capacity),
     };
   });
 
-  const withTarget = members.filter((m) => m.target > 0);
-  const target = withTarget.reduce((s, m) => s + m.target, 0);
-  const doneWithTarget = withTarget.reduce((s, m) => s + m.done, 0);
+  const measured = members.filter((m) => m.capacity > 0);
+  const capacity = measured.reduce((s, m) => s + m.capacity, 0);
+  const deliveriesMeasured = measured.reduce((s, m) => s + m.deliveries, 0);
 
   return {
-    date: rows[0]?.today ? String(rows[0].today).slice(0, 10) : "",
+    from,
+    to,
+    days,
     members,
     totals: {
       people: members.length,
-      withTarget: withTarget.length,
-      onTarget: withTarget.filter((m) => m.hit).length,
-      target,
-      done: members.reduce((s, m) => s + m.done, 0),
-      doneWithTarget,
-      open: members.reduce((s, m) => s + m.open, 0),
-      overdue: members.reduce((s, m) => s + m.overdue, 0),
-      percent: pct(doneWithTarget, target),
+      measured: measured.length,
+      deliveries: members.reduce((s, m) => s + m.deliveries, 0),
+      deliveriesMeasured,
+      capacity,
+      efficiency: pct(deliveriesMeasured, capacity),
     },
     ready: true,
   };
 }
-
-export { HISTORY_DAYS };
