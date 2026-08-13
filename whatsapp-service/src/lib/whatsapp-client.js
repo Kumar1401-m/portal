@@ -391,11 +391,37 @@ class WhatsAppService extends EventEmitter {
     // A reply to the original video message is how a client indicates which
     // video they mean without typing a code.
     let quotedText = null;
+    let repliedToUs = false;
     try {
       if (message.hasQuotedMsg) {
         const quoted = await message.getQuotedMessage();
         quotedText = quoted?.body ?? quoted?.caption ?? null;
+        // Replying to something we said is someone talking to us, not to the
+        // room. `fromMe` is set on the quoted message itself, which is the
+        // only reliable way to tell — the sender fields are the client's
+        // either way.
+        repliedToUs = Boolean(quoted?.fromMe);
       }
+    } catch {
+      /* best effort */
+    }
+
+    /*
+     * Tagged by name.
+     *
+     * `mentionedIds` holds every @mention in the message; ours is this
+     * session's own number. A client who types "@NVK when is the reel going
+     * out" is addressing us as plainly as anyone can in a group chat, and
+     * until this the message was indistinguishable from two of their own
+     * people talking.
+     */
+    let mentionedUs = false;
+    try {
+      const me = this.client?.info?.wid?._serialized ?? null;
+      const ids = message.mentionedIds ?? [];
+      mentionedUs = Boolean(
+        me && ids.some((id) => (typeof id === 'string' ? id : id?._serialized) === me)
+      );
     } catch {
       /* best effort */
     }
@@ -408,6 +434,17 @@ class WhatsAppService extends EventEmitter {
       senderNumber,
       body: message.body || '',
       quotedText,
+      /*
+       * Whether this was aimed at us.
+       *
+       * A client group holds three-way conversation — the client, their own
+       * people, and us — and most of it is not a question for the agency.
+       * These two are the signals that it is, and they are the difference
+       * between an assistant that answers when spoken to and one that
+       * interrupts.
+       */
+      repliedToUs,
+      mentionedUs,
       hasMedia: Boolean(message.hasMedia),
       /*
        * Kept so the router can fetch the audio only when it needs to.

@@ -25,6 +25,18 @@ const {
 
 const log = createLogger('router');
 
+/**
+ * Nothing but emoji, joiners and punctuation — the twin of `isEmojiOnly` in
+ * the portal. Anything with a letter or a digit in it is a real message: `#3`
+ * and `5` carry Emoji_Component, being halves of 1️⃣, and would otherwise pass.
+ */
+const emojiOnly = (text) => {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/[\p{L}\p{N}]/u.test(t)) return false;
+  return /^[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Emoji_Component}‍️\s.!,]+$/u.test(t);
+};
+
 /** Command → the status the portal should record. */
 const STATUS_FOR = {
   approve: 'Approved',
@@ -68,7 +80,10 @@ class MessageRouter {
      * The parser stays first and stays literal. This only runs on what it
      * could not read, so a typed "ok" never depends on a model being up.
      */
-    if (parsed.command === 'none' && String(msg.body || '').trim()) {
+    // Emoji on their own are not asked about: the parser already reads 👍 and
+    // ✅ as approval, and asking a model whether a ❤️ means "publish it" is a
+    // question with no good answer and a cost per message.
+    if (parsed.command === 'none' && String(msg.body || '').trim() && !emojiOnly(msg.body)) {
       const guessed = await this.readIntent(msg);
       if (guessed) parsed = guessed;
     }
@@ -322,6 +337,22 @@ class MessageRouter {
         message: msg.body,
         videoCode: videoCode ?? null,
         parsedCommand: command,
+        /*
+         * Whether the client was talking to us.
+         *
+         * A client group is three-way — the client, their own people, us —
+         * and the portal cannot tell from the words alone. Tagging us or
+         * replying to something we sent is unambiguous, and a voice note in
+         * a group whose whole purpose is this work is meant for us too.
+         *
+         * The portal uses it to decide whether to answer at all, and to
+         * answer even when it otherwise would have held back.
+         */
+        addressed: Boolean(msg.mentionedUs || msg.repliedToUs || msg.isVoice),
+        isVoice: Boolean(msg.isVoice),
+        // Set only when the words could not be recovered, so the portal can
+        // say so rather than answer a placeholder as if it were a question.
+        voiceUnreadable: Boolean(msg.isVoice && msg.transcribed !== true),
         direction: 'in',
         time: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : new Date().toISOString(),
       });

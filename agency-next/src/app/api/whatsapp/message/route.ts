@@ -21,6 +21,8 @@ import {
   recentTurns,
   shouldAutoReply,
   markReplied,
+  emojiReply,
+  unheardVoiceReply,
 } from "@/lib/whatsapp-ai";
 import { notifyAdmins } from "@/lib/notify";
 
@@ -51,6 +53,8 @@ async function maybeAnswer(input: {
   parsedCommand: string | null;
   message: string | null;
   senderName: string | null;
+  addressed?: boolean;
+  voiceUnreadable?: boolean;
 }): Promise<boolean> {
   try {
     const gate = shouldAutoReply(input);
@@ -60,6 +64,37 @@ async function maybeAnswer(input: {
     // safely be shared in it.
     const clientId = await clientForGroup(input.groupId);
     if (!clientId) return false;
+
+    /*
+     * Two answers that need no model, and must not wait for one.
+     *
+     * A voice note we could not hear has no words to answer, and an emoji has
+     * nothing to look up — sending either through the model would spend a
+     * call to arrive somewhere worse.
+     */
+    const quick = input.voiceUnreadable
+      ? unheardVoiceReply(input.senderName)
+      : gate.kind === "emoji"
+        ? emojiReply(input.message || "", input.senderName)
+        : null;
+    if (quick) {
+      const out = await sendTextToGroup(input.groupId, quick);
+      if (!out.ok) return false;
+      markReplied(input.groupId);
+      await logIncomingMessage({
+        waMessageId: out.messageId ?? null,
+        groupId: input.groupId,
+        groupName: null,
+        senderName: "Assistant",
+        senderNumber: null,
+        message: quick,
+        videoCode: null,
+        parsedCommand: "ai_reply",
+        direction: "out",
+        time: null,
+      }).catch(() => {});
+      return true;
+    }
 
     // The record and the conversation. Without the second, "and the other
     // one?" — which is how people actually talk in a chat — could only be
@@ -152,6 +187,8 @@ export async function POST(request: Request) {
       parsedCommand: str(body.parsedCommand),
       message: str(body.message),
       senderName: str(body.senderName),
+      addressed: body.addressed === true,
+      voiceUnreadable: body.voiceUnreadable === true,
     });
 
     return Response.json({ ok: true, logged: true, replied });

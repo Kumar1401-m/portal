@@ -323,8 +323,13 @@ export function shouldAutoReply(input: {
   parsedCommand: string | null;
   message: string | null;
   groupId: string;
+  /**
+   * The client was talking to us, not to the room — they tagged us, replied
+   * to something we sent, or recorded a voice note. See the router.
+   */
+  addressed?: boolean;
   now?: number;
-}): { reply: boolean; reason?: string } {
+}): { reply: boolean; reason?: string; kind?: "answer" | "emoji" } {
   const now = input.now ?? Date.now();
 
   if (input.direction === "out") return { reply: false, reason: "our own message" };
@@ -336,16 +341,94 @@ export function shouldAutoReply(input: {
   if (!text) return { reply: false, reason: "empty" };
   if (text.length > MAX_INBOUND_CHARS) return { reply: false, reason: "too long to be a question" };
 
-  // Acknowledgements are conversation between the humans in the group, not
-  // questions for us. Answering them is how a helpful bot becomes a nuisance.
-  if (/^(ok|okay|k|thanks?|thank you|ty|👍|👌|🙏|nice|good|great|super|done)[.!\s]*$/i.test(text)) {
-    return { reply: false, reason: "acknowledgement" };
+  /*
+   * Emoji on their own get an emoji back.
+   *
+   * A client who sends 🙏 or ❤️ has said something — not a question, but not
+   * nothing either, and leaving it unanswered in a chat reads as being left on
+   * read. What it does not deserve is a paragraph, so it is marked as its own
+   * kind and answered in kind.
+   *
+   * A thumbs-up is not here: the parser reads it as approval, so it never
+   * reaches this.
+   */
+  if (isEmojiOnly(text)) return { reply: true, kind: "emoji" };
+
+  /*
+   * Being spoken to overrides the two guards below.
+   *
+   * They exist to keep the assistant out of a conversation between the
+   * client's own people — which is most of a group — and both misfire the
+   * moment somebody is plainly talking to us. A client who tags us and gets
+   * silence because another message went out eighteen seconds ago has been
+   * ignored, and the cooldown was meant to prevent exactly that impression.
+   */
+  if (!input.addressed) {
+    // Acknowledgements are conversation between the humans in the group, not
+    // questions for us. Answering them is how a helpful bot becomes a nuisance.
+    if (/^(ok|okay|k|thanks?|thank you|ty|nice|good|great|super|done)[.!\s]*$/i.test(text)) {
+      return { reply: false, reason: "acknowledgement" };
+    }
+
+    const since = now - (lastReplyAt.get(input.groupId) ?? 0);
+    if (since < COOLDOWN_MS) return { reply: false, reason: "cooling down" };
   }
 
-  const since = now - (lastReplyAt.get(input.groupId) ?? 0);
-  if (since < COOLDOWN_MS) return { reply: false, reason: "cooling down" };
+  return { reply: true, kind: "answer" };
+}
 
-  return { reply: true };
+/**
+ * Nothing but emoji, punctuation and spaces.
+ *
+ * Built from Unicode property escapes rather than a list of characters,
+ * because a hand-written list is out of date the week it is written — and the
+ * one thing that must not happen is a client's real question being read as a
+ * smiley and answered with one. `\p{Extended_Pictographic}` covers the emoji
+ * themselves; the rest are the joiners, skin tones and variation selectors
+ * that make up a composed emoji like 👨‍👩‍👧.
+ */
+const EMOJI_ONLY_RE =
+  /^(?:[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Emoji_Component}‍️\s.!,]|[\u{1F3FB}-\u{1F3FF}])+$/u;
+
+export function isEmojiOnly(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  // Digits and # carry Emoji_Component (they are half of 1️⃣), so a bare "5"
+  // or "#3" would otherwise pass as an emoji.
+  if (/[\p{L}\p{N}]/u.test(t)) return false;
+  return EMOJI_ONLY_RE.test(t);
+}
+
+/**
+ * What to send back to an emoji.
+ *
+ * Warm, short, and not a question — a client who sent a heart is not opening
+ * a conversation, and "is there anything else?" turns a pleasantry into an
+ * obligation to reply again.
+ */
+export function emojiReply(text: string, senderName?: string | null): string {
+  const who = senderName?.trim()?.split(/\s+/)[0];
+  const name = who ? ` ${who}` : "";
+  if (/[🙏💐🌸]/u.test(text)) return `🙏 Thank you${name}!`;
+  if (/[❤️💖💕😍🥰♥️🧡💛💚💙💜]/u.test(text)) return `😊 Thank you${name} — that means a lot to us!`;
+  if (/[😂🤣😄😃😁😆]/u.test(text)) return `😄 Glad that landed${name}!`;
+  if (/[🔥💯⭐🌟✨👏🎉]/u.test(text)) return `🙌 Thank you${name}! Delighted you like it.`;
+  return `😊 Thank you${name}!`;
+}
+
+/**
+ * What to say when a voice note arrived but its words did not.
+ *
+ * Asking them to repeat it is better than silence and better than guessing:
+ * a client who recorded a message and heard nothing back has no way to know
+ * whether it was received at all.
+ */
+export function unheardVoiceReply(senderName?: string | null): string {
+  const who = senderName?.trim()?.split(/\s+/)[0];
+  return (
+    `🙏 Sorry${who ? ` ${who}` : ""} — your voice note came through but we couldn't quite make it out. ` +
+    `Could you please send it once more, or type it here? Either is perfectly fine.`
+  );
 }
 
 /** Record that a group was just answered, so the cooldown applies. */
