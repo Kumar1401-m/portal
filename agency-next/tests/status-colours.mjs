@@ -133,9 +133,7 @@ const ALL = [
    * amber — which reads as three different things.
    */
   const pairedWith = (v) =>
-    new RegExp(
-      `contentStatusTone\\(${v}\\.status\\)\\}>\\{contentStatusLabel\\(${v}\\.status\\)`
-    );
+    new RegExp(`contentStageTone\\(${v}\\.status\\)\\}>\\{contentStageLabel\\(${v}\\.status\\)`);
   const designPairedWith = (v) =>
     new RegExp(`editorStatusTone\\(${v}\\.status\\)\\}>\\{editorStatusLabel\\(${v}\\.status\\)`);
 
@@ -152,7 +150,35 @@ const ALL = [
   for (const s of approved) assert.equal(c.contentStatusLabel(s), "Content approved");
   const tones = new Set(approved.map((s) => c.contentStatusTone(s)));
   assert.equal(tones.size, 1, `one label, one colour — got ${[...tones].join(", ")}`);
+  // The staff fold only renames the two that need a person, and inherits the
+  // rest — so it cannot drift away from the fold above it.
+  for (const s of [...approved, "review", "approved", "rejected"]) {
+    assert.equal(c.contentStageLabel(s), c.contentStatusLabel(s), `${s} is unchanged for staff`);
+    assert.equal(c.contentStageTone(s), c.contentStatusTone(s));
+  }
   ok("rows that say the same thing look the same");
+}
+
+/* ---------------- and the two that need a person say who ---------------- */
+{
+  // "Yet to start" is a fair answer on the client's own board and a useless
+  // one on ours: it does not say whether we owe them a brief or they owe us
+  // an answer. The client-facing wording is deliberately left alone.
+  assert.equal(c.contentStatusLabel("pending"), "Yet to start", "the client's board is untouched");
+  assert.equal(c.contentStageLabel("pending"), "Content to write");
+  assert.equal(c.contentStageLabel("content_review"), "Content with client");
+
+  // A brief nobody has written is our own move, so it is not the grey that
+  // let it be missed.
+  assert.equal(c.contentStatusTone("pending"), "muted");
+  assert.notEqual(c.contentStageTone("pending"), "muted", "ours to do does not look like nothing");
+
+  // The client portal keeps the client's words.
+  for (const p of ["app/portal/content/page.tsx"]) {
+    const src = readFileSync(`${SRC}/${p}`, "utf8");
+    assert.ok(!/contentStage/.test(src), `${p} does not show a client our internal wording`);
+  }
+  ok("the staff boards name whose move it is, and the client's board does not");
 }
 
 await finish(pass);

@@ -190,6 +190,9 @@ async function main() {
   // A per-person daily target, for the team effectiveness board.
   await addColumn('users', 'daily_target', 'daily_target INT UNSIGNED NOT NULL DEFAULT 0');
 
+  // Some clients sign off the written content first; some do not.
+  await addColumn('clients', 'content_approval', 'content_approval TINYINT(1) NOT NULL DEFAULT 1');
+
   // Automatic invoice chasing is per client, and off unless chosen.
   await addColumn('clients', 'auto_payment_reminders', 'auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0');
 

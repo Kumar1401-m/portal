@@ -66,6 +66,8 @@ export default async function EditClientPage({
     editor_id: client.editor_id ? String(client.editor_id) : "",
     youtube_enabled: Number(client.youtube_enabled) === 1,
     auto_payment_reminders: Number(client.auto_payment_reminders) === 1,
+    // Null (column not there yet) means on — same rule the server applies.
+    content_approval: client.content_approval === null || Number(client.content_approval) === 1,
     youtube_channel_id: client.youtube_channel_id ?? "",
     meta_ad_account_id: client.meta_ad_account_id ?? "",
     // Deliberately not the stored token: a password field that echoes the

@@ -40,10 +40,25 @@ const NEXT: Record<string, Action[]> = {
 /** Sending content to the client (either gate) is restricted to super_admin and crm. */
 const SEND_TO_CLIENT_STATUSES = ["content_review", "review"];
 
-function actionsFor(status: string, canSendToClient: boolean, editingOnly: boolean): Action[] {
-  const out = [...(NEXT[status] || [])].filter(
-    (a) => canSendToClient || !SEND_TO_CLIENT_STATUSES.includes(a.status)
-  );
+function actionsFor(
+  status: string,
+  canSendToClient: boolean,
+  editingOnly: boolean,
+  clientApprovesContent: boolean
+): Action[] {
+  // Copied, not referenced: the label below is rewritten per client, and NEXT
+  // is a module-level constant shared by every render on the server.
+  const out = (NEXT[status] || [])
+    .filter((a) => canSendToClient || !SEND_TO_CLIENT_STATUSES.includes(a.status))
+    .map((a) =>
+      // For a client who doesn't sign the copy off, the same press hands it
+      // straight to the maker (see applyStatus). The button has to say so — one
+      // labelled "send for content review" that sends nothing to anybody for
+      // review is how people stop trusting the buttons.
+      !clientApprovesContent && a.status === "content_review"
+        ? { ...a, label: "Hand the content to the team" }
+        : { ...a }
+    );
   if (["content_review", "review"].includes(status)) {
     out.push({ label: "Request changes", status: "changes_requested", variant: "outline", reason: true });
   }
@@ -64,18 +79,21 @@ export function WorkflowControls({
   status,
   canSendToClient,
   editingOnly = false,
+  clientApprovesContent = true,
 }: {
   deliverableId: number;
   status: string;
   canSendToClient: boolean;
   /** True for a video editor: the edit's own stages, nothing beyond them. */
   editingOnly?: boolean;
+  /** False when this client has content sign-off switched off in their settings. */
+  clientApprovesContent?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<StatusState, FormData>(
     changeStatusAction,
     { ok: false }
   );
-  const actions = actionsFor(status, canSendToClient, editingOnly);
+  const actions = actionsFor(status, canSendToClient, editingOnly, clientApprovesContent);
   const needsReason = actions.some((a) => a.reason);
 
   return (

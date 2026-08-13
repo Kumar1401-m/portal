@@ -131,6 +131,13 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "content_approval",
+    definition: "content_approval TINYINT(1) NOT NULL DEFAULT 1",
+    purpose:
+      "Does this client sign off the written content before work starts? On by default; off hands it straight to the team.",
+  },
+  {
+    table: "clients",
     column: "auto_payment_reminders",
     definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",
     purpose:

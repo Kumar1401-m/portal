@@ -77,7 +77,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   // this the poster simply appears in a list they had no reason to open.
   assert.match(
     actions,
-    /if \(contentGate && d\.assigned_to\)[\s\S]{0,600}notifyUser\(/,
+    /if \(handedToMaker && d\.assigned_to\)[\s\S]{0,900}notifyUser\(/,
     "content approval notifies whoever the work is assigned to"
   );
   assert.match(actions, /A poster is ready to design/, "and says so in poster words");
@@ -127,6 +127,87 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
     "approve-and-send is the super admin's button alone"
   );
   ok("only the super admin sends a poster on to the client");
+}
+
+/* ---------------- unless the client doesn't do content approval ---------------- */
+{
+  const actions = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
+
+  // Some clients hand over the month and want it made. Sending those a content
+  // approval gets no reply, and the task sits in `content_review` until
+  // somebody notices — so the middle step is skipped and the brief goes
+  // straight to the maker.
+  assert.match(
+    actions,
+    /const skipsClientContent = status === "content_review" && !clientSignsOffContent/,
+    "a client with sign-off off never gets sent a brief"
+  );
+  assert.match(
+    actions,
+    /const effective = contentGate \|\| skipsClientContent \? "waiting_for_raw" : status/,
+    "and the task lands where the client's approval would have left it"
+  );
+
+  // Null is what a database without the column returns, and what a client
+  // added before it existed holds. Both have to mean the old behaviour.
+  assert.match(
+    actions,
+    /d\.content_approval === null \|\| Number\(d\.content_approval\) === 1/,
+    "unknown means the client does approve — the step the portal has always had"
+  );
+
+  // The client is told nothing, because there is nothing for them to do. That
+  // falls out of `effective` rather than a second rule: the notification block
+  // keys off it, so there is no way for the two to disagree.
+  assert.match(
+    actions,
+    /if \(effective === "content_review" \|\| effective === "review"\)[\s\S]{0,400}notifyClientById/,
+    "the client mail keys off the status actually reached, not the button pressed"
+  );
+
+  // And the maker is not told the client approved something the client never
+  // saw — they might repeat it back to that client.
+  assert.match(actions, /skipsClientContent\s*\n?\s*\?\s*`The content for/, "the wording differs");
+
+  const controls = readFileSync(
+    `${SRC}/app/(app)/deliverables/[id]/workflow-controls.tsx`,
+    "utf8"
+  );
+  assert.match(controls, /Hand the content to the team/, "and so does the button");
+  // NEXT is a module constant shared by every render on the server; relabelling
+  // it in place would rename the button for every other client too.
+  assert.ok(
+    !/for \(const a of out\)/.test(controls),
+    "the per-client label is a copy, not a mutation of the shared table"
+  );
+  ok("a client who does not sign content off is never waited on");
+}
+
+/* ---------------- and the setting is per client, defaulting to on ---------------- */
+{
+  const form = readFileSync(`${SRC}/app/(app)/clients/client-form.tsx`, "utf8");
+  assert.match(form, /name="content_approval"/, "it is on the client's own record");
+  assert.match(
+    form,
+    /defaultChecked=\{d\.content_approval !== false\}/,
+    "ticked for a new client, so nobody switches the gate off by not noticing it"
+  );
+
+  const save = readFileSync(`${SRC}/app/(app)/clients/actions.ts`, "utf8");
+  assert.match(
+    save,
+    /hasColumn\("clients", "content_approval"\)[\s\S]{0,200}content_approval = fd\.get\("content_approval"\) \? 1 : 0/,
+    "saved only where the column exists — the same gate every other new column uses"
+  );
+
+  const clients = readFileSync(`${SRC}/lib/clients.ts`, "utf8");
+  assert.match(clients, /export async function clientApprovesContent/, "and readable on its own");
+  assert.match(
+    clients,
+    /if \(!\(await hasColumn\("clients", "content_approval"\)\)\) return true/,
+    "which also answers true on a database the migration has not reached"
+  );
+  ok("the switch lives on the client, and its default is the old behaviour");
 }
 
 await finish(pass);

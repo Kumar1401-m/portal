@@ -117,6 +117,31 @@ export function contentStatusTone(status: string): BadgeTone {
 }
 
 /**
+ * The same track, said the way it reads to whoever has to act on it.
+ *
+ * `contentStatusLabel` is written for the client's own board, where "Yet to
+ * start" is a fair answer to "where is my post". On Today's Tasks it is not:
+ * it names a state without naming whose move it is, so a month of briefs
+ * nobody has written looks identical to a month of briefs sitting with a
+ * client. These two are the ones that need a person, so these two say who.
+ */
+export function contentStageLabel(status: string): string {
+  if (status === "pending") return "Content to write";
+  if (status === "content_review") return "Content with client";
+  return contentStatusLabel(status);
+}
+
+/**
+ * And its colour. A brief nobody has written is the agency's own move, so it
+ * is not the quiet grey the rest of "not started yet" gets — that grey is
+ * exactly why it was missed.
+ */
+export function contentStageTone(status: string): BadgeTone {
+  if (status === "pending") return "active";
+  return contentStatusTone(status);
+}
+
+/**
  * Where a piece stands with Instagram, said the way the old board said it.
  *
  * Separate from the workflow status on purpose: a video can be finished,

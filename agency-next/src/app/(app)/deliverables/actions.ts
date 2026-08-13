@@ -509,6 +509,11 @@ type WfRow = {
   assigned_to: number | null;
   service: string | null;
   company_name: string;
+  /**
+   * Does this client sign the written content off first? Null on a database
+   * without the column, which is read as "yes" — the older behaviour.
+   */
+  content_approval: number | null;
 };
 
 /**
@@ -531,10 +536,12 @@ async function applyStatus(
   // migration has not reached, and a missing column would take down every
   // status change rather than just the upload it enables.
   const hasYouTube = await hasColumn("clients", "youtube_enabled");
+  const hasContentApproval = await hasColumn("clients", "content_approval");
   const d = await queryOne<WfRow>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
             d.instagram_status, d.scheduled_at, d.assigned_to, d.service,
             c.company_name, c.auto_publish, c.ig_user_id,
+            ${hasContentApproval ? "c.content_approval" : "NULL AS content_approval"},
             ${hasYouTube ? "c.youtube_enabled, d.youtube_status" : "NULL AS youtube_enabled, NULL AS youtube_status"}
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
@@ -563,7 +570,28 @@ async function applyStatus(
 
   // Gate 1: approving content_review approves the CONTENT → waiting_for_raw.
   const contentGate = status === "approved" && d.status === "content_review";
-  const effective = contentGate ? "waiting_for_raw" : status;
+
+  /*
+   * Not every client signs the copy off, and waiting on one who doesn't
+   * approve stalls the work indefinitely.
+   *
+   * Most do: the brief goes to them, they read it, the maker starts. But some
+   * hand us the month and want it made — sending those a content approval
+   * gets no reply, and the task sits in `content_review` until somebody
+   * notices and nudges it along by hand.
+   *
+   * So for a client with the sign-off switched off, "send for content review"
+   * skips the client and hands the brief straight to the maker. Same button,
+   * same one press; only the middle step disappears. `content_approval` is
+   * null on a database the column hasn't reached, which reads as on — the
+   * behaviour everything had before this.
+   */
+  const clientSignsOffContent = d.content_approval === null || Number(d.content_approval) === 1;
+  const skipsClientContent = status === "content_review" && !clientSignsOffContent;
+
+  const effective = contentGate || skipsClientContent ? "waiting_for_raw" : status;
+  /** Either route into the maker's hands: approved by the client, or straight through. */
+  const handedToMaker = contentGate || skipsClientContent;
 
   const updates: Record<string, string | null> = { status: effective };
   if (reason) updates.reject_reason = reason;
@@ -571,7 +599,7 @@ async function applyStatus(
     updates.reject_reason = null;
     updates.approval_status = "pending";
   }
-  if (contentGate) updates.approval_status = "pending";
+  if (handedToMaker) updates.approval_status = "pending";
   else if (effective === "approved") updates.approval_status = "approved";
   if (effective === "changes_requested") updates.approval_status = "changes_requested";
   if (effective === "rejected") {
@@ -715,15 +743,21 @@ async function applyStatus(
    * at. For a poster especially: it is not in their list at all until this
    * happens, so without a word they would never know it had arrived.
    */
-  if (contentGate && d.assigned_to) {
+  if (handedToMaker && d.assigned_to) {
     const isPoster =
       d.service === "poster_designing" ||
       (!d.service && String(d.video_type ?? "").toLowerCase() === "poster");
+    // Who released it changes the sentence, not the fact. Telling a designer
+    // the client approved something the client never saw would be a lie they
+    // might repeat back to that client.
+    const released = skipsClientContent
+      ? `The content for "${d.title}" (${d.company_name}) is written and it's yours. `
+      : `${d.company_name} approved the content for "${d.title}". `;
     await notifyUser(
       d.assigned_to,
       "general",
-      isPoster ? "🎨 A poster is ready to design" : "✏️ Content approved — over to you",
-      `${d.company_name} approved the content for "${d.title}". ` +
+      isPoster ? "🎨 A poster is ready to design" : "✏️ Content ready — over to you",
+      released +
         (isPoster
           ? "It's in your posters list now — paste the design link when it's ready."
           : "You can start on it."),

@@ -4,6 +4,7 @@ import { ArrowLeft, Building2, Calendar, Link2, MessageSquareWarning } from "luc
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
+import { clientApprovesContent } from "@/lib/clients";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge } from "@/components/ui/service-badge";
@@ -65,6 +66,8 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   // AI caption panel — hidden entirely when no Gemini key is configured, since
   // every control on it would be dead.
   const [aiOn, analysis] = await Promise.all([videoAiReady(), getAnalysis(d.id)]);
+  // Whether the content goes to the client first, or straight to the maker.
+  const contentToClient = await clientApprovesContent(d.client_id);
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
@@ -112,6 +115,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             status={d.status}
             canSendToClient={canSendToClient}
             editingOnly={editingOnly}
+            clientApprovesContent={contentToClient}
           />
 
           {/*
@@ -177,10 +181,44 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             </CardHeader>
             <CardContent>
               <dl className="space-y-4">
-                <Field
-                  label={isPoster ? "Content in this poster" : "Description / script"}
-                  value={<span className="whitespace-pre-wrap">{d.description}</span>}
-                />
+                {/* An empty brief is the one field on this card worth a
+                    sentence. This page shows the brief but does not take it —
+                    it is written in the pencil on the board — and "—" gave no
+                    hint of that, so "where do I write the content" was a fair
+                    question to be left with. */}
+                {d.description ? (
+                  <Field
+                    label={isPoster ? "Content in this poster" : "Description / script"}
+                    value={<span className="whitespace-pre-wrap">{d.description}</span>}
+                  />
+                ) : (
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {isPoster ? "Content in this poster" : "Description / script"}
+                    </dt>
+                    <dd className="mt-1 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                      Nothing written yet.{" "}
+                      {canSendToClient ? (
+                        <>
+                          Open{" "}
+                          <Link
+                            href="/today?status=pending"
+                            className="font-medium text-primary hover:underline"
+                          >
+                            the tasks still to write
+                          </Link>{" "}
+                          and use the pencil on this row — the box is called{" "}
+                          <span className="font-medium">
+                            {isPoster ? "Content in this poster" : "Description / script"}
+                          </span>
+                          .
+                        </>
+                      ) : (
+                        "The brief for this one has not been written yet."
+                      )}
+                    </dd>
+                  </div>
+                )}
                 {isPoster ? null : <Field label="Hook" value={d.content_hook} />}
                 <Field label="Language" value={d.language} />
                 <Field label="Target audience" value={d.target_audience} />

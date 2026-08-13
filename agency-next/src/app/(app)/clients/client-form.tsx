@@ -45,6 +45,7 @@ export type ClientDefaults = Partial<{
   auto_publish: boolean;
   youtube_enabled: boolean;
   auto_payment_reminders: boolean;
+  content_approval: boolean;
   youtube_channel_id: string;
   meta_ad_account_id: string;
   ads_access_token: string;
@@ -289,6 +290,34 @@ export function ClientForm({
 
           {/* The ad account, which is what the Ad management board reads. It
               is not the Page or the IG account — those cannot report spend. */}
+          {/* Some clients read the month's copy before anything is made; some
+              hand us the month and want it made. Waiting on the second kind
+              for an approval they were never going to send is how a task sits
+              in "content review" for a fortnight. On by default — the step
+              this portal has always had. */}
+          <label
+            htmlFor="content_approval"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="content_approval"
+              type="checkbox"
+              name="content_approval"
+              value="1"
+              defaultChecked={d.content_approval !== false}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">This client approves the content first</span>
+              <br />
+              <span className="text-muted-foreground">
+                The written brief goes to them, and the designer or editor starts once they say
+                yes. Untick it and the brief goes straight to the team — nothing is sent to the
+                client until the finished work is ready.
+              </span>
+            </span>
+          </label>
+
           {/* Chasing money automatically is not something to do to a whole
               book of clients. Some are invoiced on a handshake, some have a
               finance contact who is not in this group, and some would take it

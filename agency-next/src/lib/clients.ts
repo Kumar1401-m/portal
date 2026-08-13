@@ -41,6 +41,8 @@ export type ClientFull = {
   auto_publish: number | null;
   youtube_enabled: number | null;
   auto_payment_reminders: number | null;
+  /** Null on a database without the column, which reads as on. */
+  content_approval: number | null;
   youtube_channel_id: string | null;
   meta_ad_account_id: string | null;
   ads_access_token: string | null;
@@ -172,4 +174,20 @@ export async function clientDefaults(clientId: number): Promise<ClientTaskOwners
        FROM clients WHERE id = ?`,
     [clientId]
   );
+}
+
+/**
+ * Does this client sign the written content off before the work starts?
+ *
+ * On for everyone unless it is turned off on their record, and on for every
+ * client on a database the column hasn't reached — the sign-off step is what
+ * the portal has always done, so "unknown" has to mean "keep doing it".
+ */
+export async function clientApprovesContent(clientId: number): Promise<boolean> {
+  if (!(await hasColumn("clients", "content_approval"))) return true;
+  const row = await queryOne<{ content_approval: number | null }>(
+    "SELECT content_approval FROM clients WHERE id = ?",
+    [clientId]
+  );
+  return !row || row.content_approval === null || Number(row.content_approval) === 1;
 }

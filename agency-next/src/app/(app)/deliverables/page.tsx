@@ -11,8 +11,8 @@ import { getCategoryMap } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
 import { SERVICES } from "@/lib/services";
 import {
-  contentStatusLabel,
-  contentStatusTone,
+  contentStageLabel,
+  contentStageTone,
   editorStatusLabel,
   editorStatusTone,
   postStatusLabel,
@@ -147,7 +147,7 @@ export default async function DeliverablesPage({
                       {fmtDate(d.scheduled_at ?? d.due_date)}
                     </TD>
                     <TD>
-                      <Badge tone={contentStatusTone(d.status)}>{contentStatusLabel(d.status)}</Badge>
+                      <Badge tone={contentStageTone(d.status)}>{contentStageLabel(d.status)}</Badge>
                     </TD>
                     <TD>
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
