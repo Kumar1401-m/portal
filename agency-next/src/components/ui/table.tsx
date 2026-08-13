@@ -36,7 +36,21 @@ export function THead({ className, ...props }: React.HTMLAttributes<HTMLTableSec
   return (
     <thead
       className={cn(
-        "[&_th]:h-11 [&_th]:px-4 [&_th]:text-left [&_th]:align-middle [&_th]:font-medium [&_th]:text-muted-foreground [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wide",
+        /*
+         * Left by default, unless the heading says otherwise.
+         *
+         * This used to be a flat `[&_th]:text-left`, which is a descendant
+         * selector and therefore outranks a plain `text-center` utility on the
+         * th itself. So every heading over a centred or right-aligned column —
+         * the counts on My work, the money on Ad management, the targets on
+         * Team — sat left while its numbers sat elsewhere, and the column read
+         * as two columns.
+         *
+         * Narrowing it to headings that carry no alignment of their own lets
+         * the utility win, without every table having to opt out.
+         */
+        "[&_th:not([class*='text-'])]:text-left",
+        "[&_th]:h-11 [&_th]:px-4 [&_th]:align-middle [&_th]:font-medium [&_th]:text-muted-foreground [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wide",
         className
       )}
       {...props}

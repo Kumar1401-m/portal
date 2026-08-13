@@ -123,19 +123,75 @@ const find = (r, name) => r.members.find((m) => m.name === name);
   ok("only active people who can be assigned work appear");
 }
 
-/* ---------------- it says what it is counting ---------------- */
+/* ---------------- effectiveness is a percentage of the target ---------------- */
 {
-  const card = readFileSync(`${SRC}/components/admin/team-effectiveness.tsx`, "utf8");
-  assert.match(card, /Resets at midnight/, "the definition sits next to the numbers");
-  assert.match(card, /No target/, "and an unset target is labelled, not scored");
+  const r = await eff.teamEffectiveness();
+
+  // The whole ask: three of three is 100%.
+  assert.equal(find(r, "asha").percent, 100, "3 done against a target of 3 is 100%");
+  assert.equal(find(r, "bala").percent, 25, "1 against 4 is 25%");
+  assert.equal(find(r, "chandu").percent, null, "and no target is no percentage");
+
+  // Team: 4 done by people with targets, against 7 asked for.
+  assert.equal(r.totals.doneWithTarget, 4);
+  assert.equal(r.totals.target, 7);
+  assert.equal(r.totals.percent, 57, "4 of 7 rounds to 57%");
+  ok("effectiveness is done ÷ target, per person and for the team");
+}
+
+/* ---------------- beating a target is not the same as meeting it ---------------- */
+{
+  // Capping at 100 would make four-of-three look identical to three-of-three,
+  // which is the one comparison a target exists to make.
+  const asha = Number(
+    (await db.queryOne("SELECT id FROM users WHERE email = 'zz-eff-asha@example.com'")).id
+  );
+  await task(asha, "ZZ-EFF asha extra", "approved", null, true);
+  const r = await eff.teamEffectiveness();
+  assert.equal(find(r, "asha").done, 4);
+  assert.equal(find(r, "asha").percent, 133, "4 of 3 is 133%, not 100%");
+  assert.equal(find(r, "asha").hit, true);
+  await db.execute("DELETE FROM deliverables WHERE title = 'ZZ-EFF asha extra'");
+  ok("over-achievement is shown as it happened, not rounded down to the target");
+}
+
+/* ---------------- an untargeted person cannot inflate the team ---------------- */
+{
+  // chandu has no target. Work of theirs must not count towards a total built
+  // from other people's targets, or the number climbs because somebody was
+  // forgotten.
+  const chanduId = Number(
+    (await db.queryOne("SELECT id FROM users WHERE email = 'zz-eff-chandu@example.com'")).id
+  );
+  const before = (await eff.teamEffectiveness()).totals;
+  await task(chanduId, "ZZ-EFF chandu done", "approved", null, true);
+  const after = (await eff.teamEffectiveness()).totals;
+
+  assert.equal(after.percent, before.percent, "the team percentage does not move");
+  assert.equal(after.doneWithTarget, before.doneWithTarget, "nor the numerator");
+  assert.equal(after.done, before.done + 1, "though the raw count does");
+  await db.execute("DELETE FROM deliverables WHERE title = 'ZZ-EFF chandu done'");
+  ok("work by someone with no target is counted, but never scored against targets");
+}
+
+/* ---------------- it says what it is counting, on its own page ---------------- */
+{
+  const page = readFileSync(`${SRC}/app/(app)/team/page.tsx`, "utf8");
+  assert.match(page, /Resets at midnight/, "the definition sits next to the numbers");
+  assert.match(page, /No target set/, "and an unset target is labelled, not scored");
+  assert.match(page, /requireUser\(SUPER_ADMIN_ROLES\)/, "super admin only — it names individuals");
+  assert.match(page, /Team effectiveness/, "and it is the page's own subject");
+
+  // Days met, never a weekly target invented by multiplying the daily one.
+  assert.match(page, /\{m\.hitDays\}\/\{HISTORY_DAYS\} days/, "the week is shown as days met");
+  assert.ok(!/daily_target \* 7|target \* 7/.test(page), "no fabricated weekly target");
+
+  const nav = readFileSync(`${SRC}/components/admin/nav-config.ts`, "utf8");
+  assert.match(nav, /href: "\/team".*roles: SUPER_ADMIN/, "it has its own nav entry");
 
   const dash = readFileSync(`${SRC}/app/(app)/dashboard/page.tsx`, "utf8");
-  assert.match(
-    dash,
-    /user\.role === "super_admin" \? <TeamEffectiveness \/> : null/,
-    "super admin only — it names individuals"
-  );
-  ok("the board defines its own numbers and is shown to the super admin alone");
+  assert.ok(!/TeamEffectiveness/.test(dash), "and is no longer a card on the dashboard");
+  ok("the board is its own page, super admin only, and defines its own numbers");
 }
 
 await clean();

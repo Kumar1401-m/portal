@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
 import { MonthPicker } from "./month-picker";
+import { PosterQueue } from "./poster-queue";
 import { contentStatusLabel, editorStatusLabel, editorStatusTone } from "@/lib/constants";
 import { fmtDate } from "@/lib/utils";
 
@@ -132,16 +133,18 @@ export default async function MyWorkPage({
         </Card>
       ) : null}
 
+      {/* A designer's posters, with the box to submit each one — the Posters
+          page brought here, so this is their only screen. */}
+      {isDesigner ? <PosterQueue user={user} /> : null}
+
       {/*
         What to pick up. Across every month, because last month's leftover is
         the first thing to do, not the thing this page hides.
 
-        Not for a designer. Their Posters page is already this same list —
-        every poster assigned to them, soonest first — with the box to paste
-        the design link beside each one. Repeating it here gave them the rows
-        without the one control that makes the rows worth having, so it was a
-        worse copy of a page one click away. An editor has no such page: My
-        work is their whole portal, and this is the worklist in it.
+        Not for a designer: their queue is right above, with the submit box
+        on each row. This list is the same rows without the one control that
+        makes them worth having. An editor has no poster queue, so this is the
+        worklist in their whole portal.
       */}
       {!isDesigner && work.upNext.length > 0 ? (
         <Card className="overflow-hidden">

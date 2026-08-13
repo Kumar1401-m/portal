@@ -42,6 +42,25 @@ export type MemberDay = {
   overdue: number;
   /** null when there is no target to judge against. */
   hit: boolean | null;
+  /**
+   * Today's effectiveness: done ÷ target, as a percentage. Null without a
+   * target.
+   *
+   * Not capped at 100. Four against a target of three is 133%, and rounding
+   * that down to "100%" would make beating a target indistinguishable from
+   * scraping it — which is exactly the thing a target is set to find out.
+   */
+  percent: number | null;
+  /**
+   * Days out of the last seven on which they met their target.
+   *
+   * Counted as days, never as a weekly target. Multiplying a daily figure by
+   * seven would invent a target nobody set and quietly count Sundays as
+   * failures.
+   */
+  hitDays: number;
+  /** Days in that window with any finished work, so hitDays has a denominator. */
+  activeDays: number;
 };
 
 export type Effectiveness = {
@@ -55,8 +74,19 @@ export type Effectiveness = {
     onTarget: number;
     target: number;
     done: number;
+    /**
+     * Done by people who have a target — the numerator for the team figure.
+     *
+     * Separate from `done` on purpose. Counting an untargeted person's work
+     * against the team's targets would let the number climb past 100% because
+     * somebody was never given a target, which is the opposite of measuring
+     * anything.
+     */
+    doneWithTarget: number;
     open: number;
     overdue: number;
+    /** Team effectiveness: doneWithTarget ÷ target. Null when no targets are set. */
+    percent: number | null;
   };
   ready: boolean;
 };
@@ -64,9 +94,25 @@ export type Effectiveness = {
 const EMPTY: Effectiveness = {
   date: "",
   members: [],
-  totals: { people: 0, withTarget: 0, onTarget: 0, target: 0, done: 0, open: 0, overdue: 0 },
+  totals: {
+    people: 0,
+    withTarget: 0,
+    onTarget: 0,
+    target: 0,
+    done: 0,
+    doneWithTarget: 0,
+    open: 0,
+    overdue: 0,
+    percent: null,
+  },
   ready: false,
 };
+
+/** How far back the day-by-day record goes. */
+const HISTORY_DAYS = 7;
+
+const pct = (done: number, target: number): number | null =>
+  target > 0 ? Math.round((done / target) * 100) : null;
 
 /**
  * Today's scoreboard.
@@ -102,9 +148,34 @@ export async function teamEffectiveness(): Promise<Effectiveness> {
       ORDER BY u.daily_target = 0, u.name`
   );
 
+  /*
+   * The last week, a day at a time.
+   *
+   * Kept as "days they hit it" rather than a weekly total, because there is no
+   * weekly target — multiplying the daily one by seven would invent a figure
+   * nobody set and score every Sunday as a failure. One extra query rather
+   * than seven: the grouping is done in SQL and folded per person here.
+   */
+  const history = await query<{ uid: number; day: string; done: number }>(
+    `SELECT d.assigned_to AS uid, DATE(d.updated_at) AS day, COUNT(*) AS done
+       FROM deliverables d
+      WHERE d.assigned_to IS NOT NULL
+        AND d.status IN ${DONE_TODAY}
+        AND d.updated_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+      GROUP BY d.assigned_to, DATE(d.updated_at)`,
+    [HISTORY_DAYS]
+  );
+
+  const byUser = new Map<number, { day: string; done: number }[]>();
+  for (const h of history) {
+    const uid = Number(h.uid);
+    byUser.set(uid, [...(byUser.get(uid) ?? []), { day: String(h.day), done: Number(h.done) }]);
+  }
+
   const members: MemberDay[] = rows.map((r) => {
     const target = Number(r.daily_target) || 0;
     const done = Number(r.done) || 0;
+    const days = byUser.get(Number(r.id)) ?? [];
     return {
       id: r.id,
       name: r.name,
@@ -115,10 +186,16 @@ export async function teamEffectiveness(): Promise<Effectiveness> {
       overdue: Number(r.overdue) || 0,
       // No target set is no verdict, not a pass.
       hit: target > 0 ? done >= target : null,
+      percent: pct(done, target),
+      hitDays: target > 0 ? days.filter((d) => d.done >= target).length : 0,
+      activeDays: days.length,
     };
   });
 
   const withTarget = members.filter((m) => m.target > 0);
+  const target = withTarget.reduce((s, m) => s + m.target, 0);
+  const doneWithTarget = withTarget.reduce((s, m) => s + m.done, 0);
+
   return {
     date: rows[0]?.today ? String(rows[0].today).slice(0, 10) : "",
     members,
@@ -126,11 +203,15 @@ export async function teamEffectiveness(): Promise<Effectiveness> {
       people: members.length,
       withTarget: withTarget.length,
       onTarget: withTarget.filter((m) => m.hit).length,
-      target: withTarget.reduce((s, m) => s + m.target, 0),
+      target,
       done: members.reduce((s, m) => s + m.done, 0),
+      doneWithTarget,
       open: members.reduce((s, m) => s + m.open, 0),
       overdue: members.reduce((s, m) => s + m.overdue, 0),
+      percent: pct(doneWithTarget, target),
     },
     ready: true,
   };
 }
+
+export { HISTORY_DAYS };

@@ -2,6 +2,7 @@ import type { Role } from "@/lib/auth";
 import {
   Briefcase,
   Megaphone,
+  Gauge,
   LayoutDashboard,
   CalendarCheck,
   Users,
@@ -23,7 +24,8 @@ export type NavItem = {
 };
 
 const ADMIN: Role[] = ["super_admin", "admin"];
-const ALL_STAFF: Role[] = ["super_admin", "admin", "poster_designer"];
+/** Names individuals and their targets — the super admin's alone. */
+const SUPER_ADMIN: Role[] = ["super_admin"];
 /** crm sees a subset of the admin modules, always scoped to its assigned clients. */
 const ADMIN_OR_CRM: Role[] = ["super_admin", "admin", "crm"];
 /**
@@ -47,6 +49,12 @@ const DAY_BOARD: Role[] = ["super_admin", "admin", "poster_designer", "crm"];
  * Dashboard and Tasks, which show everybody's.
  */
 const MAKERS: Role[] = ["admin", "poster_designer", "video_editor"];
+/**
+ * The Posters board spans every client and carries the approve-and-send step.
+ * A designer's own posters, with the box to submit them, live on My work — so
+ * they have one screen rather than two that are mostly each other.
+ */
+const POSTER_BOARD: Role[] = ["super_admin", "admin"];
 
 /** Admins see every module. */
 export const NAV: NavItem[] = [
@@ -56,9 +64,10 @@ export const NAV: NavItem[] = [
   { label: "Clients", href: "/clients", icon: Users, roles: ADMIN_OR_CRM, ready: true },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true },
   { label: "Approvals", href: "/approvals", icon: CheckCircle2, roles: ADMIN_OR_CRM, ready: true },
-  { label: "Posters", href: "/poster", icon: ImageIcon, roles: ALL_STAFF, ready: true },
+  { label: "Posters", href: "/poster", icon: ImageIcon, roles: POSTER_BOARD, ready: true },
   { label: "Payments", href: "/payments", icon: CreditCard, roles: ADMIN, ready: true },
   { label: "Ad Management", href: "/ads", icon: Megaphone, roles: ADMIN_OR_CRM, ready: true },
+  { label: "Team", href: "/team", icon: Gauge, roles: SUPER_ADMIN, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
   { label: "Settings", href: "/settings", icon: Settings, roles: ADMIN, ready: true },
 ];
