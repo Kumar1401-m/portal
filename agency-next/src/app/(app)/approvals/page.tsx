@@ -45,9 +45,11 @@ const TABS: {
    * to see what had gone. Which is the question actually asked at the end of
    * a month.
    *
-   * "Mark completed" is the last move, and the one that files it away.
+   * No action on it, deliberately. Posted is the end of the client's journey
+   * through this board, and a tab that is only ever read does not need a
+   * button to press.
    */
-  { key: "posted", label: "Posted", status: "posted", action: { label: "Mark completed", status: "completed" } },
+  { key: "posted", label: "Posted", status: "posted" },
 ];
 
 export default async function ApprovalsPage({
