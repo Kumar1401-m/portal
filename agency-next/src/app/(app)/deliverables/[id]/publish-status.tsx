@@ -11,7 +11,12 @@ import {
   CheckCircle2,
   Zap,
 } from "lucide-react";
-import { retryPublishAction, postNowAction, type RetryState } from "../actions";
+import {
+  retryPublishAction,
+  postNowAction,
+  postToFacebookAction,
+  type RetryState,
+} from "../actions";
 import { useToast } from "@/components/ui/toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +88,20 @@ export function PublishStatus({
   /** Super admin only — this puts a post on a live client account at once. */
   canPostNow?: boolean;
 }) {
+  const [fbPending, startFacebook] = useTransition();
+  const postFacebook = () => {
+    startFacebook(async () => {
+      const fd = new FormData();
+      fd.set("deliverable_id", String(deliverableId));
+      const res = await postToFacebookAction({ ok: false }, fd);
+      toast(
+        res.ok
+          ? { title: "Posted to the Page" }
+          : { title: res.error ?? "The Page refused it.", tone: "error" }
+      );
+    });
+  };
+
   const [state, formAction, pending] = useActionState<RetryState, FormData>(retryPublishAction, {
     ok: false,
   });
@@ -229,6 +248,33 @@ export function PublishStatus({
             )}
             {info.facebook.error ? (
               <p className="w-full text-xs text-destructive">{info.facebook.error}</p>
+            ) : null}
+
+            {/*
+              The one way back from a Page that refused the video.
+
+              The Instagram retry cannot do it — it refuses anything already
+              posted, and rightly, since re-running it would put the reel on
+              Instagram twice. Without this a permissions error, which is the
+              first thing anyone hits, left the Page half broken with nothing
+              in the portal able to fix it.
+
+              Also the path for a Page id added after the reel went out.
+            */}
+            {canPostNow && info.facebook.status !== "posted" && isTerminal ? (
+              <button
+                type="button"
+                onClick={postFacebook}
+                disabled={fbPending}
+                className="inline-flex items-center gap-1.5 text-primary hover:underline disabled:opacity-50"
+              >
+                {fbPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+                {info.facebook.status === "failed" ? "Try the Page again" : "Post to the Page"}
+              </button>
             ) : null}
           </div>
         ) : null}

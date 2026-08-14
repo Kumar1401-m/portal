@@ -965,3 +965,46 @@ export async function postNowAction(
   if (!res.ok) return { ok: false, error: res.error, pending: res.pending };
   return { ok: true, permalink: res.permalink ?? undefined };
 }
+
+/* ---------------------- Post to the Facebook Page ---------------------- */
+
+export type FacebookPostState = { ok: boolean; error?: string; message?: string };
+
+/**
+ * Put a video on the client's Page on its own.
+ *
+ * The Instagram retry cannot do this: it refuses anything already posted, and
+ * rightly — re-running it would publish the reel to Instagram a second time.
+ * So a Page that refused the video, or a Page id added after the reel went
+ * out, had no way back from inside the portal at all.
+ *
+ * Super admin only, the same rule "Post now" follows. Both put something on a
+ * client's public account the moment they are pressed.
+ */
+export async function postToFacebookAction(
+  _prev: FacebookPostState,
+  formData: FormData
+): Promise<FacebookPostState> {
+  const user = await requireUser(SUPER_ADMIN_ROLES);
+  const id = Number(formData.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing task." };
+
+  const row = await queryOne<{ client_id: number }>(
+    "SELECT client_id FROM deliverables WHERE id = ?",
+    [id]
+  );
+  if (!row) return { ok: false, error: "Task not found." };
+  if (!(await canAccessClient(user, row.client_id))) {
+    return { ok: false, error: "You don't have access to this client." };
+  }
+
+  const { publishToPageNow } = await import("@/lib/facebook");
+  const res = await publishToPageNow(id);
+
+  revalidatePath(`/deliverables/${id}`);
+  revalidatePath("/deliverables");
+
+  if (res.ok) return { ok: true, message: "Posted to the Page." };
+  // "Skipped" is a reason, not a failure — no Page id, or it is already there.
+  return { ok: false, error: "skipped" in res && res.skipped ? res.reason : res.error };
+}

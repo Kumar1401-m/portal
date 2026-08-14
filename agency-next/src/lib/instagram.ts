@@ -167,7 +167,8 @@ export function composeCaption(caption: string | null, hashtags: string | null):
  * media_type doesn't match the file, so this is decided from the actual asset
  * rather than from the category label a human typed.
  */
-function mediaTypeFor(url: string, category: string | null): "REELS" | "IMAGE" {
+/** Exported so the Facebook publisher classifies a file the same way. */
+export function mediaTypeFor(url: string, category: string | null): "REELS" | "IMAGE" {
   if (/\.(mp4|mov|m4v|webm)(\?|$)/i.test(url)) return "REELS";
   if (/\.(jpe?g|png|webp)(\?|$)/i.test(url)) return "IMAGE";
   // No usable extension (a signed URL can hide it) — fall back to the label.

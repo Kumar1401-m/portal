@@ -19,8 +19,10 @@
  * as failed and have a retry publish it to Instagram a second time.
  */
 import "server-only";
-import { execute, hasColumn } from "./db";
+import { execute, hasColumn, queryOne } from "./db";
 import { env } from "./env";
+import { resolveVideoUrl } from "./storage";
+import { composeCaption, mediaTypeFor } from "./instagram";
 
 const GRAPH = "https://graph.facebook.com";
 
@@ -180,4 +182,75 @@ export function facebookPermalink(postId: string | null): string | null {
   // Meta returns either "<pageId>_<postId>" or a bare id depending on the
   // endpoint; both resolve from the same path.
   return `https://www.facebook.com/${postId.replace("_", "/posts/")}`;
+}
+
+/**
+ * Put one video on the Page on its own, outside a publish run.
+ *
+ * Two moments need this and neither is covered by the Instagram retry, which
+ * refuses to touch anything already posted — correctly, since re-running it
+ * would publish the reel to Instagram twice:
+ *
+ *   - the Page refused it. The commonest reason is a token without
+ *     `pages_manage_posts`, which is fixed in Meta and then wants one button
+ *     rather than a re-post to Instagram nobody asked for.
+ *   - the Page id was added afterwards. The reel went out last week, the
+ *     client asked for Facebook too, and there is nothing to schedule because
+ *     the Instagram half is done.
+ *
+ * Resolves the media URL again rather than reusing a stored one: a signed R2
+ * link is good for hours, and both of these happen days later.
+ */
+export async function publishToPageNow(
+  deliverableId: number
+): Promise<FacebookOutcome> {
+  const row = await queryOne<{
+    id: number;
+    caption: string | null;
+    hashtags: string | null;
+    content_category: string | null;
+    cloud_video_url: string | null;
+    cloud_video_key: string | null;
+    edited_link: string | null;
+    facebook_status: string | null;
+    fb_page_id: string | null;
+    ig_access_token: string | null;
+  }>(
+    `SELECT d.id, d.caption, d.hashtags, d.content_category,
+            d.cloud_video_url, d.cloud_video_key, d.edited_link,
+            d.facebook_status, c.fb_page_id, c.ig_access_token
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE d.id = ?`,
+    [deliverableId]
+  );
+  if (!row) return { ok: false, error: "Task not found." };
+  if (!row.fb_page_id) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "This client has no Facebook Page id. Add it on their edit page.",
+    };
+  }
+  // The one thing this must not do is post the same video to the Page twice.
+  if (row.facebook_status === "posted") {
+    return { ok: false, skipped: true, reason: "This is already on the Page." };
+  }
+
+  const mediaUrl =
+    (await resolveVideoUrl(row.cloud_video_key, row.cloud_video_url, 6 * 60 * 60)) ||
+    row.edited_link;
+  if (!mediaUrl) {
+    return { ok: false, error: "There is no finished video on this task to post." };
+  }
+
+  return publishToPage({
+    deliverableId,
+    pageId: row.fb_page_id,
+    token: row.ig_access_token || env.meta.accessToken,
+    mediaUrl,
+    // The same rule the Instagram queue uses, so a poster does not get sent to
+    // the video endpoint because it was posted from a different button.
+    mediaType: mediaTypeFor(row.cloud_video_key || mediaUrl, row.content_category),
+    caption: composeCaption(row.caption, row.hashtags),
+  });
 }

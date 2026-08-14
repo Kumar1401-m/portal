@@ -118,4 +118,31 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("nobody is told a post is on Facebook when the Page refused it");
 }
 
+/* ---------------- and there is a way back when the Page refuses -------- */
+{
+  const lib = readFileSync(`${SRC}/lib/facebook.ts`, "utf8");
+
+  // The Instagram retry cannot do this job: it refuses anything already
+  // posted, and rightly — re-running it would put the reel on Instagram a
+  // second time. So a permissions failure, which is the first thing anyone
+  // hits, had no recovery inside the portal at all.
+  has(lib, "export async function publishToPageNow", "the Page can be posted to on its own");
+  has(lib, 'if (row.facebook_status === "posted")', "but never twice");
+  has(lib, "resolveVideoUrl(row.cloud_video_key", "and the media URL is resolved again");
+
+  const ig = readFileSync(`${SRC}/lib/instagram.ts`, "utf8");
+  has(ig, "WHERE id = ? AND instagram_status <> 'posted'", "which is why the IG retry cannot");
+
+  const act = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
+  has(act, "export async function postToFacebookAction", "it has an action");
+  has(act, "const user = await requireUser(SUPER_ADMIN_ROLES);", "reserved like Post now");
+
+  const panel = readFileSync(`${SRC}/app/(app)/deliverables/[id]/publish-status.tsx`, "utf8");
+  has(panel, "Try the Page again", "a refusal offers a retry");
+  has(panel, "Post to the Page", "and a Page added later offers a first post");
+  // Only once Instagram is done — before that the ordinary run will do it.
+  has(panel, 'info.facebook.status !== "posted" && isTerminal', "offered only after the reel is live");
+  ok("a Page that refused the video can be retried without touching Instagram");
+}
+
 await finish(pass);
