@@ -104,16 +104,34 @@ export type FootageItem = { title: string; due_date: string | null };
  * manual "chase them for everything" send usually finds — each line carries
  * its own, and leading with any single one would be a false deadline.
  */
-export function footageText(items: FootageItem[]): string {
+/**
+ * Which time of asking this is.
+ *
+ * The same words three times is what makes a chase easy to stop reading. Each
+ * one says something the last did not — a few days' warning, then the day
+ * itself, then the fact that the date has gone by — while staying a request
+ * rather than turning into a complaint. The third is the one worth watching:
+ * it is the one that would read as blame if it were written carelessly, so it
+ * offers to hold the slot rather than pointing out that the client is late.
+ */
+export type FootageStage = "early" | "due" | "late";
+
+export function footageText(items: FootageItem[], stage: FootageStage = "early"): string {
   const listed = items.slice(0, MAX_LISTED);
   const dates = new Set(items.map((i) => i.due_date || ""));
   const oneDate = dates.size === 1 && Boolean(items[0]?.due_date);
   const n = items.length;
+  const these = n === 1 ? "This one" : `These ${n}`;
 
-  const head = oneDate
-    ? `Hello! We're due to start editing on *${fmtDate(items[0].due_date)}*, and we're still waiting on your footage.\n\n` +
-      `${n === 1 ? "This one" : `These ${n}`}:`
-    : `Hello! Whenever you have a moment, could you please send us the footage for ${n === 1 ? "this" : `these ${n}`}:`;
+  const head = !oneDate
+    ? `Hello! Whenever you have a moment, could you please send us the footage for ${n === 1 ? "this" : `these ${n}`}:`
+    : stage === "due"
+      ? `Hello! We're due to start editing *today* and we're still waiting on your footage.\n\n${these}:`
+      : stage === "late"
+        ? `Hello! Just coming back to this one — we were due to start editing on ` +
+          `*${fmtDate(items[0].due_date)}*, and the footage hasn't reached us yet. ` +
+          `We're holding the slot for you.\n\n${these}:`
+        : `Hello! We're due to start editing on *${fmtDate(items[0].due_date)}*, and we're still waiting on your footage.\n\n${these}:`;
 
   const lines = listed
     .map((i) => (oneDate ? `• ${i.title}` : `• ${i.title}${i.due_date ? ` — ${fmtDate(i.due_date)}` : ""}`))

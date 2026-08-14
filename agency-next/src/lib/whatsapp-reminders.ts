@@ -29,6 +29,7 @@ import {
   invoiceText,
   monthlyPlanText,
   teamDigestText,
+  type FootageStage,
 } from "./reminder-messages";
 
 /**
@@ -84,7 +85,25 @@ const CHASE_AFTER_HOURS = 12;
  */
 const AUTO_APPROVE_AFTER_HOURS = 24;
 /** Days before a shoot is due that we ask for the footage. */
-const FOOTAGE_WARNING_DAYS = 3;
+/**
+ * When footage is asked for, and how many times.
+ *
+ * It was asked for once, on exactly one day — `due_date = CURDATE() + 3` — and
+ * never again. A client who did not send it that morning was never chased,
+ * and the task sat waiting until somebody noticed by hand.
+ *
+ * Three asks now, as offsets from the due date: a few days out, on the day,
+ * and once after it has passed. Three rather than a nag without end, and each
+ * one says something the last did not — the message changes with the stage.
+ *
+ * Every one stops the moment the footage arrives, because the query only ever
+ * returns tasks that still have no link on them.
+ */
+const FOOTAGE_ASKS: { offset: number; stage: FootageStage }[] = [
+  { offset: -3, stage: "early" },
+  { offset: 0, stage: "due" },
+  { offset: 2, stage: "late" },
+];
 
 /**
  * Take the right to send one reminder, or find it already taken.
@@ -329,7 +348,7 @@ async function autoApprove(): Promise<{ sent: number; failed: number }> {
  * footage" messages in a row reads as a malfunction, and the client's job is
  * the same either way: send a link.
  */
-function findFootageDue() {
+function findFootageDue(offset: number) {
   return query<{
     client_id: number;
     group_id: string;
@@ -345,28 +364,39 @@ function findFootageDue() {
        JOIN ${ONE_GROUP} g ON g.client_id = c.id
       WHERE d.status IN ('pending','waiting_for_raw')
         AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
-        AND d.due_date = DATE_ADD(CURDATE(), INTERVAL ? DAY)
+        AND d.due_date = DATE_SUB(CURDATE(), INTERVAL ? DAY)
       GROUP BY d.client_id, g.group_id, d.due_date
       LIMIT 50`,
-    [FOOTAGE_WARNING_DAYS]
+    // An offset from the due date, expressed as "how many days ago was it
+    // due" so one query serves all three asks: -3 is three days from now,
+    // 0 is today, 2 is two days overdue.
+    [offset]
   );
 }
 
 async function requestFootage(): Promise<{ sent: number; failed: number }> {
-  const rows = await findFootageDue();
-
   let sent = 0, failed = 0;
-  for (const r of rows) {
-    const key = `c:${r.client_id}:${r.due_date}`;
-    if (!(await claim("footage_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
 
-    // Grouped by a single due_date in the query above, so every item carries
-    // the same one and the message leads with that date.
-    const text = footageText(
-      r.titles.split("||").map((title) => ({ title, due_date: r.due_date }))
-    );
-    if (await deliver("footage_due", key, r.group_id, text)) sent++;
-    else failed++;
+  /*
+   * Each ask is claimed under its own key, so the three are independent and
+   * none of them can go twice. A client who sends the footage after the first
+   * simply stops matching the query, and the second and third never happen.
+   */
+  for (const ask of FOOTAGE_ASKS) {
+    const rows = await findFootageDue(ask.offset);
+    for (const r of rows) {
+      const key = `c:${r.client_id}:${r.due_date}:${ask.stage}`;
+      if (!(await claim("footage_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
+
+      // Grouped by a single due_date in the query above, so every item carries
+      // the same one and the message leads with that date.
+      const text = footageText(
+        r.titles.split("||").map((title) => ({ title, due_date: r.due_date })),
+        ask.stage
+      );
+      if (await deliver("footage_due", key, r.group_id, text)) sent++;
+      else failed++;
+    }
   }
   return { sent, failed };
 }
@@ -616,9 +646,19 @@ export async function pendingReminders(month?: string): Promise<PendingReminders
   out.auto_approve = await count(async () =>
     unclaimedCount("auto_approve", (await findAutoApprovals()).map((r) => `d:${r.id}`))
   );
-  out.footage_due = await count(async () =>
-    unclaimedCount("footage_due", (await findFootageDue()).map((r) => `c:${r.client_id}:${r.due_date}`))
-  );
+  // All three asks, since "what would the next run do" means every one of them
+  // that is due today — not only the first.
+  out.footage_due = await count(async () => {
+    let n = 0;
+    for (const ask of FOOTAGE_ASKS) {
+      const rows = await findFootageDue(ask.offset);
+      n += await unclaimedCount(
+        "footage_due",
+        rows.map((r) => `c:${r.client_id}:${r.due_date}:${ask.stage}`)
+      );
+    }
+    return n;
+  });
   out.invoice_due = await count(async () =>
     unclaimedCount("invoice_due", (await findUnpaidInvoices()).map((r) => `inv:${r.id}:${r.week}`))
   );
