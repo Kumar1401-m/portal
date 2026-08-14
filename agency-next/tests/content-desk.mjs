@@ -105,8 +105,8 @@ const piece = (title, body, dueDate = "2026-08-20") => ({ title, dueDate, body }
 {
   const today = readFileSync(`${SRC}/app/(app)/today/page.tsx`, "utf8");
   assert.ok(
-    today.includes('d.status !== "pending" && !isFinished(d.status, d.posting_status)'),
-    "unwritten briefs are not on the day board, and neither is finished work"
+    today.includes('(d.status !== "pending" || arrived(d)) && !isFinished(d.status, d.posting_status)'),
+    "unwritten briefs are off the day board unless footage has arrived, and finished work is off it"
   );
   // But sent-to-the-client is: that is the one content state waiting on
   // somebody, which is what the board is for.

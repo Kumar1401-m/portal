@@ -93,9 +93,21 @@ export default async function TodayPage({
    * on somebody, which is exactly what this board is for. A posted piece is
    * waiting on nobody, and lives on Approvals → Posted.
    */
+  /*
+   * Except a slot the client has already sent footage for.
+   *
+   * That is the one kind of unwritten brief that is not just a line on next
+   * month's plan: somebody outside the agency has done something, and it is
+   * now waiting on us. Since footage no longer advances a pending task — it
+   * cannot, or it would skip the content gate — such a task would otherwise
+   * sit only on the content desk, with the client's video attached and nobody
+   * on the day board any the wiser.
+   */
+  const arrived = (d: (typeof board)[number]) => Boolean((d.raw_drive_link ?? "").trim());
   const all = board.filter(
-    (d) => d.status !== "pending" && !isFinished(d.status, d.posting_status)
+    (d) => (d.status !== "pending" || arrived(d)) && !isFinished(d.status, d.posting_status)
   );
+  // Everything unwritten is still on the desk, including the ones showing here.
   const onContentDesk = board.filter((d) => d.status === "pending").length;
 
   /*

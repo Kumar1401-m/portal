@@ -96,4 +96,33 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("only the services actually in use get a tab");
 }
 
+/* ---------------- and the day board sees it arrive ---------------- */
+{
+  const today = readFileSync(`${SRC}/app/(app)/today/page.tsx`, "utf8");
+
+  // Footage no longer advances a pending task — it cannot, or it would skip
+  // the content gate — so without this the client's video sits on the content
+  // desk alone and nobody on the day board knows it came.
+  has(today, "const arrived = (d: (typeof board)[number]) =>", "a slot with footage is recognised");
+  has(
+    today,
+    '(d.status !== "pending" || arrived(d)) && !isFinished(d.status, d.posting_status)',
+    "and shown on Today's Tasks, unwritten or not"
+  );
+  // It is still unwritten, so it is still on the desk as well.
+  has(today, 'board.filter((d) => d.status === "pending").length', "and still counted there");
+
+  // Content approval was never the missing half — waiting_for_raw is neither
+  // pending nor finished, so it has always been on the board. Named here so a
+  // future filter cannot quietly drop it.
+  assert.ok(
+    !/waiting_for_raw/.test(today.split("const all = board.filter")[1].slice(0, 400)),
+    "nothing excludes a task whose content was just approved"
+  );
+
+  const route = readFileSync(`${SRC}/app/api/whatsapp/footage/route.ts`, "utf8");
+  has(route, "The content still needs writing.", "and the alert says which case it is");
+  ok("footage the client sends shows up on the day board either way");
+}
+
 await finish(pass);

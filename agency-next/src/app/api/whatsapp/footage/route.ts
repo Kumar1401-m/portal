@@ -67,10 +67,15 @@ export async function POST(request: Request) {
     next ? [link, next, task.id] : [link, task.id]
   );
 
+  // What is owed next differs, so the alert says which it is. Both land on
+  // Today’s Tasks either way — a slot with the client’s footage on it is
+  // waiting on us, whether or not the brief has been written.
   await notifyAdmins(
     "general",
     "Raw footage received on WhatsApp",
-    `"${task.title}" — the client sent a footage link in their WhatsApp group.`,
+    next
+      ? `"${task.title}" — the client sent a footage link. Ready to edit.`
+      : `"${task.title}" — the client sent a footage link before we asked. The content still needs writing.`,
     `/deliverables/${task.id}`
   );
 
