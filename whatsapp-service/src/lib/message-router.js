@@ -215,7 +215,7 @@ class MessageRouter {
    */
   async acknowledge(groupId, command, videoCode, data) {
     /*
-     * Content is answered as a batch, and needs its own sentence.
+     * Content is answered as a batch, and needs its own sentences.
      *
      * "We'll get it scheduled for posting" is the right thing to say about an
      * approved video and the wrong thing to say about approved copy — nothing
@@ -224,27 +224,52 @@ class MessageRouter {
      */
     if (data?.kind === 'content') {
       const n = Number(data.count) || 1;
-      const what = n === 1 ? 'the content' : `all ${n} pieces`;
+      /*
+       * The noun and its pronoun are decided together, once.
+       *
+       * Choosing them separately is how "we'll rework all 2 pieces and send it
+       * back" happens — and "all 2" is not something anybody says. Two is
+       * "both", more is "all five", one is just "the content".
+       */
+      const [subject, pronoun, verb] =
+        n === 1
+          ? ['The content', 'it', 'is']
+          : n === 2
+            ? ['Both pieces', 'them', 'are']
+            : [`All ${n} pieces`, 'them', 'are'];
+
       const text =
         command === 'approve'
-          ? `✅ Thank you! We have ${what} approved — the team will get started.`
+          ? `✅ Thank you! ${subject} ${verb} approved — we'll get started on ${pronoun} right away.`
           : command === 'change'
-            ? `📝 Thank you — noted. We'll rework ${what} and send it back to you here.`
-            : `🚫 Understood. We've set ${what} aside and someone will be in touch.`;
+            ? `📝 Thank you — noted. We'll rework ${pronoun} and send ${pronoun} back to you here.`
+            : `🚫 Understood — we've set ${pronoun} aside. Someone from our team will follow up with you shortly.`;
       await this.replySafely(groupId, text);
       return;
     }
 
-    const title = data?.title ? ` — _${data.title}_` : '';
-    // A code is shown only if there is one; the client no longer sees codes
-    // and echoing "undefined" back at them would be worse than saying nothing.
-    const ref = videoCode ? `*${videoCode}* ` : '';
+    /*
+     * The title, not the code.
+     *
+     * The video message stopped showing a code a while ago, so echoing one
+     * back names something the client has never seen. The title is what they
+     * were shown and what they would call it themselves. A code still appears
+     * where it is genuinely needed — when two are waiting and we have to ask
+     * which they mean.
+     */
+    // Subject and verb together, for the same reason the batch does it: a
+    // title makes this a name, and its absence makes it a pronoun, and the
+    // two need different words around them. Split apart, the untitled case
+    // came out as "Thank you! it is approved".
+    const named = Boolean(data?.title);
+    const subject = named ? `_${data.title}_` : 'That';
+    const object = named ? `_${data.title}_` : 'it';
     const text =
       command === 'approve'
-        ? `✅ Thank you! ${ref}Approved${title}\nWe'll get it scheduled for posting.`
+        ? `✅ Thank you! ${subject} is approved — we'll get it scheduled for posting.`
         : command === 'change'
-          ? `📝 Thank you — noted${title}\nYour changes have gone to the editor, and we'll share the updated version here soon.`
-          : `🚫 Understood${title}\nWe've marked it as rejected. Someone from our team will follow up with you shortly.`;
+          ? `📝 Thank you — noted. Your changes for ${object} have gone to the editor, and we'll share the updated version here soon.`
+          : `🚫 Understood — we've set ${object} aside. Someone from our team will follow up with you shortly.`;
 
     await this.replySafely(groupId, text);
   }

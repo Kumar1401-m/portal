@@ -144,7 +144,12 @@ const politeEnough = (text, label) => {
 {
   const router = readFileSync(`${SRC}/../../whatsapp-service/src/lib/message-router.js`, "utf8");
   const acks = router.slice(router.indexOf("async acknowledge("), router.indexOf("async replySafely("));
-  assert.match(acks, /Thank you! \$\{ref\}Approved/, "an approval is thanked for");
+  // Both branches — content and video — open by thanking them. Asserted on
+  // the intent rather than the exact sentence, which has been rewritten once
+  // already and will be again.
+  const approvals = acks.match(/✅ Thank you!/g) || [];
+  assert.equal(approvals.length, 2, "both kinds of approval are thanked for");
+  assert.ok(!/Thank you! \*?\$\{ref\}/.test(acks), "and neither opens with a code the client never saw");
   assert.match(acks, /Thank you — noted/, "so is a change request");
   assert.ok(!/We'll follow up with you\.`/.test(acks), "and a rejection says who follows up, and when");
   assert.match(router, /Sorry — we couldn't record that/, "a failure apologises rather than warns");

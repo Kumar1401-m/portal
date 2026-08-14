@@ -90,7 +90,7 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   // "We'll get it scheduled for posting" is right about an approved video and
   // wrong about approved copy — nothing has been made yet.
   has(router, "if (data?.kind === 'content') {", "content gets its own acknowledgement");
-  has(router, "the team will get started", "which says what actually happens next");
+  has(router, "we'll get started on ", "which says what actually happens next");
   assert.ok(
     !/kind === 'content'[\s\S]{0,400}scheduled for posting/.test(router),
     "and never promises a posting slot for a brief"
