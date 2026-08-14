@@ -912,6 +912,21 @@ export type ApprovalCounts = {
  * A video that failed to send is NOT pending: nobody is waiting on the client,
  * the agency has a problem to fix, and conflating the two hides it.
  */
+/**
+ * The tiles above the approval board.
+ *
+ * "Ready to post" needs both posted columns, and asked for only one. A piece
+ * is posted in two different places — the publisher writes `posting_status`
+ * and leaves the workflow status where it was, while marking it by hand writes
+ * the workflow status — so `status <> 'posted'` counted anything the
+ * automation published for ever. It also counted a piece posted and then
+ * marked completed. The tile read "Ready to post: 1" about something that had
+ * already gone out, which is the one thing a number like that must not do.
+ *
+ * Cancelled and rejected are excluded for the reason they are everywhere else:
+ * nothing is going to be posted from them. Kept in step with `isFinished` in
+ * constants.ts, which is this same rule in TypeScript.
+ */
 export async function getApprovalCounts(clientIds?: number[] | null): Promise<ApprovalCounts> {
   if (!(await approvalsReady())) {
     return { pending: 0, approved: 0, changesRequested: 0, rejected: 0, readyToPost: 0, failed: 0 };
@@ -930,7 +945,12 @@ export async function getApprovalCounts(clientIds?: number[] | null): Promise<Ap
        COALESCE(SUM(d.wa_status = 'changes_requested'),0) AS changes_requested,
        COALESCE(SUM(d.wa_status = 'rejected'),0)          AS rejected,
        COALESCE(SUM(d.wa_status = 'failed'),0)            AS failed,
-       COALESCE(SUM(d.wa_status = 'approved' AND d.status <> 'posted'),0) AS ready_to_post
+       -- Approved by the client and not out yet. See the note above the query.
+       COALESCE(SUM(
+         d.wa_status = 'approved'
+         AND COALESCE(d.posting_status,'') <> 'posted'
+         AND d.status NOT IN ('posted','completed','cancelled','rejected')
+       ),0) AS ready_to_post
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status <> 'churned' ${scope}`,
     clientIds && clientIds.length ? clientIds : []

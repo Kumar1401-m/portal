@@ -41,6 +41,8 @@ export type CardGroup = {
   companyName: string;
   hasGroup: boolean;
   approvesContent: boolean;
+  /** Whether this viewer may put content in front of the client. */
+  canSend: boolean;
   properties: CardProperty[];
   toWrite: CardRow[];
   ready: CardRow[];
@@ -176,7 +178,7 @@ function PropertySection({
         </div>
       ) : null}
 
-      <WriteList rows={[...property.toWrite, ...property.ready]} />
+      <WriteList rows={[...property.toWrite, ...property.ready]} group={group} />
 
       {/* Handing work to our own team is not the same act as putting something
           in front of a client, so it is not held to the same rule — otherwise
@@ -197,12 +199,19 @@ function PropertySection({
 }
 
 /** The briefs themselves — a line each, written in a popup. */
-function WriteList({ rows }: { rows: CardRow[] }) {
+function WriteList({ rows, group }: { rows: CardRow[]; group: CardGroup }) {
   if (rows.length === 0) return null;
   return (
     <div className="space-y-2">
       {rows.map((r) => (
-        <BriefRow key={r.id} row={r} />
+        <BriefRow
+          key={r.id}
+          row={r}
+          clientId={group.clientId}
+          canSend={group.canSend}
+          approvesContent={group.approvesContent}
+          hasGroup={group.hasGroup}
+        />
       ))}
     </div>
   );

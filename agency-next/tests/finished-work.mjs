@@ -194,4 +194,25 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("two small wrongnesses that only showed up at the edges");
 }
 
+/* ---------------- and the tile counting it says the same thing ---------------- */
+{
+  const wa = readFileSync(`${SRC}/lib/whatsapp-approvals.ts`, "utf8");
+
+  // “Ready to post” asked for status <> 'posted' alone, so it counted
+  // anything the publisher had put out — which sets posting_status and leaves
+  // the workflow status where it was — for ever. The tile read “Ready to
+  // post: 1” about something already on the client’s page.
+  has(wa, "COALESCE(d.posting_status,'') <> 'posted'", "the publisher’s column counts");
+  has(
+    wa,
+    "d.status NOT IN ('posted','completed','cancelled','rejected')",
+    "and so does everything else that is finished"
+  );
+  assert.ok(
+    !wa.includes("d.wa_status = 'approved' AND d.status <> 'posted'"),
+    "the half-check is gone"
+  );
+  ok("a piece already posted is not counted as ready to post");
+}
+
 await finish(pass);

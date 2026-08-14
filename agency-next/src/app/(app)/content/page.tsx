@@ -43,6 +43,7 @@ export default async function ContentPage() {
     companyName: g.companyName,
     hasGroup: g.hasGroup,
     approvesContent: g.approvesContent,
+    canSend,
     properties: g.properties.map((p) => ({
       name: p.name,
       toWrite: p.toWrite.map(row),
