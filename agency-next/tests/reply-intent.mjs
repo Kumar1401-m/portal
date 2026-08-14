@@ -210,4 +210,28 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("a voice note is transcribed whole, and a truncated one is not silent");
 }
 
+/* ---------------- a change asked for by voice lands on the task ---------------- */
+{
+  const wa = readFileSync(`${SRC}/lib/whatsapp-approvals.ts`, "utf8");
+
+  // It set reject_reason, logged an activity row, and stopped. The feedback
+  // thread is what the task page and the designer’s queue actually show, so a
+  // change asked for in the group appeared in a banner and was missing from
+  // the conversation the team reads — while the same change typed in the
+  // portal appeared in both.
+  has(wa, "INSERT INTO feedback (deliverable_id, author_id, author_role, message)", "it is written into the thread");
+  has(wa, 'if (input.command !== "approve") {', "for a change or a rejection, not an approval");
+
+  // A voice note is transcribed in the client’s own language and the note is
+  // our English reading of it. The person redoing the work should see both:
+  // the client’s own words are what settle an argument about what was asked.
+  has(wa, "note && said && note !== said", "both the words and the reading of them");
+
+  // And the maker is told. Changes went to notifyAdmins alone, so the one
+  // person who has to make them found out when somebody forwarded it.
+  has(wa, 'if (input.command === "change" && d.assigned_to)', "whoever has the task is told");
+  has(wa, "d.assigned_to, c.company_name", "which the lookup now reads");
+  ok("a change requested on WhatsApp reaches the person who has to make it");
+}
+
 await finish(pass);

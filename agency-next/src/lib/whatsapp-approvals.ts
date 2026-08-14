@@ -17,7 +17,7 @@
  */
 import "server-only";
 import { query, queryOne, execute, transaction, hasColumn } from "./db";
-import { notifyAdmins } from "./notify";
+import { notifyAdmins, notifyUser } from "./notify";
 import { resolveVideoUrl } from "./storage";
 import { composeCaption } from "./instagram";
 import { buildVideoPermalink } from "./video-link";
@@ -95,11 +95,17 @@ export async function findByVideoCode(code: string): Promise<{
   video_code: string;
   wa_status: string;
   wa_group_id: string | null;
+  /** Who has to act on a change the client asks for. */
+  assigned_to: number | null;
+  /** Named in that person’s notification, since they work across clients. */
+  company_name: string;
 } | null> {
   if (!/^[A-Za-z]{1,3}\d{1,8}$/.test(code.trim())) return null;
   return queryOne(
-    `SELECT id, client_id, title, video_code, wa_status, wa_group_id
-       FROM deliverables WHERE UPPER(video_code) = UPPER(?)`,
+    `SELECT d.id, d.client_id, d.title, d.video_code, d.wa_status, d.wa_group_id,
+            d.assigned_to, c.company_name
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE UPPER(d.video_code) = UPPER(?)`,
     [code.trim()]
   );
 }
@@ -736,6 +742,58 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
       }),
     ]
   );
+
+  /*
+   * A change asked for on WhatsApp is written onto the task, not just beside it.
+   *
+   * It set `reject_reason` and logged an activity row, and stopped there. The
+   * feedback thread is what the task page and the designer's queue actually
+   * show — so a change requested in the group appeared in a banner and was
+   * absent from the conversation the team reads, while one typed in the portal
+   * appeared in both.
+   *
+   * Both the words and the reading of them, when they differ. A voice note is
+   * transcribed in the client's own language and the note is our English
+   * summary of it; the person redoing the work should be able to see what was
+   * actually said, and the client's own words are the ones that settle an
+   * argument about what was asked for.
+   */
+  if (input.command !== "approve") {
+    const said = (input.message ?? "").trim();
+    const note = (input.comment ?? "").trim();
+    const body =
+      note && said && note !== said
+        ? `${note}
+
+— ${input.approvedBy || "the client"}: "${said}"`
+        : note || said || null;
+    if (body) {
+      await execute(
+        `INSERT INTO feedback (deliverable_id, author_id, author_role, message)
+         VALUES (?, NULL, 'client', ?)`,
+        [d.id, body]
+      ).catch(() => {});
+    }
+  }
+
+  /*
+   * And the maker is told, not only the admins.
+   *
+   * Changes went to notifyAdmins alone, which meant the one person who has to
+   * make them found out when somebody forwarded it — or when they next opened
+   * a board and noticed the status had moved under them.
+   */
+  if (input.command === "change" && d.assigned_to) {
+    await notifyUser(
+      d.assigned_to,
+      "general",
+      "📝 Changes requested",
+      input.comment
+        ? `${d.company_name}: ${input.comment.slice(0, 200)}`
+        : `${d.company_name} asked for changes to "${d.title}".`,
+      `/deliverables/${d.id}`
+    ).catch(() => {});
+  }
 
   const who = input.approvedBy || "The client";
   await notifyAdmins(
