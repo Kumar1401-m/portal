@@ -409,10 +409,22 @@ export function isEmojiOnly(text: string): boolean {
 export function emojiReply(text: string, senderName?: string | null): string {
   const who = senderName?.trim()?.split(/\s+/)[0];
   const name = who ? ` ${who}` : "";
-  if (/[🙏💐🌸]/u.test(text)) return `🙏 Thank you${name}!`;
-  if (/[❤️💖💕😍🥰♥️🧡💛💚💙💜]/u.test(text)) return `😊 Thank you${name} — that means a lot to us!`;
-  if (/[😂🤣😄😃😁😆]/u.test(text)) return `😄 Glad that landed${name}!`;
-  if (/[🔥💯⭐🌟✨👏🎉]/u.test(text)) return `🙌 Thank you${name}! Delighted you like it.`;
+
+  /*
+   * Selectors stripped before matching, because inside a character class one
+   * is a member of it.
+   *
+   * "❤️" is two code points — the heart, then U+FE0F asking for the colour
+   * form. Written as [❤️…] the class holds both, so it also matches a bare
+   * U+FE0F, and "☺️" or "✅️" came back as a heart. Removing them leaves one
+   * code point per emoji, which is what the class was written for.
+   */
+  const t = text.replace(/[︎️]/g, "");
+
+  if (/[🙏💐🌸]/u.test(t)) return `🙏 Thank you${name}!`;
+  if (/[❤💖💕😍🥰♥🧡💛💚💙💜]/u.test(t)) return `😊 Thank you${name} — that means a lot to us!`;
+  if (/[😂🤣😄😃😁😆]/u.test(t)) return `😄 Glad that landed${name}!`;
+  if (/[🔥💯⭐🌟✨👏🎉]/u.test(t)) return `🙌 Thank you${name}! Delighted you like it.`;
   return `😊 Thank you${name}!`;
 }
 

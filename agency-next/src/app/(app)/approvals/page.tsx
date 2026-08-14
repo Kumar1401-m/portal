@@ -28,6 +28,8 @@ const TABS: {
   label: string;
   status: string;
   action?: { label: string; status: string };
+  /** Match on either posted column rather than the workflow status alone. */
+  postedEither?: boolean;
 }[] = [
   { key: "content", label: "Content review", status: "content_review", action: { label: "Approve content", status: "approved" } },
   { key: "final", label: "Final review", status: "review", action: { label: "Approve", status: "approved" } },
@@ -49,7 +51,7 @@ const TABS: {
    * through this board, and a tab that is only ever read does not need a
    * button to press.
    */
-  { key: "posted", label: "Posted", status: "posted" },
+  { key: "posted", label: "Posted", status: "posted", postedEither: true },
 ];
 
 export default async function ApprovalsPage({
@@ -62,7 +64,9 @@ export default async function ApprovalsPage({
   const active = (TABS.find((t) => t.key === sp.tab) ?? TABS[0]) as (typeof TABS)[number];
   const service = isServiceKey(sp.service) ? sp.service : null;
   const scopeIds = await crmClientIds(user);
-  const filters = { status: active.status, service: service ?? undefined, crmClientIds: scopeIds };
+  const filters = active.postedEither
+    ? { postedEither: true, service: service ?? undefined, crmClientIds: scopeIds }
+    : { status: active.status, service: service ?? undefined, crmClientIds: scopeIds };
 
   const [rows, counts, serviceCounts, waRows, waCounts] = await Promise.all([
     getDeliverables(filters),

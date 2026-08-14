@@ -104,10 +104,9 @@ const piece = (title, body, dueDate = "2026-08-20") => ({ title, dueDate, body }
 /* ---------------- the board is off Today's Tasks ---------------- */
 {
   const today = readFileSync(`${SRC}/app/(app)/today/page.tsx`, "utf8");
-  assert.match(
-    today,
-    /const all = board\.filter\(\(d\) => d\.status !== "pending"\)/,
-    "unwritten briefs are not on the day board"
+  assert.ok(
+    today.includes('d.status !== "pending" && !isFinished(d.status, d.posting_status)'),
+    "unwritten briefs are not on the day board, and neither is finished work"
   );
   // But sent-to-the-client is: that is the one content state waiting on
   // somebody, which is what the board is for.
@@ -208,6 +207,7 @@ const piece = (title, body, dueDate = "2026-08-20") => ({ title, dueDate, body }
   has(lib, "p[bucket].push(r);", "and the property holds the same rows");
 
   const card = readFileSync(`${SRC}/app/(app)/content/client-card.tsx`, "utf8");
+  const brief = readFileSync(`${SRC}/app/(app)/content/brief-row.tsx`, "utf8");
   has(card, "function PropertySection", "each property is a section of its own");
   has(card, "<SendBar group={group} rows={property.ready}", "with its own send");
   has(
@@ -215,7 +215,7 @@ const piece = (title, body, dueDate = "2026-08-20") => ({ title, dueDate, body }
     "group.properties.length > 1 && group.ready.length > 0",
     "and a send-everything only where there is more than one property to gather"
   );
-  has(card, 'fd.set("campaign", property)', "the property is written where the copy is");
+  has(brief, 'fd.set("campaign", property)', "the property is written where the copy is");
 
   const actions = readFileSync(`${SRC}/app/(app)/content/actions.ts`, "utf8");
   has(

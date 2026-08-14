@@ -11,6 +11,7 @@ import { SERVICES, SERVICE_KEYS, serviceOf } from "@/lib/services";
 import {
   contentStageLabel,
   contentStageTone,
+  isFinished,
   editorStatusLabel,
   editorStatusTone,
   postStatusLabel,
@@ -76,19 +77,26 @@ export default async function TodayPage({
   ]);
 
   /*
-   * Briefs nobody has written are not on this board.
+   * This board is work that still needs doing, and only that.
    *
-   * They were, and they were the bulk of it: a month is created as thirty
-   * tasks at once, all of them `pending`, none of them workable — and thirty
-   * rows of "yet to start" is what the four late ones were hiding behind.
-   * Writing them is a real job with its own screen now, so this board holds
-   * what is moving: sent to the client, being made, waiting to go out.
+   * It fills from both ends. A month is created as thirty tasks at once, all
+   * `pending` and none of them workable — thirty rows of "yet to start" that
+   * the four late ones hid behind. Writing those is a real job with its own
+   * screen now. And nothing ever left at the other end either: a video went
+   * out and its row stayed, so the board grew by every piece the agency had
+   * ever finished.
    *
-   * Sent to the client stays. That is the one content state that is waiting on
-   * somebody, which is exactly what this board is for.
+   * Both ends go. What is left is what is moving — with the client, being
+   * made, waiting to go out.
+   *
+   * Content sent to the client stays: that is the one content state waiting
+   * on somebody, which is exactly what this board is for. A posted piece is
+   * waiting on nobody, and lives on Approvals → Posted.
    */
-  const all = board.filter((d) => d.status !== "pending");
-  const onContentDesk = board.length - all.length;
+  const all = board.filter(
+    (d) => d.status !== "pending" && !isFinished(d.status, d.posting_status)
+  );
+  const onContentDesk = board.filter((d) => d.status === "pending").length;
 
   /*
    * The tab counts are counted from the same rows the table shows.
@@ -102,14 +110,10 @@ export default async function TodayPage({
   for (const d of all) counts[serviceOf(d)]++;
 
   // How much of it is actually due — the number the heading used to be about,
-  // and still worth saying now that the board holds more than that.
+  // and still worth saying now that the board holds more than that. Nothing
+  // finished is in `all` any more, so the date is the only test left.
   const today = new Date(new Date().toDateString());
-  const dueNow = all.filter(
-    (d) =>
-      d.due_date &&
-      new Date(d.due_date) <= today &&
-      !["posted", "completed", "cancelled", "rejected"].includes(d.status)
-  ).length;
+  const dueNow = all.filter((d) => d.due_date && new Date(d.due_date) <= today).length;
 
   /*
    * Content that has gone out and is waiting on an answer.

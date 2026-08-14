@@ -9,35 +9,25 @@ import {
   ChevronDown,
   Loader2,
   MessageCircle,
-  PenLine,
   Send,
   Undo2,
   Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonClasses } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { fmtDate } from "@/lib/utils";
+import { BriefRow, type CardRow } from "./brief-row";
 import {
-  saveBriefAction,
   sendContentAction,
   handToTeamAction,
   recordContentDecisionAction,
   type ContentState,
 } from "./actions";
 
-export type CardRow = {
-  id: number;
-  title: string;
-  dueDate: string | null;
-  description: string | null;
-  assigneeName: string | null;
-  /** What it is about — a property, a project. "" when it belongs to none. */
-  property: string;
-};
+export type { CardRow };
 
 export type CardProperty = {
   name: string;
@@ -206,7 +196,7 @@ function PropertySection({
   );
 }
 
-/** The briefs themselves, each one editable where it sits. */
+/** The briefs themselves — a line each, written in a popup. */
 function WriteList({ rows }: { rows: CardRow[] }) {
   if (rows.length === 0) return null;
   return (
@@ -218,108 +208,6 @@ function WriteList({ rows }: { rows: CardRow[] }) {
   );
 }
 
-function BriefRow({ row }: { row: CardRow }) {
-  const written = Boolean((row.description ?? "").trim());
-  const [editing, setEditing] = useState(!written);
-  const [body, setBody] = useState(row.description ?? "");
-  const [property, setProperty] = useState(row.property);
-  const [saved, setSaved] = useState(written);
-  const [pending, start] = useTransition();
-  const toast = useToast();
-
-  const save = () => {
-    start(async () => {
-      const fd = new FormData();
-      fd.set("deliverable_id", String(row.id));
-      fd.set("description", body);
-      fd.set("campaign", property);
-      const res: ContentState = await saveBriefAction({ ok: false }, fd);
-      if (res.ok) {
-        setSaved(Boolean(body.trim()));
-        setEditing(false);
-        toast({ title: "Content saved." });
-      } else {
-        toast({ title: res.error ?? "Could not save.", tone: "error" });
-      }
-    });
-  };
-
-  return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <Link
-            href={`/deliverables/${row.id}`}
-            className="text-sm font-medium hover:text-primary hover:underline"
-          >
-            {row.title}
-          </Link>
-          <p className="text-xs text-muted-foreground">
-            {row.dueDate ? fmtDate(row.dueDate) : "no date"}
-            {row.assigneeName ? ` · ${row.assigneeName}` : ""}
-          </p>
-        </div>
-        {saved && !editing ? (
-          <Badge tone="info">Written</Badge>
-        ) : (
-          <Badge tone="active">To write</Badge>
-        )}
-      </div>
-
-      {editing ? (
-        <div className="mt-2 space-y-2">
-          <Textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={5}
-            placeholder="The content for this piece, exactly as the client should read it."
-            className="text-sm"
-          />
-          {/* Named here rather than on a separate screen, because it is
-              decided while writing: you know which property the post is about
-              before you know what it says. Blank is allowed — not everything
-              a client posts is about one. */}
-          <Input
-            value={property}
-            onChange={(e) => setProperty(e.target.value)}
-            placeholder="Property or project this is about — optional"
-            className="text-sm"
-          />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={save} disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Save
-            </Button>
-            {saved ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setBody(row.description ?? "");
-                  setEditing(false);
-                }}
-                disabled={pending}
-              >
-                Cancel
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <div className="mt-2 flex items-start gap-2">
-          <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{body}</p>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className={buttonClasses({ variant: "ghost", size: "sm" })}
-          >
-            <PenLine className="h-3.5 w-3.5" /> Edit
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 

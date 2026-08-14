@@ -52,6 +52,8 @@ export type DeliverableFilters = {
   clientId?: number;
   month?: string;
   q?: string;
+  /** Posted by the publisher or by hand — see buildWhere. */
+  postedEither?: boolean;
   today?: boolean; // due today or overdue, still open
   /** Dated after today and still open — what the Today board falls back to. */
   upcoming?: boolean;
@@ -103,6 +105,21 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
   if (f.status) {
     conds.push("d.status = ?");
     params.push(f.status);
+  }
+  /*
+   * Posted, however it was recorded.
+   *
+   * A piece is posted in two different places: the publisher writes
+   * `posting_status`, and marking it by hand writes the workflow status. The
+   * Posted tab selected on the workflow status alone, so anything the
+   * automation put out sat under Scheduled — and once the working boards
+   * stopped showing finished work, that was the only place it appeared at all.
+   *
+   * Mirrors `isFinished`, which is what hides these rows elsewhere. The two
+   * have to agree or a piece falls between them.
+   */
+  if (f.postedEither) {
+    conds.push("(d.posting_status = 'posted' OR d.status IN ('posted','completed'))");
   }
   if (f.month) {
     conds.push("d.month_key = ?");
@@ -308,7 +325,7 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
        COALESCE(SUM(d.status = 'changes_requested'),0)  AS changes,
        COALESCE(SUM(d.status = 'approved'),0)           AS approved,
        COALESCE(SUM(d.status = 'scheduled'),0)          AS scheduled,
-       COALESCE(SUM(d.status = 'posted'),0)             AS posted
+       COALESCE(SUM(d.posting_status = 'posted' OR d.status IN ('posted','completed')),0) AS posted
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status != 'churned' ${scope}`,
     crmClientIds && crmClientIds.length ? crmClientIds : []

@@ -77,7 +77,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   // this the poster simply appears in a list they had no reason to open.
   assert.match(
     actions,
-    /if \(handedToMaker && d\.assigned_to\)[\s\S]{0,900}notifyUser\(/,
+    /if \(handedToMaker && d\.assigned_to && !quiet\)[\s\S]{0,900}notifyUser\(/,
     "content approval notifies whoever the work is assigned to"
   );
   assert.match(actions, /A poster is ready to design/, "and says so in poster words");

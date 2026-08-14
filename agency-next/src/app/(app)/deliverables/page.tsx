@@ -1,18 +1,16 @@
 import Link from "next/link";
 import { ClipboardList, Plus } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
-import {
-  getDeliverables,
-  getServiceCounts,
-  getAssignees,
-} from "@/lib/deliverables";
+import { getDeliverables, getAssignees } from "@/lib/deliverables";
+import type { ServiceCounts } from "@/lib/deliverables";
 import { crmClientIds } from "@/lib/crm";
 import { getCategoryMap } from "@/lib/categories";
 import { parseTaskQuery, type SearchParams } from "@/lib/task-query";
-import { SERVICES } from "@/lib/services";
+import { SERVICES, SERVICE_KEYS, serviceOf } from "@/lib/services";
 import {
   contentStageLabel,
   contentStageTone,
+  isFinished,
   editorStatusLabel,
   editorStatusTone,
   postStatusLabel,
@@ -43,12 +41,35 @@ export default async function DeliverablesPage({
   const scopeIds = await crmClientIds(user);
   const filters = { ...parsedFilters, crmClientIds: scopeIds };
 
-  const [all, counts, assignees, categoryMap] = await Promise.all([
+  const [board, assignees, categoryMap] = await Promise.all([
     getDeliverables(filters),
-    getServiceCounts(filters),
     getAssignees(),
     getCategoryMap(),
   ]);
+
+  /*
+   * Finished work is not on the working board either.
+   *
+   * It was, and it accumulated: this board is what the agency is doing, and a
+   * post that went out in May is not that. Every month added rows that would
+   * never move again, until the things still needing attention were a
+   * minority of their own list.
+   *
+   * Not deleted, though — "posted" is a fair thing to want to look up, and
+   * cancelled and rejected live nowhere else. So they are one click away
+   * rather than gone, behind a link rather than a filter bar: the filters
+   * came off this board on purpose and are not going back on for this.
+   */
+  const showDone = sp.done === "1";
+  const all = showDone ? board : board.filter((d) => !isFinished(d.status, d.posting_status));
+  const doneCount = board.length - all.length;
+
+  // Counted from the rows on screen. Counting the hidden ones would put 28
+  // above a board holding 12 — the discrepancy this change would otherwise
+  // have introduced.
+  const counts = { all: all.length } as ServiceCounts;
+  for (const k of SERVICE_KEYS) counts[k] = 0;
+  for (const d of all) counts[serviceOf(d)]++;
 
   /*
    * Eight to a page, the same as Today's Tasks.
@@ -66,6 +87,15 @@ export default async function DeliverablesPage({
   const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const heading = service ? SERVICES[service].label : "All Tasks";
+  /** The same board with the finished rows switched on or off. */
+  const doneHref = (on: boolean) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) qs.set(k, String(v));
+    if (service) qs.set("service", service);
+    if (on) qs.set("done", "1");
+    const q = qs.toString();
+    return q ? `/deliverables?${q}` : "/deliverables";
+  };
   const newHref = service ? `/deliverables/new?service=${service}` : "/deliverables/new";
 
   return (
@@ -81,6 +111,21 @@ export default async function DeliverablesPage({
                 how you know there is a second page to go to. */}
             {all.length} task{all.length === 1 ? "" : "s"}
             {hasFilters ? " (filtered)" : ""}
+            {showDone ? (
+              <>
+                {" · including finished · "}
+                <Link href={doneHref(false)} className="text-primary hover:underline">
+                  hide them
+                </Link>
+              </>
+            ) : doneCount > 0 ? (
+              <>
+                {` · ${doneCount} finished, hidden · `}
+                <Link href={doneHref(true)} className="text-primary hover:underline">
+                  show
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
         <Link href={newHref} className={buttonClasses()}>
@@ -223,9 +268,11 @@ export default async function DeliverablesPage({
               </TBody>
             </Table>
         )}
+        {/* Paging must not silently switch the finished rows back off — every
+            other filter travels in the link, and this one does too. */}
         <Pager
           basePath="/deliverables"
-          params={params}
+          params={showDone ? { ...params, done: "1" } : params}
           page={page}
           totalPages={totalPages}
           totalItems={all.length}

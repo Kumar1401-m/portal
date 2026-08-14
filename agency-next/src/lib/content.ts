@@ -16,6 +16,7 @@ import { query, queryOne, execute } from "./db";
 import { getGroupsForClient } from "./whatsapp-approvals";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { fmtDate } from "./utils";
+import { callJSON } from "./ai";
 
 export type ContentRow = {
   id: number;
@@ -76,6 +77,11 @@ export type ContentGroup = {
  * `pending` covers both "nothing written" and "written but not sent" — the
  * status does not distinguish them, the description does, and the board splits
  * on that rather than inventing a status for it.
+ *
+ * Churned clients are excluded, the same rule every other board follows via
+ * `buildWhere`. A client who left owes nobody a brief, and their unwritten
+ * month would otherwise sit on this desk for ever — growing, never actionable,
+ * and counted in the heading as work outstanding.
  */
 export async function getContentBoard(
   crmClientIds: number[] | null,
@@ -92,7 +98,8 @@ export async function getContentBoard(
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
        LEFT JOIN users u ON u.id = d.assigned_to
-      WHERE d.status IN ('pending','content_review')${scope}
+      WHERE d.status IN ('pending','content_review')
+        AND c.status != 'churned'${scope}
       ORDER BY c.company_name ASC, d.campaign IS NULL, d.campaign ASC,
                d.due_date IS NULL, d.due_date ASC, d.id ASC`
   );
@@ -357,4 +364,60 @@ export async function sendContentForApproval(
     messages: messages.length,
     clientName: client.company_name,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Naming the piece                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A title the month generator made up, rather than one anybody chose.
+ *
+ * `generateMonthTasks` names a month "Video 1..12" and "Poster 1..4" — it has
+ * to call them something before anyone has written a word. The numbers are
+ * doing real work while the month is being planned, and none at all once the
+ * copy exists: a board of "Video 6, Video 7, Video 8" tells you nothing about
+ * what is in any of them.
+ */
+export const isPlaceholderTitle = (title: string): boolean =>
+  /^(video|poster|reel|post)\s*\d+$/i.test(String(title || "").trim());
+
+/**
+ * A short title for a piece, from the copy that was just written for it.
+ *
+ * Only ever replaces a placeholder — a title somebody typed is theirs, and
+ * silently rewriting it would be the portal editing a person's work. Returns
+ * null when there is no model, when the copy is too thin to name, or when the
+ * model answers with something unusable; the caller keeps the old title in
+ * every one of those cases rather than treating any of them as a failure.
+ */
+export async function suggestTitle(
+  body: string,
+  companyName?: string | null
+): Promise<string | null> {
+  const copy = String(body || "").trim();
+  // Under a few words there is nothing to summarise, and a "title" derived
+  // from three of them is just those three words again.
+  if (copy.length < 25) return null;
+
+  const { data } = await callJSON(
+    [
+      "You name social-media posts for a marketing agency's internal board.",
+      "Given the copy for one post, reply with JSON: {\"title\":\"...\"}",
+      "The title is read by the team, not the client. Make it say what the post is about.",
+      "Three to six words. No quotes, no emoji, no hashtags, no full stop.",
+      "Use the language of the copy's subject, but write the title in English.",
+    ].join(" "),
+    `${companyName ? `Client: ${companyName}\n` : ""}Copy:\n${copy.slice(0, 1500)}`
+  );
+
+  const raw = typeof data?.title === "string" ? data.title.trim() : "";
+  if (!raw) return null;
+
+  // Trimmed rather than trusted: models add quotes and trailing stops however
+  // firmly they are asked not to, and a stray one ends up on the board.
+  const title = raw.replace(/^["'“”\s]+|["'“”.\s]+$/g, "").slice(0, 120);
+  // A model that echoes the placeholder back has told us nothing.
+  if (!title || isPlaceholderTitle(title)) return null;
+  return title;
 }

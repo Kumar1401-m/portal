@@ -152,6 +152,24 @@ export function contentStageTone(status: string): BadgeTone {
  * posting_status is only written by the publisher, so a video marked posted by
  * hand has the workflow status and nothing else.
  */
+/**
+ * Is this piece done — waiting on nobody, needing nothing?
+ *
+ * Deliberately next to `postStatusLabel`, and deliberately sharing its first
+ * line: a board that prints "Posted" on a row is a board showing finished
+ * work, and the two must agree about what "posted" means or one of them is
+ * lying. They can disagree easily, because a piece can be posted in two
+ * different places — the publisher writes `posting_status`, while marking it
+ * by hand writes the workflow status, and a row set one way was invisible to
+ * a check written the other.
+ *
+ * Cancelled and rejected are finished too. Nothing is owed on them either.
+ */
+export function isFinished(status: string, posting?: string | null): boolean {
+  if (posting === "posted") return true;
+  return ["posted", "completed", "cancelled", "rejected"].includes(status);
+}
+
 export function postStatusLabel(status: string, posting?: string | null): string {
   if (posting === "posted" || ["posted", "completed"].includes(status)) return "Posted";
   if (posting === "rejected") return "Failed";

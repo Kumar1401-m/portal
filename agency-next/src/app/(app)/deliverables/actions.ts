@@ -526,7 +526,18 @@ async function applyStatus(
   user: SessionUser,
   id: number,
   status: string,
-  reason?: string
+  reason?: string,
+  /**
+   * Suppress the hand-off notification, because the caller is sending one of
+   * its own.
+   *
+   * Set only when a batch goes through here a piece at a time — approving a
+   * client's month is fifteen calls and one designer, and fifteen identical
+   * alerts is how somebody turns notifications off. The batch caller sends a
+   * single summary instead. Everything else about the transition is unchanged,
+   * so the trail and the status are identical either way.
+   */
+  quiet = false
 ): Promise<StatusState> {
   if (!id) return { ok: false, error: "Missing deliverable." };
   if (!(STATUS_LIST as readonly string[]).includes(status)) {
@@ -743,7 +754,7 @@ async function applyStatus(
    * at. For a poster especially: it is not in their list at all until this
    * happens, so without a word they would never know it had arrived.
    */
-  if (handedToMaker && d.assigned_to) {
+  if (handedToMaker && d.assigned_to && !quiet) {
     const isPoster =
       d.service === "poster_designing" ||
       (!d.service && String(d.video_type ?? "").toLowerCase() === "poster");
@@ -782,7 +793,8 @@ export async function changeStatusAction(
     user,
     Number(formData.get("deliverable_id")),
     String(formData.get("status") || ""),
-    String(formData.get("reason") || "").trim() || undefined
+    String(formData.get("reason") || "").trim() || undefined,
+    formData.get("quiet") === "1"
   );
 }
 
