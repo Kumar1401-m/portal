@@ -166,4 +166,63 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("switching it on is one click, and it says so rather than erroring");
 }
 
+/* ---------------- and correcting one already recorded ---------------- */
+{
+  const act = readFileSync(`${SRC}/app/(app)/expenses/actions.ts`, "utf8");
+
+  has(act, "export async function updateExpenseAction", "an expense can be corrected");
+  has(act, "const existing = await queryOne<", "against a row that still exists");
+
+  // The same gauntlet as adding. A validator on one path and not the other is
+  // how a zero-rupee expense gets in through the back door.
+  const add = act.slice(act.indexOf("addExpenseAction"), act.indexOf("markExpensePaidAction"));
+  const upd = act.slice(act.indexOf("export async function updateExpenseAction"));
+  for (const rule of [
+    "amount <= 0",
+    "if (!isCategory(category))",
+    "if (!isRepeat(repeats))",
+    "Math.min(60, Math.max(0,",
+  ]) {
+    assert.ok(add.includes(rule), `adding checks ${rule}`);
+    assert.ok(upd.includes(rule), `and so does correcting: ${rule}`);
+  }
+
+  // The trap this design avoids. Paying a repeating expense creates the next
+  // one, so an un-pay here would leave an unpaid row AND the instance it had
+  // already spawned — the same subscription twice, neither marked as real.
+  assert.ok(!upd.includes('fd.get("paid_now")'), "the edit cannot un-pay a row");
+  has(act, "existing.paid_on ? asDate(", "only the paid date is correctable");
+  has(act, "?? existing.paid_on : null", "and omitting it leaves the stored value alone");
+
+  const table = readFileSync(`${SRC}/app/(app)/expenses/expense-table.tsx`, "utf8");
+  has(table, "{row?.paidOn ? (", "the paid-date field appears only on a paid row");
+  has(table, "{editing ? null : (", "and the already-paid tick only when adding");
+
+  // One row, never the series — the same rule delete follows.
+  has(table, "Changes apply to this one only.", "the dialog says which rows it touches");
+  ok("an expense can be corrected without disturbing what it already did");
+}
+
+/* ---------------- one dialog, two jobs ---------------- */
+{
+  const table = readFileSync(`${SRC}/app/(app)/expenses/expense-table.tsx`, "utf8");
+
+  // A second component for the second job is two places for a field to be
+  // added and one place for it to be forgotten.
+  has(table, "function ExpenseDialog", "add and edit share the form");
+  assert.ok(!/function AddExpense/.test(table), "there is no second copy of it");
+  has(table, "? await updateExpenseAction", "and the row decides which action runs");
+
+  // Ids are per row. Two dialogs sharing `exp-title` is a label pointing at
+  // another row's field, which nobody notices.
+  has(table, 'const uid = row ? `e${row.id}` : "new";', "field ids are unique per row");
+  assert.ok(!/id="exp-/.test(table), "none are hard-coded any more");
+
+  // Mounted per row rather than one shared dialog holding an id: Modal renders
+  // nothing when closed, so the fields remount from this row every time.
+  has(table, "<ExpenseDialog", "the dialog is mounted where the row is");
+  has(table, 'defaultValue={row?.title ?? ""}', "and starts from that row");
+  ok("adding and correcting are the same form, and cannot drift apart");
+}
+
 await finish(pass);

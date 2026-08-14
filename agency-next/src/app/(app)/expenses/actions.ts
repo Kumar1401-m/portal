@@ -176,3 +176,90 @@ export async function deleteExpenseAction(
   revalidatePath("/dashboard");
   return { ok: true, message: "Deleted." };
 }
+
+/**
+ * Correct one that is already recorded.
+ *
+ * Everything about the expense except whether it has been paid. That one
+ * omission is deliberate: paying a repeating expense creates the next one, so
+ * a tick-box here that could un-pay it would leave an unpaid row *and* the
+ * instance it had already spawned — the same subscription, twice, with
+ * nothing on either row saying which is real.
+ *
+ * The date it was paid is editable, because "I marked it today but paid it on
+ * the 3rd" is a real correction and carries no such risk. Paying itself stays
+ * with the button that does only that.
+ *
+ * Edits this row and no other. A repeating expense is a chain, so putting the
+ * rent up changes next month's from next month — the ones already recorded
+ * are what was actually owed at the time, and rewriting history to match a
+ * new price makes every past month wrong.
+ */
+export async function updateExpenseAction(
+  _prev: ExpenseState,
+  fd: FormData
+): Promise<ExpenseState> {
+  await requireUser(ROLES);
+  const id = Number(s(fd, "id"));
+  if (!id) return { ok: false, error: "Missing expense." };
+
+  const existing = await queryOne<{ id: number; paid_on: string | null }>(
+    "SELECT id, paid_on FROM expenses WHERE id = ?",
+    [id]
+  );
+  if (!existing) return { ok: false, error: "That expense no longer exists." };
+
+  const title = s(fd, "title");
+  if (!title) return { ok: false, error: "Give it a name — what is the money for?" };
+
+  const amount = Number(s(fd, "amount").replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Enter an amount greater than zero." };
+  }
+
+  const dueOn = asDate(s(fd, "due_on"));
+  if (!dueOn) return { ok: false, error: "Pick the date it is due." };
+
+  const category = s(fd, "category");
+  const repeats = s(fd, "repeats");
+  if (!isCategory(category)) return { ok: false, error: "Pick a category." };
+  if (!isRepeat(repeats)) return { ok: false, error: "Pick how often it repeats." };
+
+  /*
+   * Only meaningful on a row that is already paid, and only ever a correction
+   * to the date — the field is not rendered otherwise, and a request that
+   * omits it leaves the stored value alone rather than clearing it.
+   */
+  const paidOn = existing.paid_on ? asDate(s(fd, "paid_on")) ?? existing.paid_on : null;
+
+  const clientRaw = Number(s(fd, "client_id"));
+  const clientId = Number.isInteger(clientRaw) && clientRaw > 0 ? clientRaw : null;
+
+  const remindDaysRaw = Number(s(fd, "remind_days"));
+  const remindDays = Math.min(60, Math.max(0, Number.isFinite(remindDaysRaw) ? remindDaysRaw : 3));
+
+  await execute(
+    `UPDATE expenses
+        SET title = ?, category = ?, amount = ?, vendor = ?, due_on = ?, paid_on = ?,
+            repeats = ?, remind = ?, remind_days = ?, client_id = ?, note = ?
+      WHERE id = ?`,
+    [
+      title.slice(0, 200),
+      category,
+      amount,
+      s(fd, "vendor").slice(0, 150) || null,
+      dueOn,
+      paidOn,
+      repeats,
+      fd.get("remind") ? 1 : 0,
+      remindDays,
+      clientId,
+      s(fd, "note").slice(0, 2000) || null,
+      id,
+    ]
+  );
+
+  revalidatePath("/expenses");
+  revalidatePath("/dashboard");
+  return { ok: true, message: "Saved." };
+}

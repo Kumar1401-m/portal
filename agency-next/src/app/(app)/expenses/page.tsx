@@ -74,6 +74,7 @@ export default async function ExpensesPage() {
       repeats: r.repeats,
       remind: Number(r.remind) === 1,
       remindDays: r.remind_days,
+      clientId: r.client_id,
       clientName: r.company_name,
       note: r.note,
       overdue: !r.paid_on && due < today,

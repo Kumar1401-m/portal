@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Loader2, Plus, Repeat2, Trash2, BellOff } from "lucide-react";
+import { Check, Loader2, Pencil, Plus, Repeat2, Trash2, BellOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { money, fmtDate } from "@/lib/utils";
 import { EXPENSE_CATEGORIES, categoryLabel, REPEATS } from "@/lib/expense-kinds";
 import {
   addExpenseAction,
+  updateExpenseAction,
   deleteExpenseAction,
   markExpensePaidAction,
   type ExpenseState,
@@ -32,6 +33,7 @@ export type Row = {
   repeats: string;
   remind: boolean;
   remindDays: number;
+  clientId: number | null;
   clientName: string | null;
   note: string | null;
   /** Worked out on the server, against the database's idea of today. */
@@ -56,7 +58,7 @@ export function ExpenseTable({
   /** The database's today, so a new expense defaults to a date it agrees with. */
   today: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   return (
     <Card className="overflow-hidden">
@@ -67,7 +69,7 @@ export function ExpenseTable({
             What is owed first, oldest due date at the top.
           </p>
         </div>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button size="sm" onClick={() => setAdding(true)}>
           <Plus className="h-4 w-4" /> Add an expense
         </Button>
       </div>
@@ -92,22 +94,36 @@ export function ExpenseTable({
             </THead>
             <TBody>
               {rows.map((r) => (
-                <ExpenseRow key={r.id} row={r} />
+                <ExpenseRow key={r.id} row={r} clients={clients} today={today} />
               ))}
             </TBody>
           </Table>
         </div>
       )}
 
-      <AddExpense open={open} onClose={() => setOpen(false)} clients={clients} today={today} />
+      <ExpenseDialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        clients={clients}
+        today={today}
+      />
     </Card>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
-function ExpenseRow({ row }: { row: Row }) {
+function ExpenseRow({
+  row,
+  clients,
+  today,
+}: {
+  row: Row;
+  clients: { id: number; company_name: string }[];
+  today: string;
+}) {
   const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
   const [gone, setGone] = useState(false);
   const toast = useToast();
 
@@ -134,123 +150,215 @@ function ExpenseRow({ row }: { row: Row }) {
   if (gone) return null;
 
   return (
-    <TR>
-      <TD className="max-w-[16rem]">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate font-medium">{row.title}</span>
-          {row.repeats !== "once" ? (
-            <Repeat2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={row.repeats} />
+    <>
+      <TR>
+        <TD className="max-w-[16rem]">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="truncate text-left font-medium transition-colors hover:text-primary hover:underline"
+            >
+              {row.title}
+            </button>
+            {row.repeats !== "once" ? (
+              <Repeat2
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                aria-label={row.repeats}
+              />
+            ) : null}
+            {!row.remind && !row.paidOn ? (
+              <BellOff
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                aria-label="No reminder"
+              />
+            ) : null}
+          </div>
+          {row.vendor || row.clientName ? (
+            <p className="truncate text-xs text-muted-foreground">
+              {[row.vendor, row.clientName].filter(Boolean).join(" · ")}
+            </p>
           ) : null}
-          {!row.remind && !row.paidOn ? (
-            <BellOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="No reminder" />
-          ) : null}
-        </div>
-        {row.vendor || row.clientName ? (
-          <p className="truncate text-xs text-muted-foreground">
-            {[row.vendor, row.clientName].filter(Boolean).join(" · ")}
-          </p>
-        ) : null}
-      </TD>
-      <TD className="text-muted-foreground">{categoryLabel(row.category)}</TD>
-      <TD className="whitespace-nowrap text-right font-medium tabular-nums">{money(row.amount)}</TD>
-      <TD className="whitespace-nowrap tabular-nums">
-        <span className={row.overdue && !row.paidOn ? "font-medium text-destructive" : "text-muted-foreground"}>
-          {fmtDate(row.dueOn)}
-        </span>
-      </TD>
-      <TD>
-        {row.paidOn ? (
-          <Badge tone="success">Paid {fmtDate(row.paidOn)}</Badge>
-        ) : row.overdue ? (
-          <Badge tone="danger">Overdue</Badge>
-        ) : row.dueSoon ? (
-          <Badge tone="warning">Due soon</Badge>
-        ) : (
-          <Badge tone="muted">Upcoming</Badge>
-        )}
-      </TD>
-      <TD>
-        <div className="flex items-center justify-end gap-1">
-          {row.paidOn ? null : (
-            <Button size="sm" variant="ghost" onClick={() => run(markExpensePaidAction)} disabled={pending}>
-              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              Paid
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending}
-            onClick={() =>
-              run(
-                deleteExpenseAction,
-                `Delete "${row.title}"? ${
-                  row.repeats === "once" ? "" : "Only this one — the others in the series stay."
-                }`
-              )
+        </TD>
+        <TD className="text-muted-foreground">{categoryLabel(row.category)}</TD>
+        <TD className="whitespace-nowrap text-right font-medium tabular-nums">
+          {money(row.amount)}
+        </TD>
+        <TD className="whitespace-nowrap tabular-nums">
+          <span
+            className={
+              row.overdue && !row.paidOn ? "font-medium text-destructive" : "text-muted-foreground"
             }
-            aria-label={`Delete ${row.title}`}
           >
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-          </Button>
-        </div>
-      </TD>
-    </TR>
+            {fmtDate(row.dueOn)}
+          </span>
+        </TD>
+        <TD>
+          {row.paidOn ? (
+            <Badge tone="success">Paid {fmtDate(row.paidOn)}</Badge>
+          ) : row.overdue ? (
+            <Badge tone="danger">Overdue</Badge>
+          ) : row.dueSoon ? (
+            <Badge tone="warning">Due soon</Badge>
+          ) : (
+            <Badge tone="muted">Upcoming</Badge>
+          )}
+        </TD>
+        <TD>
+          <div className="flex items-center justify-end gap-1">
+            {row.paidOn ? null : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => run(markExpensePaidAction)}
+                disabled={pending}
+              >
+                {pending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )}
+                Paid
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditing(true)}
+              disabled={pending}
+              aria-label={`Edit ${row.title}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() =>
+                run(
+                  deleteExpenseAction,
+                  `Delete "${row.title}"? ${
+                    row.repeats === "once" ? "" : "Only this one — the others in the series stay."
+                  }`
+                )
+              }
+              aria-label={`Delete ${row.title}`}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+        </TD>
+      </TR>
+
+      {/* Mounted per row rather than one shared dialog holding an id: the
+          Modal renders nothing when closed, so the fields remount from this
+          row's values every time it opens and cannot show the last one's. */}
+      <ExpenseDialog
+        open={editing}
+        onClose={() => setEditing(false)}
+        clients={clients}
+        today={today}
+        row={row}
+      />
+    </>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
-function AddExpense({
+/**
+ * One dialog for both jobs.
+ *
+ * Adding and correcting are the same eleven fields, and a second component
+ * for the second job is two places for a field to be added and one place for
+ * it to be forgotten. `row` decides which action the submit goes to and what
+ * the fields start as; everything else is identical, because it should be.
+ */
+function ExpenseDialog({
   open,
   onClose,
   clients,
   today,
+  row,
 }: {
   open: boolean;
   onClose: () => void;
   clients: { id: number; company_name: string }[];
   today: string;
+  /** Absent when adding. Present when correcting one already recorded. */
+  row?: Row;
 }) {
   const [pending, start] = useTransition();
-  const [repeats, setRepeats] = useState("once");
+  const [repeats, setRepeats] = useState(row?.repeats ?? "once");
   const toast = useToast();
+
+  const editing = Boolean(row);
+  // Unique per row, so two dialogs' worth of markup can never share an id — a
+  // label pointing at another row's field is the sort of thing nobody notices.
+  const uid = row ? `e${row.id}` : "new";
 
   const submit = (fd: FormData) => {
     start(async () => {
-      const res = await addExpenseAction({ ok: false }, fd);
+      const res = editing
+        ? await updateExpenseAction({ ok: false }, fd)
+        : await addExpenseAction({ ok: false }, fd);
       if (res.ok) {
-        toast({ title: res.message ?? "Added." });
+        toast({ title: res.message ?? "Saved." });
         onClose();
       } else {
-        toast({ title: res.error ?? "Could not add it.", tone: "error" });
+        toast({ title: res.error ?? "Could not save it.", tone: "error" });
       }
     });
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add an expense">
+    <Modal open={open} onClose={onClose} title={row ? row.title : "Add an expense"}>
       <form action={submit}>
+        {row ? <input type="hidden" name="id" value={row.id} /> : null}
+
         <div className="flex-1 space-y-5 overflow-y-auto p-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="exp-title">What is it for</Label>
-              <Input id="exp-title" name="title" required placeholder="Adobe Creative Cloud" />
+              <Label htmlFor={`${uid}-title`}>What is it for</Label>
+              <Input
+                id={`${uid}-title`}
+                name="title"
+                required
+                defaultValue={row?.title ?? ""}
+                placeholder="Adobe Creative Cloud"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-amount">Amount</Label>
-              <Input id="exp-amount" name="amount" required inputMode="decimal" placeholder="4,230" />
+              <Label htmlFor={`${uid}-amount`}>Amount</Label>
+              <Input
+                id={`${uid}-amount`}
+                name="amount"
+                required
+                inputMode="decimal"
+                defaultValue={row ? String(row.amount) : ""}
+                placeholder="4,230"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-due">Due on</Label>
-              <Input id="exp-due" name="due_on" type="date" required defaultValue={today} />
+              <Label htmlFor={`${uid}-due`}>Due on</Label>
+              <Input
+                id={`${uid}-due`}
+                name="due_on"
+                type="date"
+                required
+                defaultValue={row?.dueOn ?? today}
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-category">Category</Label>
-              <Select id="exp-category" name="category" defaultValue="software">
+              <Label htmlFor={`${uid}-category`}>Category</Label>
+              <Select
+                id={`${uid}-category`}
+                name="category"
+                defaultValue={row?.category ?? "software"}
+              >
                 {EXPENSE_CATEGORIES.map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.label}
@@ -260,9 +368,9 @@ function AddExpense({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-repeats">Repeats</Label>
+              <Label htmlFor={`${uid}-repeats`}>Repeats</Label>
               <Select
-                id="exp-repeats"
+                id={`${uid}-repeats`}
                 name="repeats"
                 value={repeats}
                 onChange={(e) => setRepeats(e.target.value)}
@@ -276,17 +384,27 @@ function AddExpense({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-vendor">
+              <Label htmlFor={`${uid}-vendor`}>
                 Paid to <span className="font-normal text-muted-foreground">— optional</span>
               </Label>
-              <Input id="exp-vendor" name="vendor" placeholder="Adobe" />
+              <Input
+                id={`${uid}-vendor`}
+                name="vendor"
+                defaultValue={row?.vendor ?? ""}
+                placeholder="Adobe"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exp-client">
-                Against a client <span className="font-normal text-muted-foreground">— optional</span>
+              <Label htmlFor={`${uid}-client`}>
+                Against a client{" "}
+                <span className="font-normal text-muted-foreground">— optional</span>
               </Label>
-              <Select id="exp-client" name="client_id" defaultValue="">
+              <Select
+                id={`${uid}-client`}
+                name="client_id"
+                defaultValue={row?.clientId ? String(row.clientId) : ""}
+              >
                 <option value="">Not client-specific</option>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -295,39 +413,69 @@ function AddExpense({
                 ))}
               </Select>
             </div>
+
+            {/* Only where there is a payment to re-date. "I marked it today
+                but paid it on the 3rd" is a correction; un-paying is not
+                offered here — see updateExpenseAction for why. */}
+            {row?.paidOn ? (
+              <div className="space-y-2">
+                <Label htmlFor={`${uid}-paid`}>Paid on</Label>
+                <Input id={`${uid}-paid`} name="paid_on" type="date" defaultValue={row.paidOn} />
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="exp-note">
+            <Label htmlFor={`${uid}-note`}>
               Note <span className="font-normal text-muted-foreground">— optional</span>
             </Label>
-            <Textarea id="exp-note" name="note" rows={2} placeholder="Annual plan, 5 seats." />
+            <Textarea
+              id={`${uid}-note`}
+              name="note"
+              rows={2}
+              defaultValue={row?.note ?? ""}
+              placeholder="Annual plan, 5 seats."
+            />
           </div>
 
           <div className="space-y-3 rounded-lg border border-border p-3">
-            <label htmlFor="exp-paid" className="flex cursor-pointer items-center gap-2.5 text-sm">
-              <input
-                id="exp-paid"
-                type="checkbox"
-                name="paid_now"
-                value="1"
-                className="h-4 w-4 accent-[var(--primary)]"
-              />
-              <span>
-                Already paid
-                {repeats !== "once" ? (
-                  <span className="text-muted-foreground"> — the next one is created straight away</span>
-                ) : null}
-              </span>
-            </label>
+            {/* Adding only. On a row that exists, paying is the button on the
+                row itself — paying a repeating expense also creates the next
+                one, and a checkbox cannot say that. */}
+            {editing ? null : (
+              <label
+                htmlFor={`${uid}-paidnow`}
+                className="flex cursor-pointer items-center gap-2.5 text-sm"
+              >
+                <input
+                  id={`${uid}-paidnow`}
+                  type="checkbox"
+                  name="paid_now"
+                  value="1"
+                  className="h-4 w-4 accent-[var(--primary)]"
+                />
+                <span>
+                  Already paid
+                  {repeats !== "once" ? (
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — the next one is created straight away
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            )}
 
-            <label htmlFor="exp-remind" className="flex cursor-pointer items-start gap-2.5 text-sm">
+            <label
+              htmlFor={`${uid}-remind`}
+              className="flex cursor-pointer items-start gap-2.5 text-sm"
+            >
               <input
-                id="exp-remind"
+                id={`${uid}-remind`}
                 type="checkbox"
                 name="remind"
                 value="1"
-                defaultChecked
+                defaultChecked={row ? row.remind : true}
                 className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
               />
               <span>
@@ -339,20 +487,34 @@ function AddExpense({
             </label>
 
             <div className="flex items-center gap-2 pl-7">
-              <Label htmlFor="exp-days" className="text-xs font-normal text-muted-foreground">
+              <Label
+                htmlFor={`${uid}-days`}
+                className="text-xs font-normal text-muted-foreground"
+              >
                 How many days before
               </Label>
               <Input
-                id="exp-days"
+                id={`${uid}-days`}
                 name="remind_days"
                 type="number"
                 min={0}
                 max={60}
-                defaultValue={3}
+                defaultValue={row?.remindDays ?? 3}
                 className="w-20"
               />
             </div>
           </div>
+
+          {/* A repeating expense is a chain of rows, so a change here is a
+              change from here. The instances already recorded are what was
+              owed at the time, and rewriting them to match a new price would
+              make every past month wrong. */}
+          {row && row.repeats !== "once" ? (
+            <p className="text-xs text-muted-foreground">
+              Changes apply to this one only. The instances already recorded keep what they were,
+              and the next one is created from this row when it is marked paid.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-4">
@@ -360,8 +522,14 @@ function AddExpense({
             Cancel
           </Button>
           <Button type="submit" disabled={pending}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Add expense
+            {pending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : editing ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            {editing ? "Save changes" : "Add expense"}
           </Button>
         </div>
       </form>
