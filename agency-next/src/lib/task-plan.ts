@@ -16,9 +16,10 @@
  *
  * It generates placeholders, not briefs. Every task gets a plain numbered
  * name, because the subject is decided by a person afterwards. The dates are
- * not left to them, though: tasks are spread two days apart from the start of
- * the month, which is what anyone was going to do by hand anyway. Every one is
- * still movable from the plan.
+ * not left to them, though: the month is divided by how much goes in it, so a
+ * client on ten videos gets one every three days and one on four gets one a
+ * week, with posters falling between the videos rather than after all of them.
+ * Every date is still movable from the plan.
  */
 import "server-only";
 import { query, queryOne, execute } from "./db";
@@ -79,18 +80,6 @@ export function firstOfMonth(month: string): string {
  */
 const DUE_DATE_SQL = "IF(DATE_FORMAT(CURDATE(),'%Y-%m') = ?, GREATEST(?, CURDATE()), ?)";
 
-/**
- * Days between one generated task and the next.
- *
- * Everything used to land on the same day, on the reasoning that the dates
- * were a person's to decide afterwards. In practice nobody wants twelve videos
- * due on the 1st — they want them through the month, and spreading them by
- * hand is the tedium this feature exists to remove. Two days is a month's
- * worth of posting for a client on ten to fifteen pieces, and any date is
- * still movable from the plan.
- */
-const SPACING_DAYS = 2;
-
 /** YYYY-MM, validated — anything else falls back to the current month. */
 export function safeMonth(month: string | null | undefined): string {
   const m = String(month || "");
@@ -149,8 +138,8 @@ async function defaultCategory(service: ServiceKey): Promise<string> {
  *
  * Numbered from what is already there — a client with five videos gets "Video
  * 6" upwards — so the names stay unique and reading the list tells you where
- * the month stands. Dated two days apart, continuing after whatever the month
- * already holds, and never past its last day.
+ * the month stands. Spread evenly across what is left of the month, continuing
+ * after whatever it already holds, and never past its last day.
  */
 export async function generateMonthTasks(
   clientId: number,
@@ -203,21 +192,57 @@ export async function generateMonthTasks(
   const afterMs = bounds.after ? day(bounds.after) : null;
 
   // Start after whatever is already there, but never before the base date.
-  let cursorMs = afterMs !== null ? Math.max(baseMs, afterMs + SPACING_DAYS * DAY_MS) : baseMs;
+  const startMs = afterMs !== null ? Math.max(baseMs, afterMs + DAY_MS) : baseMs;
 
   /*
-   * The next date in the run, spaced and clamped.
+   * The month is divided by how much goes in it, not filled two days at a time.
    *
-   * Twenty videos at two days apart need thirty-nine, which no month has — so
-   * once the month runs out the remainder land on its last day rather than
-   * spilling into the next one. A task dated outside its own `month_key` would
-   * count towards one month's target while sitting in another's calendar, and
-   * every tally in the portal reads that key.
+   * A fixed two-day gap ignores the one number that matters. Ten videos in a
+   * thirty-day month came out on the 1st to the 19th and then stopped, and the
+   * posters — added as a second run after the videos — landed on the 21st to
+   * the 27th. So the client's month was front-loaded with video, tailed with
+   * poster, and empty for the last few days. A client on four videos got the
+   * opposite: everything done inside a week.
+   *
+   * Spreading by count fixes both. The window is whatever is left of the month
+   * from today, the first task lands at the start of it and the last on the
+   * final day, and everything in between is evenly spaced — so ten videos are
+   * three days apart and four are ten, without anyone choosing a number.
+   *
+   * Rounded to whole days, which means a month with more tasks than days puts
+   * two on some of them. That is the honest answer to "forty videos in
+   * February"; the old code answered it by piling twenty on the 28th.
    */
-  const nextDate = (): string => {
-    const at = Math.min(cursorMs, lastMs);
-    cursorMs = at + SPACING_DAYS * DAY_MS;
-    return asDate(at);
+  const slotDate = (i: number, total: number): string => {
+    if (total <= 1) return asDate(Math.min(startMs, lastMs));
+    const span = Math.max(0, lastMs - startMs);
+    return asDate(Math.min(startMs + Math.round((i * span) / (total - 1)), lastMs));
+  };
+
+  /*
+   * And the two kinds are interleaved rather than run one after the other.
+   *
+   * Whichever kind is furthest behind its own share goes next, so ten videos
+   * and four posters come out roughly V V V P V V P V V P V V P V — the
+   * posters sitting between the videos across the whole month, which is how a
+   * feed is actually planned.
+   */
+  const interleave = (videos: number, posters: number): ServiceKey[] => {
+    const out: ServiceKey[] = [];
+    let v = 0;
+    let p = 0;
+    while (v < videos || p < posters) {
+      const takeVideo =
+        p >= posters || (v < videos && (v + 0.5) / videos <= (p + 0.5) / posters);
+      if (takeVideo) {
+        out.push("video_editing");
+        v++;
+      } else {
+        out.push("poster_designing");
+        p++;
+      }
+    }
+    return out;
   };
 
   const rows: (string | number | null)[][] = [];
@@ -239,32 +264,51 @@ export async function generateMonthTasks(
     }, 0);
   };
 
-  const add = async (service: ServiceKey, count: number, startAt: number, noun: string) => {
-    if (count <= 0) return;
-    const category = await defaultCategory(service);
-    const videoType = videoTypeForService(service, category);
-    // The same rule the manual form follows, so a generated task lands where a
-    // hand-made one would.
-    const assignee = defaultAssigneeFor(service, client);
-    for (let i = 0; i < count; i++) {
-      rows.push([
-        clientId,
-        `${noun} ${startAt + i + 1}`,
-        service,
-        category,
-        videoType,
-        // Worked out above rather than in SQL, so the spacing is one sequence
-        // across both videos and posters instead of two runs colliding.
-        nextDate(),
-        plan.month,
-        createdBy,
-        assignee,
-      ]);
-    }
+  /*
+   * One pass over the interleaved sequence, dated by position in it.
+   *
+   * It was two passes, one per kind, sharing a cursor — which is what put all
+   * the videos before all the posters. The order is decided first now, and the
+   * date falls out of where a task sits in it.
+   */
+  const sequence = interleave(wantVideos, wantPosters);
+  const meta: Record<string, { noun: string; next: number; category: string; videoType: string | null; assignee: number | null }> = {
+    video_editing: {
+      noun: "Video",
+      next: highest("Video"),
+      category: await defaultCategory("video_editing"),
+      videoType: null,
+      // The same rule the manual form follows, so a generated task lands where
+      // a hand-made one would.
+      assignee: defaultAssigneeFor("video_editing", client),
+    },
+    poster_designing: {
+      noun: "Poster",
+      next: highest("Poster"),
+      category: await defaultCategory("poster_designing"),
+      videoType: null,
+      assignee: defaultAssigneeFor("poster_designing", client),
+    },
   };
+  for (const key of Object.keys(meta)) {
+    meta[key].videoType = videoTypeForService(key as ServiceKey, meta[key].category);
+  }
 
-  await add("video_editing", wantVideos, highest("Video"), "Video");
-  await add("poster_designing", wantPosters, highest("Poster"), "Poster");
+  sequence.forEach((service, i) => {
+    const m = meta[service];
+    m.next += 1;
+    rows.push([
+      clientId,
+      `${m.noun} ${m.next}`,
+      service,
+      m.category,
+      m.videoType,
+      slotDate(i, sequence.length),
+      plan.month,
+      createdBy,
+      m.assignee,
+    ]);
+  });
 
   if (rows.length) {
     await execute(
@@ -417,11 +461,14 @@ export async function setTaskDate(taskId: number, date: string | null): Promise<
 }
 
 /**
- * Re-date a month's existing tasks onto the two-day rhythm.
+ * Spread a month's existing tasks across what is left of it.
  *
- * Generating spaces new tasks out; this is for the months that were filled
- * before it did, where twelve videos all sit on the 1st. Same rhythm, same
- * start, applied to what is already there.
+ * Generating spreads new tasks out; this is for the months that were filled
+ * before it did, where twelve videos all sit on the 1st. Same rule, same
+ * start, applied to what is already there — dividing the window by the number
+ * of tasks rather than stepping through it two days at a time, so a light
+ * month is spread wide and a heavy one is not all crammed into its first
+ * fortnight.
  *
  * Each move goes through `setTaskDate`, so a task's posting slot follows its
  * date exactly as it does when the date is changed by hand — the day it lands
@@ -454,7 +501,6 @@ export async function respaceMonth(
   );
   if (!tasks.length) return { moved: 0, skipped: 0, from: null, to: null };
 
-  const DAY_MS = 86_400_000;
   const baseMs = Date.parse(`${String(bounds.base).slice(0, 10)}T00:00:00Z`);
   const lastMs = Date.parse(`${String(bounds.last).slice(0, 10)}T00:00:00Z`);
 
@@ -463,11 +509,15 @@ export async function respaceMonth(
   let firstDate: string | null = null;
   let lastDate: string | null = null;
 
+  // The same division generating uses. Clamped to the month's last day for
+  // the same reason: a task dated outside its own month_key is counted by one
+  // month and shown in another's calendar.
+  const span = Math.max(0, lastMs - baseMs);
   for (let i = 0; i < tasks.length; i++) {
-    // Clamped to the month's last day, for the same reason generating is: a
-    // task dated outside its own month_key is counted by one month and shown
-    // in another's calendar.
-    const at = Math.min(baseMs + i * SPACING_DAYS * DAY_MS, lastMs);
+    const at =
+      tasks.length <= 1
+        ? Math.min(baseMs, lastMs)
+        : Math.min(baseMs + Math.round((i * span) / (tasks.length - 1)), lastMs);
     const date = new Date(at).toISOString().slice(0, 10);
     if (await setTaskDate(tasks[i].id, date)) {
       moved++;
