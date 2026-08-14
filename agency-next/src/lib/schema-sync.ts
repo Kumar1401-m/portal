@@ -421,6 +421,35 @@ type TableSpec = { table: string; purpose: string; ddl: string };
 
 const EXPECTED_TABLES: TableSpec[] = [
   {
+    table: "expenses",
+    purpose:
+      "What the agency spends — salaries, subscriptions, ad budgets, rent — with the recurring ones due again on a date.",
+    ddl: `CREATE TABLE IF NOT EXISTS expenses (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      title        VARCHAR(200) NOT NULL,
+      category     VARCHAR(40) NOT NULL DEFAULT 'other',
+      amount       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      currency     CHAR(3) NOT NULL DEFAULT 'INR',
+      vendor       VARCHAR(150) DEFAULT NULL,
+      due_on       DATE NOT NULL,
+      paid_on      DATE DEFAULT NULL,
+      repeats      VARCHAR(12) NOT NULL DEFAULT 'once',
+      remind       TINYINT(1) NOT NULL DEFAULT 1,
+      remind_days  INT UNSIGNED NOT NULL DEFAULT 3,
+      client_id    BIGINT UNSIGNED DEFAULT NULL,
+      note         TEXT DEFAULT NULL,
+      created_by   BIGINT UNSIGNED DEFAULT NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_exp_due (due_on),
+      KEY idx_exp_paid (paid_on),
+      KEY idx_exp_category (category),
+      KEY idx_exp_client (client_id),
+      CONSTRAINT fk_exp_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "ad_insights",
     purpose:
       "One row per client per day of Meta ad spend, impressions and leads — what the Ad management board reads.",

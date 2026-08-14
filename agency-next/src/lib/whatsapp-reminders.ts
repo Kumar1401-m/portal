@@ -15,10 +15,13 @@
  * data, so a reminder can only ever say something the boards already say.
  */
 import "server-only";
-import { query, execute, hasColumn } from "./db";
+import { query, execute, hasColumn, hasTable } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { sendDueMessages } from "./reminder-outbox";
 import { recordRun } from "./automation-runs";
+import { notifyAdmins } from "./notify";
+import { expensesNeedingNotice } from "./expenses";
+import { money } from "./utils";
 import { paymentLinkForInvoice } from "./payment-links";
 import {
   approvalChaseText,
@@ -39,7 +42,13 @@ export type ReminderKind =
   | "footage_due"
   | "monthly_plan"
   | "invoice_due"
-  | "team_digest";
+  | "team_digest"
+  /**
+   * The agency's own bills. The only kind here that never leaves the
+   * building — it is claimed through the same table so it cannot be said
+   * twice in a morning, but it is delivered to the portal, not a group.
+   */
+  | "expense_due";
 
 export type ReminderSummary = {
   ran: boolean;
@@ -503,6 +512,48 @@ async function teamDigest(teamGroupId: string, today: string): Promise<{ sent: n
     : { sent: 0, failed: 1 };
 }
 
+/**
+ * The agency's own bills, said once a day to the agency.
+ *
+ * Not a client reminder — nothing here leaves the building. It goes to the
+ * portal's own notification list, so it works with no WhatsApp group linked
+ * and no phone connected, which is the difference between a reminder that
+ * exists and one that only exists on a good day.
+ *
+ * Claimed on the date like every other reminder, so two runs in one morning
+ * do not say it twice.
+ */
+async function expenseNotice(today: string): Promise<{ sent: number; failed: number }> {
+  if (!(await hasTable("expenses"))) return { sent: 0, failed: 0 };
+
+  const due = await expensesNeedingNotice();
+  if (due.length === 0) return { sent: 0, failed: 0 };
+  if (!(await claim("expense_due", `expenses:${today}`))) return { sent: 0, failed: 0 };
+
+  const late = due.filter((d) => d.overdue);
+  const total = due.reduce((n, d) => n + d.amount, 0);
+
+  // Named individually up to a point, because "3 payments due" makes somebody
+  // open the board to find out which — and past a handful the list is the
+  // thing nobody reads.
+  const named = due
+    .slice(0, 5)
+    .map((d) => `• ${d.title} — ${money(d.amount)}${d.overdue ? " (overdue)" : `, due ${d.due_on}`}`)
+    .join("\n");
+  const more = due.length > 5 ? `\n…and ${due.length - 5} more.` : "";
+
+  await notifyAdmins(
+    "general",
+    late.length > 0
+      ? `💸 ${late.length} payment${late.length === 1 ? " is" : "s are"} overdue`
+      : `💸 ${due.length} payment${due.length === 1 ? "" : "s"} coming up`,
+    `${money(total)} in total.
+${named}${more}`,
+    "/expenses"
+  );
+  return { sent: 1, failed: 0 };
+}
+
 /* ------------------------------------------------------------------ *
  * What the next run would do
  * ------------------------------------------------------------------ */
@@ -671,6 +722,9 @@ export async function runReminders(
     ["footage_due", requestFootage],
     ["monthly_plan", () => sendMonthlyPlan(month)],
     ["invoice_due", remindInvoices],
+    // The agency's own bills. Last, and internal — everything above this line
+    // goes to a client.
+    ["expense_due", () => expenseNotice(today)],
   ];
   if (opts.teamGroupId) steps.push(["team_digest", () => teamDigest(opts.teamGroupId!, today)]);
 

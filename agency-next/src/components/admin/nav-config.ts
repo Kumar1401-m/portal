@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Image as ImageIcon,
   CreditCard,
+  Wallet,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -68,6 +69,8 @@ export const NAV: NavItem[] = [
   { label: "Approvals", href: "/approvals", icon: CheckCircle2, roles: ADMIN_OR_CRM, ready: true },
   { label: "Posters", href: "/poster", icon: ImageIcon, roles: POSTER_BOARD, ready: true },
   { label: "Payments", href: "/payments", icon: CreditCard, roles: ADMIN, ready: true },
+  // Sits next to Payments on purpose: money in and money out are one question.
+  { label: "Expenses", href: "/expenses", icon: Wallet, roles: ADMIN, ready: true },
   { label: "Ad Management", href: "/ads", icon: Megaphone, roles: ADMIN_OR_CRM, ready: true },
   { label: "Team", href: "/team", icon: Gauge, roles: SUPER_ADMIN, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
