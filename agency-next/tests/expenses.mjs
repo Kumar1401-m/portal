@@ -225,4 +225,27 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("adding and correcting are the same form, and cannot drift apart");
 }
 
+/* ---------------- the dialog fits the screen it opens on ---------------- */
+{
+  const table = readFileSync(`${SRC}/app/(app)/expenses/expense-table.tsx`, "utf8");
+  const modal = readFileSync(`${SRC}/components/ui/modal.tsx`, "utf8");
+
+  // Modal is a flex column capped at 90vh, and that applies to its own
+  // children. A <form> dropped in between meant `flex-1 overflow-y-auto` and
+  // `shrink-0` were landing on children of the form instead — so the body
+  // never scrolled, the dialog grew past the viewport, and Save went off the
+  // bottom of the screen where nobody could reach it.
+  has(modal, "flex max-h-[90vh] w-full flex-col", "the shell caps and lays out its children");
+  has(table, 'className="flex min-h-0 flex-1 flex-col"', "so the form is that column, not a wrapper");
+
+  // min-h-0 is the other half: a flex child will not shrink below its content
+  // without it, whatever the overflow says.
+  has(table, 'className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"', "the body scrolls");
+  has(table, "flex shrink-0 items-center justify-end gap-2 border-t border-border p-4", "the footer stays put");
+
+  const brief = readFileSync(`${SRC}/app/(app)/content/brief-row.tsx`, "utf8");
+  has(brief, "min-h-0 flex-1", "and the other dialog is pinned the same way");
+  ok("a long dialog scrolls its body instead of pushing the buttons off-screen");
+}
+
 await finish(pass);

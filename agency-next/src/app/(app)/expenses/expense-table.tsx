@@ -313,12 +313,23 @@ function ExpenseDialog({
 
   return (
     <Modal open={open} onClose={onClose} title={row ? row.title : "Add an expense"}>
-      <form action={submit}>
+      {/*
+        The form has to be the flex column, not a plain wrapper inside it.
+
+        `Modal` is a flex column capped at 90vh, and it applies to its own
+        children. A <form> dropped in between meant the body's `flex-1
+        overflow-y-auto` and the footer's `shrink-0` were being applied to
+        children of the form instead — so the body never scrolled, the whole
+        thing grew past the viewport, and Save went off the bottom of the
+        screen. `min-h-0` is the other half: a flex child will not shrink below
+        its content without it, whatever the overflow says.
+      */}
+      <form action={submit} className="flex min-h-0 flex-1 flex-col">
         {row ? <input type="hidden" name="id" value={row.id} /> : null}
 
-        <div className="flex-1 space-y-5 overflow-y-auto p-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+          <div className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor={`${uid}-title`}>What is it for</Label>
               <Input
                 id={`${uid}-title`}
@@ -329,7 +340,7 @@ function ExpenseDialog({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-amount`}>Amount</Label>
               <Input
                 id={`${uid}-amount`}
@@ -341,7 +352,7 @@ function ExpenseDialog({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-due`}>Due on</Label>
               <Input
                 id={`${uid}-due`}
@@ -352,7 +363,7 @@ function ExpenseDialog({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-category`}>Category</Label>
               <Select
                 id={`${uid}-category`}
@@ -367,7 +378,7 @@ function ExpenseDialog({
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-repeats`}>Repeats</Label>
               <Select
                 id={`${uid}-repeats`}
@@ -383,7 +394,7 @@ function ExpenseDialog({
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-vendor`}>
                 Paid to <span className="font-normal text-muted-foreground">— optional</span>
               </Label>
@@ -395,7 +406,7 @@ function ExpenseDialog({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor={`${uid}-client`}>
                 Against a client{" "}
                 <span className="font-normal text-muted-foreground">— optional</span>
@@ -414,18 +425,24 @@ function ExpenseDialog({
               </Select>
             </div>
 
-            {/* Only where there is a payment to re-date. "I marked it today
-                but paid it on the 3rd" is a correction; un-paying is not
-                offered here — see updateExpenseAction for why. */}
+            {/* Only where there is a payment to re-date, and it lands on a row
+                of its own — so the empty half beside it says why un-paying is
+                not offered rather than just sitting there looking unfinished. */}
             {row?.paidOn ? (
-              <div className="space-y-2">
-                <Label htmlFor={`${uid}-paid`}>Paid on</Label>
-                <Input id={`${uid}-paid`} name="paid_on" type="date" defaultValue={row.paidOn} />
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${uid}-paid`}>Paid on</Label>
+                  <Input id={`${uid}-paid`} name="paid_on" type="date" defaultValue={row.paidOn} />
+                </div>
+                <p className="self-end pb-2.5 text-xs text-muted-foreground">
+                  Correcting the day it actually went out. To undo the payment itself, delete this
+                  one and add it again.
+                </p>
+              </>
             ) : null}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor={`${uid}-note`}>
               Note <span className="font-normal text-muted-foreground">— optional</span>
             </Label>
@@ -466,33 +483,23 @@ function ExpenseDialog({
               </label>
             )}
 
-            <label
-              htmlFor={`${uid}-remind`}
-              className="flex cursor-pointer items-start gap-2.5 text-sm"
-            >
-              <input
-                id={`${uid}-remind`}
-                type="checkbox"
-                name="remind"
-                value="1"
-                defaultChecked={row ? row.remind : true}
-                className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
-              />
-              <span>
-                Remind me before it is due
-                <span className="block text-xs text-muted-foreground">
-                  Shows on this board and in the daily reminder.
-                </span>
-              </span>
-            </label>
-
-            <div className="flex items-center gap-2 pl-7">
-              <Label
-                htmlFor={`${uid}-days`}
-                className="text-xs font-normal text-muted-foreground"
+            {/* The notice period sits on the same line as the switch it
+                belongs to. Stacked underneath it read as a third setting. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm">
+              <label
+                htmlFor={`${uid}-remind`}
+                className="flex cursor-pointer items-center gap-2.5"
               >
-                How many days before
-              </Label>
+                <input
+                  id={`${uid}-remind`}
+                  type="checkbox"
+                  name="remind"
+                  value="1"
+                  defaultChecked={row ? row.remind : true}
+                  className="h-4 w-4 accent-[var(--primary)]"
+                />
+                <span>Remind me</span>
+              </label>
               <Input
                 id={`${uid}-days`}
                 name="remind_days"
@@ -500,9 +507,16 @@ function ExpenseDialog({
                 min={0}
                 max={60}
                 defaultValue={row?.remindDays ?? 3}
-                className="w-20"
+                className="h-8 w-16"
+                aria-label="Days of notice before it is due"
               />
+              <Label htmlFor={`${uid}-days`} className="font-normal">
+                days before it is due
+              </Label>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Shows on this board and in the daily reminder.
+            </p>
           </div>
 
           {/* A repeating expense is a chain of rows, so a change here is a

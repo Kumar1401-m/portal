@@ -148,7 +148,7 @@ export function BriefRow({ row }: { row: CardRow }) {
         because the textarea is the tallest thing in the portal.
       */}
       <Modal open={open} onClose={() => setOpen(false)} title={title}>
-        <div className="flex-1 space-y-5 overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
           <div className="space-y-2">
             <div className="flex items-baseline justify-between gap-3">
               <Label htmlFor={`body-${row.id}`}>Content for this piece</Label>
