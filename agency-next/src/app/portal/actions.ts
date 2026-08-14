@@ -8,7 +8,7 @@ import { notifyAdmins } from "@/lib/notify";
 import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/posting";
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
 import { sendPaidInvoiceEmail } from "@/lib/email";
-import { ACCEPTS_RAW } from "@/lib/portal";
+import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/portal";
 import { getAgencyInbox } from "@/lib/settings";
 
 export type PortalActionState = { ok: boolean; error?: string; message?: string };
@@ -362,15 +362,22 @@ export async function submitRawFootage(
     return { ok: false, error: "We're already working on this one — send changes in the chat instead." };
   }
 
+  // Only a piece we actually asked for footage on becomes ready to edit. One
+  // sent ahead of the brief keeps its place in the queue — see rawUploadStatus.
+  const next = rawUploadStatus(d.status);
   await execute(
-    "UPDATE deliverables SET raw_drive_link = ?, status = 'raw_uploaded' WHERE id = ?",
-    [link, id]
+    next
+      ? "UPDATE deliverables SET raw_drive_link = ?, status = ? WHERE id = ?"
+      : "UPDATE deliverables SET raw_drive_link = ? WHERE id = ?",
+    next ? [link, next, id] : [link, id]
   );
 
   await notifyAdmins(
     "general",
     "Raw footage received",
-    `${d.title}: the client uploaded their raw footage — ready to edit.`,
+    next
+      ? `${d.title}: the client uploaded their raw footage — ready to edit.`
+      : `${d.title}: the client sent footage before we asked. The content still needs writing.`,
     `/deliverables/${id}`
   );
 
@@ -379,5 +386,10 @@ export async function submitRawFootage(
   revalidatePath(`/portal/content/${id}`);
   revalidatePath("/deliverables");
   revalidatePath("/today");
-  return { ok: true, message: "Thanks! Your raw footage was submitted — we'll start editing." };
+  return {
+    ok: true,
+    message: next
+      ? "Thanks! Your raw footage was submitted — we'll start editing."
+      : "Thanks! We have your footage and it's saved against this one.",
+  };
 }

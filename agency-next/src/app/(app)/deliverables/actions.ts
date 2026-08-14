@@ -28,6 +28,7 @@ import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/servic
 import { monthKey, autoTaskTitle } from "@/lib/utils";
 import { localTimeToUtc, scheduleDateToUtc } from "@/lib/posting";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
+import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/raw-footage";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
@@ -833,7 +834,15 @@ export async function submitRawOrReference(
   );
   if (!d) return { ok: false, error: "Task not found." };
   if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
-  if (d.status !== "waiting_for_raw") {
+  /*
+   * A slot nobody has written yet takes footage too.
+   *
+   * The client portal and the WhatsApp handler have always accepted both —
+   * a client who already has the footage should not have to wait to be asked
+   * for it. The agency's own form was the one place that refused, so a link a
+   * client had sent by any other route could not be pasted in here.
+   */
+  if (!(ACCEPTS_RAW as readonly string[]).includes(d.status)) {
     return { ok: false, error: "This task isn't waiting for raw footage." };
   }
 
@@ -846,7 +855,10 @@ export async function submitRawOrReference(
     return { ok: false, error: "Raw footage link must be a valid URL." };
   }
 
-  const updates: Record<string, string | null> = { status: "raw_uploaded" };
+  // Ready to edit only if we had asked for it. Footage against a brief nobody
+  // has written keeps its place in the content queue — see rawUploadStatus.
+  const next = rawUploadStatus(d.status);
+  const updates: Record<string, string | null> = next ? { status: next } : {};
   if (rawLink) updates.raw_drive_link = rawLink;
   if (referenceLinks) updates.reference_links = referenceLinks;
 
@@ -860,9 +872,10 @@ export async function submitRawOrReference(
   revalidatePath(`/deliverables/${id}`);
   revalidatePath("/today");
 
+  const what = rawLink ? "Raw footage added" : "Reference links added";
   return {
     ok: true,
-    message: rawLink ? "Raw footage added — ready to edit." : "Reference links added — ready to edit.",
+    message: next ? `${what} — ready to edit.` : `${what}. The content still needs writing.`,
   };
 }
 

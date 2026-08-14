@@ -4,9 +4,17 @@ import { SERVICE_LIST, type ServiceKey } from "@/lib/services";
 import type { ServiceCounts } from "@/lib/deliverables";
 
 /**
- * The task-organisation tab bar: All Tasks · Videos · Posters · Website ·
- * Meta Ads · Content · Social. Picking a tab narrows the list to that service
- * only — no mixed task types.
+ * The task-organisation tab bar: All Tasks, then one tab per service in use.
+ * Picking a tab narrows the list to that service only — no mixed task types.
+ *
+ * A service with nothing in it gets no tab. Every agency runs two or three of
+ * these and the rest read "Meta Ads 0 · Content 0" on every board for ever —
+ * a permanent offer of an empty list, taking up the width the tabs that do
+ * something need. They come back on their own the moment a task exists, so
+ * nothing is hidden and nothing has to be configured.
+ *
+ * The active tab is always shown, even at zero: filtering to a service and
+ * having its tab disappear underneath you leaves no way back to it.
  *
  * Plain links so the whole thing works without JS and stays bookmarkable.
  * Other active filters carry across; `category` is dropped because category
@@ -56,7 +64,7 @@ export function ServiceTabs({
         </span>
       </Link>
 
-      {SERVICE_LIST.map((s) => (
+      {SERVICE_LIST.filter((s) => counts[s.key] > 0 || active === s.key).map((s) => (
         <Link key={s.key} href={href(s.key)} className={tabClass(active === s.key, s.tab)}>
           <span className={cn("h-2 w-2 rounded-full", s.dot)} />
           {s.short}

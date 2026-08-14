@@ -10,6 +10,7 @@ import {
   type RawFootageState,
 } from "./actions";
 import type { DeliverableListRow } from "@/lib/deliverables";
+import { acceptsRaw } from "@/lib/raw-footage";
 import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload, CaptionLine, type CaptionNote } from "./video-upload";
@@ -173,12 +174,12 @@ export function EditVideoModal({
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
-        {d.status === "waiting_for_raw" ? (
+        {acceptsRaw(d.status) ? (
           <form action={rawAction} className="shrink-0 space-y-3 border-b border-border bg-amber-500/5 p-6">
             <input type="hidden" name="deliverable_id" value={d.id} />
             <div className="flex items-center gap-2 text-sm font-medium">
               <UploadCloud className="h-4 w-4 text-amber-600" />
-              Waiting for raw footage
+              {d.status === "waiting_for_raw" ? "Waiting for raw footage" : "Raw footage"}
             </div>
             <p className="text-xs text-muted-foreground">
               Add the client&apos;s raw footage link, or — if none was provided — paste

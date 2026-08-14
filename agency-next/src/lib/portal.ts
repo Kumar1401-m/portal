@@ -4,18 +4,13 @@ import { query, queryOne, hasColumn } from "./db";
 
 const n = (v: unknown) => Number(v ?? 0);
 
-/**
- * Statuses a client may still attach footage to.
- *
- * `waiting_for_raw` is the case where we asked for it. `pending` is a slot on
- * the month's plan that nobody has asked about yet — and a client who already
- * has the footage should not have to wait to be asked before sending the link.
- *
- * Lives here rather than beside the action because the dashboard query that
- * decides what to offer and the action that accepts it must agree; a button
- * offered and then refused is the worst version of this.
+/*
+ * Both rules live in `raw-footage.ts` — this module is server-only and the
+ * task dialog is a client component. Re-exported so the queries below and the
+ * pages that already import from here keep reading one definition.
  */
-export const ACCEPTS_RAW = ["waiting_for_raw", "pending"] as const;
+import { ACCEPTS_RAW } from "./raw-footage";
+export { ACCEPTS_RAW, rawUploadStatus } from "./raw-footage";
 
 const ACCEPTS_RAW_SQL = ACCEPTS_RAW.map((s) => `'${s}'`).join(",");
 

@@ -18,12 +18,13 @@ import { isAuthorizedWhatsAppRequest, unauthorized } from "@/lib/api-auth";
 import { clientForGroup } from "@/lib/whatsapp-approvals";
 import { query, execute } from "@/lib/db";
 import { notifyAdmins } from "@/lib/notify";
+import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/raw-footage";
 import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-/** Statuses a link may still be attached to — mirrors the portal's own rule. */
-const ACCEPTS_RAW = ["waiting_for_raw", "pending"];
+// The portal's own rule, imported rather than mirrored: two copies of a list
+// like this stay in step right up until one of them does not.
 
 export async function POST(request: Request) {
   if (!isAuthorizedWhatsAppRequest(request)) return unauthorized();
@@ -43,8 +44,8 @@ export async function POST(request: Request) {
   const clientId = await clientForGroup(groupId);
   if (!clientId) return Response.json({ ok: true, attached: false, text: null });
 
-  const [task] = await query<{ id: number; title: string }>(
-    `SELECT id, title FROM deliverables
+  const [task] = await query<{ id: number; title: string; status: string }>(
+    `SELECT id, title, status FROM deliverables
       WHERE client_id = ? AND status IN (${ACCEPTS_RAW.map(() => "?").join(",")})
         AND (raw_drive_link IS NULL OR raw_drive_link = '')
       ORDER BY due_date IS NULL, due_date ASC, id ASC LIMIT 1`,
@@ -56,9 +57,14 @@ export async function POST(request: Request) {
   // announcing "received!" over a link to a news article is worse than silence.
   if (!task) return Response.json({ ok: true, attached: false, text: null });
 
+  // A piece we asked for footage on is ready to edit; one sent ahead of the
+  // brief keeps its place in the queue.
+  const next = rawUploadStatus(task.status);
   await execute(
-    "UPDATE deliverables SET raw_drive_link = ?, status = 'raw_uploaded' WHERE id = ?",
-    [link, task.id]
+    next
+      ? "UPDATE deliverables SET raw_drive_link = ?, status = ? WHERE id = ?"
+      : "UPDATE deliverables SET raw_drive_link = ? WHERE id = ?",
+    next ? [link, next, task.id] : [link, task.id]
   );
 
   await notifyAdmins(
