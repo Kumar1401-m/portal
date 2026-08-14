@@ -178,7 +178,7 @@ function PropertySection({
         </div>
       ) : null}
 
-      <WriteList rows={[...property.toWrite, ...property.ready]} group={group} />
+      <WriteList rows={[...property.toWrite, ...property.ready]} />
 
       {/* Handing work to our own team is not the same act as putting something
           in front of a client, so it is not held to the same rule — otherwise
@@ -199,19 +199,12 @@ function PropertySection({
 }
 
 /** The briefs themselves — a line each, written in a popup. */
-function WriteList({ rows, group }: { rows: CardRow[]; group: CardGroup }) {
+function WriteList({ rows }: { rows: CardRow[] }) {
   if (rows.length === 0) return null;
   return (
     <div className="space-y-2">
       {rows.map((r) => (
-        <BriefRow
-          key={r.id}
-          row={r}
-          clientId={group.clientId}
-          canSend={group.canSend}
-          approvesContent={group.approvesContent}
-          hasGroup={group.hasGroup}
-        />
+        <BriefRow key={r.id} row={r} />
       ))}
     </div>
   );

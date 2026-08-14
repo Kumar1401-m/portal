@@ -5,7 +5,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { hasColumn, execute, query } from "@/lib/db";
 import { sendContentForApproval, suggestTitle, isPlaceholderTitle } from "@/lib/content";
-import { notifyUser } from "@/lib/notify";
+import { notifyUser, notifyAdmins } from "@/lib/notify";
 import { changeStatusAction } from "../deliverables/actions";
 
 export type ContentState = {
@@ -315,5 +315,68 @@ export async function recordContentDecisionAction(
     ok: true,
     message: `${done} ${done === 1 ? "piece" : "pieces"} ${what}.`,
     ...(firstError ? { error: `Some could not be updated: ${firstError}` } : {}),
+  };
+}
+
+/**
+ * Hand a written brief to the super admin.
+ *
+ * The writer's last step, and deliberately not a send to the client. Whether
+ * a piece goes to the client for sign-off or straight to the team is a
+ * decision about that client, and it is the super admin's — so the brief goes
+ * to Approvals with both buttons on it rather than out of the building on the
+ * word of whoever typed it.
+ *
+ * No status change. "Written but not sent" is already expressible — `pending`
+ * with a description — and the alternative is a new value in an ENUM, which
+ * means a migration and a feature that stays off until somebody runs it. The
+ * Approvals tab selects on exactly that pair.
+ */
+export async function submitForApprovalAction(
+  _prev: ContentState,
+  fd: FormData
+): Promise<ContentState> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  const id = Number(fd.get("deliverable_id"));
+  if (!id) return { ok: false, error: "Missing task." };
+
+  const row = await query<{
+    client_id: number;
+    title: string;
+    description: string | null;
+    company_name: string;
+  }>(
+    `SELECT d.client_id, d.title, d.description, c.company_name
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE d.id = ? AND d.status = 'pending'`,
+    [id]
+  );
+  if (row.length === 0) return { ok: false, error: "This piece is no longer waiting to be written." };
+  if (!(await canAccessClient(user, row[0].client_id))) return { ok: false, error: "Not authorized." };
+  if (!(row[0].description ?? "").trim()) return { ok: false, error: "There is no content to send." };
+
+  /*
+   * Not when the super admin wrote it themselves.
+   *
+   * Telling somebody their own action happened is how a notification list
+   * becomes noise, and it is already on their Approvals board either way.
+   */
+  if (user.role !== "super_admin") {
+    await notifyAdmins(
+      "general",
+      "📝 Content ready to review",
+      `${user.name} finished the content for "${row[0].title}" (${row[0].company_name}).`,
+      "/approvals?tab=written"
+    ).catch(() => {});
+  }
+
+  revalidatePath("/content");
+  revalidatePath("/approvals");
+  return {
+    ok: true,
+    message:
+      user.role === "super_admin"
+        ? "Saved. It's on your Approvals board under Content ready."
+        : "Sent for approval — it's with the super admin now.",
   };
 }

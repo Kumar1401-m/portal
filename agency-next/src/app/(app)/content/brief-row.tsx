@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, Loader2, PenLine, Send, Sparkles, Users } from "lucide-react";
+import { Check, Loader2, PenLine, Send, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
 import { fmtDate } from "@/lib/utils";
-import { saveBriefAction, sendContentAction, handToTeamAction, type ContentState } from "./actions";
+import { saveBriefAction, submitForApprovalAction, type ContentState } from "./actions";
 
 export type CardRow = {
   id: number;
@@ -36,21 +36,7 @@ export type CardRow = {
  * where the writing happens. Same on every other board in the portal, which
  * is the other half of the reason.
  */
-export function BriefRow({
-  row,
-  clientId,
-  canSend,
-  approvesContent,
-  hasGroup,
-}: {
-  row: CardRow;
-  clientId: number;
-  /** Putting something in front of a client is a super admin's, and their crm's. */
-  canSend: boolean;
-  /** False where this client's sign-off is switched off on their record. */
-  approvesContent: boolean;
-  hasGroup: boolean;
-}) {
+export function BriefRow({ row }: { row: CardRow }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(row.title);
   const [body, setBody] = useState(row.description ?? "");
@@ -95,26 +81,29 @@ export function BriefRow({
       }
 
       const out = new FormData();
-      out.set("client_id", String(clientId));
-      out.append("ids", String(row.id));
-      const sent: ContentState = approvesContent
-        ? await sendContentAction({ ok: false }, out)
-        : await handToTeamAction({ ok: false }, out);
+      out.set("deliverable_id", String(row.id));
+      const sent: ContentState = await submitForApprovalAction({ ok: false }, out);
       if (sent.ok) {
         setOpen(false);
-        toast({ title: sent.message ?? "Sent." });
+        toast({ title: sent.message ?? "Sent for approval." });
       } else {
-        // Saved but not sent, and said so — the copy is safe, and the reason
-        // it did not go is usually something they can fix.
-        toast({ title: `Saved, but not sent: ${sent.error}`, tone: "error" });
+        // Saved but not submitted, and said so — the copy is safe either way.
+        toast({ title: `Saved, but not submitted: ${sent.error}`, tone: "error" });
       }
     });
   };
 
   const save = () => run("close");
-  /* Nothing to send until something is written, and nowhere to send it to
-     without a group. Both said on the button rather than after pressing it. */
-  const canSendThis = body.trim().length > 0 && (approvesContent ? canSend && hasGroup : true);
+  /*
+   * The only bar is having written something.
+   *
+   * It used to also require the right role and a linked WhatsApp group,
+   * because the button sent to the client. It does not any more — it hands
+   * the piece to the super admin, and whether it then goes to the client or
+   * straight to the team is their decision, made on the Approvals page where
+   * those two buttons live.
+   */
+  const canSendThis = body.trim().length > 0;
 
   const preview = body.trim().replace(/\s+/g, " ");
 
@@ -176,40 +165,44 @@ export function BriefRow({
             />
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-              Cancel
-            </Button>
-            {/* Kept, because writing half a month before sending any of it is
-                a real way to work — and because a piece may need a second
-                pass before anyone outside sees it. */}
-            <Button variant="outline" onClick={save} disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Save
-            </Button>
-            <Button onClick={() => run("send")} disabled={pending || !canSendThis}>
-              {pending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : approvesContent ? (
-                <Send className="h-4 w-4" />
-              ) : (
-                <Users className="h-4 w-4" />
-              )}
-              {approvesContent ? "Save & send for approval" : "Save & hand to the team"}
-            </Button>
+          {/* One row, and the hint above it rather than hanging off the
+              right-hand edge under a button. */}
+          <div className="space-y-2 border-t border-border pt-3">
+            {!canSendThis ? (
+              <p className="text-xs text-muted-foreground">
+                Write the content before sending it for approval.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Goes to Approvals for a super admin to read. They decide whether it goes to the
+                client or straight to the team.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+                Cancel
+              </Button>
+              {/* Kept, because writing half a month before submitting any of
+                  it is a real way to work — and because a piece may need a
+                  second pass before anyone else reads it. */}
+              <Button variant="outline" onClick={save} disabled={pending}>
+                {pending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Save
+              </Button>
+              <Button onClick={() => run("send")} disabled={pending || !canSendThis}>
+                {pending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Save &amp; send for approval
+              </Button>
+            </div>
           </div>
-
-          {/* Why the button above is off, when it is. Silence would read as a
-              broken button. */}
-          {!canSendThis ? (
-            <p className="text-right text-xs text-muted-foreground">
-              {body.trim().length === 0
-                ? "Write the content first."
-                : !canSend
-                  ? "A super admin sends content to the client."
-                  : "No WhatsApp group linked for this client — add one under Settings → WhatsApp."}
-            </p>
-          ) : null}
         </div>
       </Modal>
     </>

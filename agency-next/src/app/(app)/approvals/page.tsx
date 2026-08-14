@@ -11,6 +11,7 @@ import { ApprovalBoard } from "./approval-board";
 import { crmClientIds } from "@/lib/crm";
 import { isServiceKey } from "@/lib/services";
 import { quickStatus } from "../deliverables/actions";
+import { sendContentToClient, approveContentToTeam } from "../content/approval-actions";
 import { Card } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
@@ -21,7 +22,7 @@ import { fmtDate, cn } from "@/lib/utils";
 export const metadata = { title: "Approvals · NVK Hub" };
 export const dynamic = "force-dynamic";
 
-type TabKey = "content" | "final" | "changes" | "approved" | "scheduled" | "posted";
+type TabKey = "written" | "content" | "final" | "changes" | "approved" | "scheduled" | "posted";
 
 const TABS: {
   key: TabKey;
@@ -30,7 +31,18 @@ const TABS: {
   action?: { label: string; status: string };
   /** Match on either posted column rather than the workflow status alone. */
   postedEither?: boolean;
+  /** Written and waiting on the super admin, who decides where it goes next. */
+  contentWritten?: boolean;
 }[] = [
+  /*
+   * First, because it is the step before everything below it.
+   *
+   * Somebody writes the copy and it lands here. The super admin reads it and
+   * makes the one decision that is theirs: to the client for sign-off, or
+   * straight to the team. Those two buttons are on the rows rather than in
+   * the single `action` slot, because this is the one tab with a choice on it.
+   */
+  { key: "written", label: "Content ready", status: "pending", contentWritten: true },
   { key: "content", label: "Content review", status: "content_review", action: { label: "Approve content", status: "approved" } },
   { key: "final", label: "Final review", status: "review", action: { label: "Approve", status: "approved" } },
   { key: "changes", label: "Changes requested", status: "changes_requested", action: { label: "Mark resolved", status: "resolved" } },
@@ -64,9 +76,15 @@ export default async function ApprovalsPage({
   const active = (TABS.find((t) => t.key === sp.tab) ?? TABS[0]) as (typeof TABS)[number];
   const service = isServiceKey(sp.service) ? sp.service : null;
   const scopeIds = await crmClientIds(user);
+  // Putting something in front of a client, and releasing it past them, are
+  // both the super admin's — and their crm's, for their own clients.
+  const canSend = user.role === "super_admin" || user.role === "crm";
+  const scope = { service: service ?? undefined, crmClientIds: scopeIds };
   const filters = active.postedEither
-    ? { postedEither: true, service: service ?? undefined, crmClientIds: scopeIds }
-    : { status: active.status, service: service ?? undefined, crmClientIds: scopeIds };
+    ? { postedEither: true, ...scope }
+    : active.contentWritten
+      ? { contentWritten: true, ...scope }
+      : { status: active.status, ...scope };
 
   const [rows, counts, serviceCounts, waRows, waCounts] = await Promise.all([
     getDeliverables(filters),
@@ -168,7 +186,26 @@ export default async function ApprovalsPage({
                   </TD>
                   <TD className="text-muted-foreground">{fmtDate(d.due_date)}</TD>
                   <TD>
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {/* The super admin's choice, and the only place it is
+                          offered: to the client for sign-off, or past them
+                          and straight to whoever makes it. */}
+                      {active.contentWritten && canSend ? (
+                        <>
+                          <form action={sendContentToClient}>
+                            <input type="hidden" name="deliverable_id" value={d.id} />
+                            <Button type="submit" size="sm">
+                              Send to client
+                            </Button>
+                          </form>
+                          <form action={approveContentToTeam}>
+                            <input type="hidden" name="deliverable_id" value={d.id} />
+                            <Button type="submit" size="sm" variant="secondary">
+                              Approve — to the team
+                            </Button>
+                          </form>
+                        </>
+                      ) : null}
                       {active.action ? (
                         <form action={quickStatus}>
                           <input type="hidden" name="deliverable_id" value={d.id} />

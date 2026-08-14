@@ -54,6 +54,8 @@ export type DeliverableFilters = {
   q?: string;
   /** Posted by the publisher or by hand — see buildWhere. */
   postedEither?: boolean;
+  /** Written but not sent: the super admin's content queue. */
+  contentWritten?: boolean;
   today?: boolean; // due today or overdue, still open
   /** Dated after today and still open — what the Today board falls back to. */
   upcoming?: boolean;
@@ -120,6 +122,16 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
    */
   if (f.postedEither) {
     conds.push("(d.posting_status = 'posted' OR d.status IN ('posted','completed'))");
+  }
+  /*
+   * The content the super admin has to read.
+   *
+   * Not a status of its own. "Written but not sent" is already expressible as
+   * `pending` with a description, and the alternative is a new value in an
+   * ENUM — a migration, and a feature switched off until somebody runs it.
+   */
+  if (f.contentWritten) {
+    conds.push("d.status = 'pending' AND TRIM(COALESCE(d.description,'')) <> ''");
   }
   if (f.month) {
     conds.push("d.month_key = ?");
@@ -307,12 +319,14 @@ export type ApprovalCounts = {
   approved: number;
   scheduled: number;
   posted: number;
+  /** Written and waiting on the super admin — see buildWhere. */
+  written: number;
 };
 
 /** Counts for the Approvals worklist tabs (churned clients excluded). */
 export async function getApprovalCounts(crmClientIds?: number[] | null): Promise<ApprovalCounts> {
   if (crmClientIds && crmClientIds.length === 0) {
-    return { content: 0, final: 0, changes: 0, approved: 0, scheduled: 0, posted: 0 };
+    return { content: 0, final: 0, changes: 0, approved: 0, scheduled: 0, posted: 0, written: 0 };
   }
   const scope =
     crmClientIds && crmClientIds.length
@@ -325,7 +339,8 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
        COALESCE(SUM(d.status = 'changes_requested'),0)  AS changes,
        COALESCE(SUM(d.status = 'approved'),0)           AS approved,
        COALESCE(SUM(d.status = 'scheduled'),0)          AS scheduled,
-       COALESCE(SUM(d.posting_status = 'posted' OR d.status IN ('posted','completed')),0) AS posted
+       COALESCE(SUM(d.posting_status = 'posted' OR d.status IN ('posted','completed')),0) AS posted,
+       COALESCE(SUM(d.status = 'pending' AND TRIM(COALESCE(d.description,'')) <> ''),0) AS written
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status != 'churned' ${scope}`,
     crmClientIds && crmClientIds.length ? crmClientIds : []
@@ -337,6 +352,7 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
     approved: n(row?.approved),
     scheduled: n(row?.scheduled),
     posted: n(row?.posted),
+    written: n(row?.written),
   };
 }
 
