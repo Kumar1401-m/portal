@@ -46,11 +46,19 @@ const interleave = (videos, posters) => {
   return out;
 };
 
-const plan = (from, to, videos, posters) => {
+const startFor = (baseMs, lastMs, afterMs, total) => {
+  const tailMs = afterMs !== null ? Math.max(baseMs, afterMs + DAY_MS) : baseMs;
+  const roomFor = (fromMs) => lastMs - fromMs >= Math.max(0, total - 1) * DAY_MS;
+  if (total <= 1) return Math.min(tailMs, lastMs);
+  return tailMs <= lastMs && roomFor(tailMs) ? tailMs : baseMs;
+};
+
+const plan = (from, to, videos, posters, after = null) => {
   const seq = interleave(videos, posters);
-  const s = day(from);
-  const l = day(to);
-  return seq.map((k, i) => ({ kind: k, date: slotDate(i, seq.length, s, l) }));
+  const baseMs = day(from);
+  const lastMs = day(to);
+  const startMs = startFor(baseMs, lastMs, after ? day(after) : null, seq.length);
+  return seq.map((k, i) => ({ kind: k, date: slotDate(i, seq.length, startMs, lastMs) }));
 };
 
 /* ---------------- the month is divided by what goes in it ---------------- */
@@ -119,6 +127,32 @@ const plan = (from, to, videos, posters) => {
   ok("a month with more tasks than days spreads them, rather than stacking the end");
 }
 
+/* ---------------- and a month with no room left does not stack ---------------- */
+{
+  // The regression, and it appeared on the second press of the button. The old
+  // two-day spacing clamped overflow onto the month’s last day, so a great
+  // many months already hold a task dated the 31st — and a month generated in
+  // full has one by design. Continuing after that leaves a window of nothing,
+  // every new task rounds to the same date, and ten videos land on one day.
+  for (const after of ["2026-08-31", "2026-08-30", "2026-08-28"]) {
+    const p = plan("2026-08-01", "2026-08-31", 10, 0, after);
+    const days = new Set(p.map((t) => t.date));
+    assert.equal(days.size, 10, `ten tasks on ten days, not one (already ends ${after})`);
+  }
+
+  // Where there is room, the top-up still continues the month rather than
+  // restarting it — which is the behaviour the fallback must not swallow.
+  const roomy = plan("2026-08-01", "2026-08-31", 5, 0, "2026-08-10");
+  assert.equal(roomy[0].date, "2026-08-11", "a top-up with room starts after what is there");
+  assert.equal(roomy.at(-1).date, "2026-08-31");
+
+  // One extra piece belongs at the end of the month, not back at a first that
+  // has usually already passed.
+  const one = plan("2026-08-01", "2026-08-31", 1, 0, "2026-08-31");
+  assert.equal(one[0].date, "2026-08-31", "a single top-up lands on the last day");
+  ok("a second press spreads across the month instead of piling onto one day");
+}
+
 /* ---------------- the module still contains what was tested --------------- */
 {
   has("const slotDate = (i: number, total: number): string => {", "the spread is where it was");
@@ -126,6 +160,9 @@ const plan = (from, to, videos, posters) => {
   has("const interleave = (videos: number, posters: number): ServiceKey[] =>", "so is the ordering");
   has("(v + 0.5) / videos <= (p + 0.5) / posters", "by whichever is furthest behind its share");
   has("const sequence = interleave(wantVideos, wantPosters);", "and one pass writes the rows");
+  has("const roomFor = (fromMs: number) =>", "the fallback is where it was");
+  has("tailMs <= lastMs && roomFor(tailMs)", "and chosen the same way");
+  has("Math.min(tailMs, lastMs)", "with a single top-up landing at the end of the month");
   // The two-runs-sharing-a-cursor shape is what put all the videos first.
   assert.ok(
     !/await add\("video_editing"/.test(src),

@@ -85,4 +85,30 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("the super admin chooses, on the board they were told to look at");
 }
 
+/* ---------------- and the dialog is built the way the others are ---------------- */
+{
+  const brief = readFileSync(`${SRC}/app/(app)/content/brief-row.tsx`, "utf8");
+
+  // Modal owns the header and nothing else — it renders children with no
+  // padding — so a caller that drops a stack of fields in gets labels and
+  // inputs flush against the card edges and a footer running off the right.
+  const modal = readFileSync(`${SRC}/components/ui/modal.tsx`, "utf8");
+  assert.ok(modal.includes("{children}"), "the dialog shell pads nothing itself");
+
+  has(brief, "flex-1 space-y-5 overflow-y-auto p-6", "so the body pads and scrolls");
+  has(brief, "shrink-0", "and the footer stays put while it does");
+  has(brief, "border-t border-border p-4", "separated the way every other dialog is");
+
+  // The same two classes the task dialog uses, so the two cannot drift into
+  // looking like different products.
+  const other = readFileSync(`${SRC}/app/(app)/deliverables/edit-video-modal.tsx`, "utf8");
+  has(other, "overflow-y-auto p-6", "which is where the pattern comes from");
+  has(other, "border-t border-border p-4", "footer included");
+
+  // The rename notice is about something that has not happened yet, so it goes
+  // once the piece has a name.
+  has(brief, "{isPlaceholder ? (", "the naming notice is conditional");
+  ok("the write dialog is laid out like the rest of the portal");
+}
+
 await finish(pass);

@@ -94,6 +94,9 @@ export function BriefRow({ row }: { row: CardRow }) {
   };
 
   const save = () => run("close");
+  // Only worth saying while it is still true — once it has a name, the notice
+  // is a sentence about something that already happened.
+  const isPlaceholder = /^(video|poster|reel|post)\s*\d+$/i.test(title.trim());
   /*
    * The only bar is having written something.
    *
@@ -134,74 +137,97 @@ export function BriefRow({ row }: { row: CardRow }) {
         </Button>
       </div>
 
+      {/*
+        Body and footer, the way every other dialog in the portal is built.
+
+        `Modal` renders its children with no padding of its own — it owns the
+        header and nothing else — so a caller that just drops a stack of
+        fields in gets exactly what this one had: labels and inputs flush
+        against the edges, and the footer text running off the right of the
+        card. The body scrolls and the buttons stay put, which matters here
+        because the textarea is the tallest thing in the portal.
+      */}
       <Modal open={open} onClose={() => setOpen(false)} title={title}>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor={`body-${row.id}`}>Content for this piece</Label>
+        <div className="flex-1 space-y-5 overflow-y-auto p-6">
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <Label htmlFor={`body-${row.id}`}>Content for this piece</Label>
+              {/* Counted because it goes out on WhatsApp, where length is the
+                  difference between one message and three. */}
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                {body.trim().length} characters
+              </span>
+            </div>
             <Textarea
               id={`body-${row.id}`}
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              rows={10}
+              rows={9}
               autoFocus
               placeholder="Exactly as the client should read it."
+              className="min-h-[12rem] resize-y leading-relaxed"
             />
             {/* Said once, here, because it happens on save and would otherwise
                 look like the portal renaming things on its own. */}
-            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-              <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
-              Pieces still called &ldquo;Video 6&rdquo; get a proper name from this copy when you
-              save. Rename it yourself on the task page and we&apos;ll leave it alone.
-            </p>
+            {isPlaceholder ? (
+              <p className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                <span>
+                  This piece is still called <span className="font-medium">{title}</span>. Saving
+                  gives it a proper name from what you write here — rename it yourself on the task
+                  page and we&apos;ll leave it alone.
+                </span>
+              </p>
+            ) : null}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor={`prop-${row.id}`}>Property or project</Label>
+          <div className="space-y-2">
+            <Label htmlFor={`prop-${row.id}`}>
+              Property or project{" "}
+              <span className="font-normal text-muted-foreground">— optional</span>
+            </Label>
             <Input
               id={`prop-${row.id}`}
               value={property}
               onChange={(e) => setProperty(e.target.value)}
-              placeholder="Optional — groups this with the rest of that property's content"
+              placeholder="Green Meadows"
             />
+            <p className="text-xs text-muted-foreground">
+              Groups this with the rest of that property&apos;s content, and names the message the
+              client receives.
+            </p>
           </div>
+        </div>
 
-          {/* One row, and the hint above it rather than hanging off the
-              right-hand edge under a button. */}
-          <div className="space-y-2 border-t border-border pt-3">
-            {!canSendThis ? (
-              <p className="text-xs text-muted-foreground">
-                Write the content before sending it for approval.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Goes to Approvals for a super admin to read. They decide whether it goes to the
-                client or straight to the team.
-              </p>
-            )}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-                Cancel
-              </Button>
-              {/* Kept, because writing half a month before submitting any of
-                  it is a real way to work — and because a piece may need a
-                  second pass before anyone else reads it. */}
-              <Button variant="outline" onClick={save} disabled={pending}>
-                {pending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="h-4 w-4" />
-                )}
-                Save
-              </Button>
-              <Button onClick={() => run("send")} disabled={pending || !canSendThis}>
-                {pending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                Save &amp; send for approval
-              </Button>
-            </div>
+        <div className="flex shrink-0 flex-col gap-3 border-t border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            {canSendThis
+              ? "Sending puts this on Approvals for a super admin to read."
+              : "Write the content before sending it for approval."}
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            {/* Kept, because writing half a month before submitting any of it
+                is a real way to work — and because a piece may need a second
+                pass before anyone else reads it. */}
+            <Button variant="outline" onClick={save} disabled={pending}>
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+            <Button onClick={() => run("send")} disabled={pending || !canSendThis}>
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Send for approval
+            </Button>
           </div>
         </div>
       </Modal>

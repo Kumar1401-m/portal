@@ -191,8 +191,35 @@ export async function generateMonthTasks(
   const lastMs = day(bounds.last);
   const afterMs = bounds.after ? day(bounds.after) : null;
 
-  // Start after whatever is already there, but never before the base date.
-  const startMs = afterMs !== null ? Math.max(baseMs, afterMs + DAY_MS) : baseMs;
+  /*
+   * Where the new run starts.
+   *
+   * After whatever is already there, so topping up continues the month rather
+   * than restarting it — but only while there is room left to continue into.
+   *
+   * There often is not. The old two-day spacing clamped any overflow onto the
+   * month's last day, so a great many months already hold a task dated the
+   * 31st; and a month generated in full has one by design. Starting after that
+   * leaves a window of nothing, every new task rounds to the same date, and
+   * ten videos land on one day — which is the bug this whole change was
+   * supposed to fix, reappearing on the second press of the button.
+   *
+   * So the tail is used only if it can hold what is going into it. Otherwise
+   * the run spreads across the whole of what is left of the month and shares
+   * some days with the tasks already there. Two on a day is a real answer;
+   * ten on one is not.
+   */
+  const totalToAdd = wantVideos + wantPosters;
+  const tailMs = afterMs !== null ? Math.max(baseMs, afterMs + DAY_MS) : baseMs;
+  const roomFor = (fromMs: number) => lastMs - fromMs >= Math.max(0, totalToAdd - 1) * DAY_MS;
+  const startMs =
+    totalToAdd <= 1
+      ? // One extra piece added to a month belongs at the end of it, not back
+        // at a first that has usually already passed.
+        Math.min(tailMs, lastMs)
+      : tailMs <= lastMs && roomFor(tailMs)
+        ? tailMs
+        : baseMs;
 
   /*
    * The month is divided by how much goes in it, not filled two days at a time.
