@@ -560,9 +560,20 @@ export type ApprovalResult = {
   videoCode?: string;
   alreadyRecorded?: boolean;
   deliverableId?: number;
-  title?: string;
+  title?: string | null;
   clientId?: number;
   status?: string;
+  /**
+   * What the client was answering about.
+   *
+   * "video" is the default and everything that came before this. "content" is
+   * the month’s written copy, which is answered as a batch and needs a
+   * different acknowledgement — "we’ll get it scheduled for posting" is the
+   * wrong sentence when nothing has been made yet.
+   */
+  kind?: "video" | "content";
+  /** How many pieces the answer covered. Content only. */
+  count?: number;
 };
 
 /** How a WhatsApp verdict maps onto the portal's own workflow status. */
@@ -602,6 +613,37 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
     if (!input.groupId) {
       return { ok: false, error: "No video code, and no group to work it out from." };
     }
+
+    /*
+     * Content first, when there is content waiting.
+     *
+     * A client who has just been sent the month's copy and replies "ok" is
+     * answering that, not a video from last week. It is checked before the
+     * video path because content is the thing most recently put in front of
+     * them, and because a video awaiting approval always carries a code the
+     * client can name if they mean that one instead.
+     *
+     * This is the whole reason a perfectly good "ok" came back as "there's
+     * nothing waiting for approval in this group": the resolver only ever
+     * looked at videos.
+     */
+    const content = await recordContentVerdict({
+      groupId: input.groupId,
+      command: input.command,
+      comment: input.comment,
+      message: input.message,
+      approvedBy: input.approvedBy,
+    });
+    if (content.ok) {
+      return {
+        ok: true,
+        kind: "content",
+        count: content.count,
+        title: content.titles[0] ?? null,
+        status: input.command === "approve" ? "waiting_for_raw" : "pending",
+      };
+    }
+
     const resolved = await resolveVideoForGroup(input.groupId);
     if (!resolved.ok) {
       if (resolved.reason === "none") {
@@ -1187,4 +1229,156 @@ export async function getVideoTimeline(deliverableId: number): Promise<TimelineS
       done: d.status === "posted" || d.status === "completed",
     },
   ];
+}
+
+/* ------------------------------------------------------------------ *
+ * Content approval, which is a different shape of answer
+ * ------------------------------------------------------------------ */
+
+/**
+ * The written content this group is currently being asked about.
+ *
+ * Not resolvable through `resolveVideoForGroup`, and it never could be. That
+ * path is keyed on a video code, which is allocated when a *finished video*
+ * is sent for approval — content is sent as text, has no code, and does not
+ * touch `wa_status` at all. So a client replying "ok" to a month of content
+ * was told there was nothing waiting for approval in their group, which from
+ * their side is the portal ignoring an answer it asked for.
+ *
+ * And it is deliberately a list rather than one row. Content goes out as a
+ * batch — fifteen pieces, numbered, under one "reply OK to approve" — so the
+ * answer is about all of them. Resolving it to a single piece would be the
+ * wrong question, and asking the client which one they meant would be
+ * answering a question they were never asked.
+ */
+export async function contentAwaitingInGroup(groupId: string): Promise<
+  { id: number; title: string; client_id: number; assigned_to: number | null; company_name: string }[]
+> {
+  return query(
+    `SELECT d.id, d.title, d.client_id, d.assigned_to, c.company_name
+       FROM deliverables d
+       JOIN clients c ON c.id = d.client_id
+       JOIN whatsapp_groups g ON g.client_id = c.id AND g.is_active = 1
+      WHERE g.group_id = ?
+        AND d.status = 'content_review'
+      ORDER BY d.due_date IS NULL, d.due_date ASC, d.id ASC
+      LIMIT 50`,
+    [groupId]
+  );
+}
+
+/**
+ * A client's verdict on the content, applied to everything it was about.
+ *
+ * The transitions mirror the two gates the portal already has, because they
+ * are the same gates — this is the client pressing them from WhatsApp rather
+ * than the super admin pressing them on the Approvals board:
+ *
+ *   approve → `waiting_for_raw`, which is where the content gate leaves a
+ *             task and the point at which it becomes the maker's.
+ *   change  → back to `pending`, the content desk, with what they said
+ *             attached. Not `changes_requested`: that status belongs to the
+ *             finished work, and a brief that needs rewriting has to land
+ *             where briefs are written or nobody will find it.
+ *   reject  → `cancelled`, since a rejected brief is not work anybody should
+ *             carry on with.
+ */
+export async function recordContentVerdict(input: {
+  groupId: string;
+  command: "approve" | "change" | "reject";
+  comment?: string | null;
+  message?: string | null;
+  approvedBy?: string | null;
+}): Promise<{ ok: true; count: number; titles: string[] } | { ok: false; error: string }> {
+  const items = await contentAwaitingInGroup(input.groupId);
+  if (items.length === 0) return { ok: false, error: "no content waiting" };
+
+  const ids = items.map((i) => i.id);
+  const nextStatus =
+    input.command === "approve" ? "waiting_for_raw" : input.command === "change" ? "pending" : "cancelled";
+
+  const reason = (input.comment ?? "").trim() || null;
+  await execute(
+    `UPDATE deliverables
+        SET status = ?, approval_status = ?, reject_reason = ?
+      WHERE id IN (${ids.join(",")})`,
+    [
+      nextStatus,
+      input.command === "approve" ? "pending" : input.command === "change" ? "changes_requested" : "rejected",
+      input.command === "approve" ? null : reason,
+      ]
+  );
+
+  /*
+   * Their own words on every piece, in the thread the team reads.
+   *
+   * The same reasoning as a change requested on a video: the banner carries
+   * the reason, but the conversation is what the task page and the queues
+   * actually show, and a change that only exists in a banner gets missed.
+   */
+  if (input.command !== "approve") {
+    const said = (input.message ?? "").trim();
+    const body =
+      reason && said && reason !== said
+        ? `${reason}\n\n— ${input.approvedBy || "the client"}: "${said}"`
+        : reason || said || "The client asked for changes to the content.";
+    for (const i of items) {
+      await execute(
+        `INSERT INTO feedback (deliverable_id, author_id, author_role, message)
+         VALUES (?, NULL, 'client', ?)`,
+        [i.id, body]
+      ).catch(() => {});
+    }
+  }
+
+  for (const i of items) {
+    await execute(
+      "INSERT INTO approvals (deliverable_id, client_id, action, comment, actioned_by) VALUES (?,?,?,?,NULL)",
+      [i.id, i.client_id, input.command === "approve" ? "approved" : input.command, reason]
+    ).catch(() => {});
+  }
+
+  const who = input.approvedBy || "The client";
+  const company = items[0].company_name;
+
+  if (input.command === "approve") {
+    /*
+     * One notification per maker, not per piece.
+     *
+     * A month approved in one message is fifteen tasks and one designer, and
+     * fifteen identical alerts is how somebody turns notifications off.
+     */
+    const byPerson = new Map<number, typeof items>();
+    for (const i of items) {
+      if (!i.assigned_to) continue;
+      const list = byPerson.get(i.assigned_to) ?? [];
+      list.push(i);
+      byPerson.set(i.assigned_to, list);
+    }
+    for (const [personId, list] of byPerson) {
+      await notifyUser(
+        personId,
+        "general",
+        "✏️ Content approved — over to you",
+        list.length === 1
+          ? `${company} approved the content for "${list[0].title}". You can start on it.`
+          : `${company} approved ${list.length} pieces. They are in your list now.`,
+        list.length === 1 ? `/deliverables/${list[0].id}` : "/my-work"
+      ).catch(() => {});
+    }
+  }
+
+  await notifyAdmins(
+    "general",
+    input.command === "approve"
+      ? `✅ ${company} approved the content`
+      : input.command === "change"
+        ? `📝 ${company} asked for content changes`
+        : `🚫 ${company} rejected the content`,
+    `${who} answered about ${items.length} ${items.length === 1 ? "piece" : "pieces"}.` +
+      (reason ? `\n\n"${reason}"` : ""),
+    "/content"
+  ).catch(() => {});
+
+  return { ok: true, count: items.length, titles: items.map((i) => i.title) };
 }

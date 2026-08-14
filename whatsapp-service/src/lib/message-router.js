@@ -214,6 +214,27 @@ class MessageRouter {
    * the reply should say so.
    */
   async acknowledge(groupId, command, videoCode, data) {
+    /*
+     * Content is answered as a batch, and needs its own sentence.
+     *
+     * "We'll get it scheduled for posting" is the right thing to say about an
+     * approved video and the wrong thing to say about approved copy — nothing
+     * has been made yet. The portal tells us which kind this was, because only
+     * it knows what was in front of the client.
+     */
+    if (data?.kind === 'content') {
+      const n = Number(data.count) || 1;
+      const what = n === 1 ? 'the content' : `all ${n} pieces`;
+      const text =
+        command === 'approve'
+          ? `✅ Thank you! We have ${what} approved — the team will get started.`
+          : command === 'change'
+            ? `📝 Thank you — noted. We'll rework ${what} and send it back to you here.`
+            : `🚫 Understood. We've set ${what} aside and someone will be in touch.`;
+      await this.replySafely(groupId, text);
+      return;
+    }
+
     const title = data?.title ? ` — _${data.title}_` : '';
     // A code is shown only if there is one; the client no longer sees codes
     // and echoing "undefined" back at them would be worse than saying nothing.
