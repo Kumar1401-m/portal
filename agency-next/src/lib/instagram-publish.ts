@@ -32,6 +32,7 @@ import {
   type PublishQueueItem,
 } from "./instagram";
 import { sendTextToGroup } from "./whatsapp-service-client";
+import { publishToPage } from "./facebook";
 
 const GRAPH = "https://graph.facebook.com";
 
@@ -254,7 +255,37 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
     /* a missing link is cosmetic; the post and its media id are recorded */
   }
 
-  await tellTheClient(item, permalink);
+  /*
+   * And the same post on their Facebook Page.
+   *
+   * After the Instagram write, never before it, and never able to affect its
+   * outcome: the reel is live by this point and the row says so. A Page that
+   * refuses the video is something to record and show — marking the whole
+   * publish failed would invite a retry, and the retry would post to Instagram
+   * a second time.
+   *
+   * Meta is handed the same URL it has just fetched for Instagram, so this is
+   * one HTTP call rather than a second upload.
+   */
+  const fb = await publishToPage({
+    deliverableId: item.deliverable_id,
+    pageId: item.fb_page_id,
+    token,
+    mediaUrl: item.video_url,
+    mediaType: item.media_type,
+    caption: item.caption,
+  }).catch((err) => ({
+    ok: false as const,
+    error: err instanceof Error ? err.message : "Facebook failed.",
+  }));
+
+  if (!fb.ok && !("skipped" in fb && fb.skipped)) {
+    // Said once, in the run's own log. The row carries the reason, and the
+    // task page shows it — this is for whoever is reading why a run was noisy.
+    console.warn(`[publish] ${item.deliverable_id} is live on Instagram but not on Facebook:`, fb.error);
+  }
+
+  await tellTheClient(item, permalink, fb.ok);
 
   return { ok: true, deliverableId: item.deliverable_id, mediaId: published.id, permalink };
 }
@@ -266,12 +297,20 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
  * recording it as failed because a message didn't send would be worse than the
  * client hearing it from us a little later.
  */
-async function tellTheClient(item: PublishQueueItem, permalink: string | null): Promise<void> {
+async function tellTheClient(
+  item: PublishQueueItem,
+  permalink: string | null,
+  /** Whether it also reached their Page — the client is told what is true. */
+  onFacebook: boolean
+): Promise<void> {
   if (!item.wa_chat_id) return;
   try {
     const who = item.contact_person || item.client_name;
+    // Named only when it worked. Telling a client it is on Facebook when the
+    // Page refused it is the one version of this message worth avoiding.
+    const where = onFacebook ? "Instagram and Facebook" : "Instagram";
     const text =
-      `Hi ${who},\n\nYour post "${item.title}" is now live on Instagram. 🎉` +
+      `Hi ${who},\n\nYour post "${item.title}" is now live on ${where}. 🎉` +
       (permalink ? `\n\n${permalink}` : "");
     await sendTextToGroup(item.wa_chat_id, text);
   } catch (err) {

@@ -73,6 +73,14 @@ export type PublishQueueItem = {
   /** Meta Graph IG business account id. */
   ig_user_id: string;
   /**
+   * The client's Facebook Page, or null.
+   *
+   * Set means "post there too" — one field rather than a Page id and a
+   * separate switch, because a Page id on a client record has never meant
+   * anything else.
+   */
+  fb_page_id: string | null;
+  /**
    * Per-client Graph token, or null to use n8n's agency-wide META_ACCESS_TOKEN.
    * Only sent to the automation, never to a browser.
    */
@@ -230,6 +238,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
     post_attempts: number;
     ig_user_id: string;
     ig_access_token: string | null;
+    fb_page_id: string | null;
     email: string | null;
     whatsapp_number: string | null;
     phone: string | null;
@@ -239,7 +248,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
             d.content_category, d.campaign,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
             d.scheduled_at, d.post_attempts,
-            c.ig_user_id, c.ig_access_token,
+            c.ig_user_id, c.ig_access_token, c.fb_page_id,
             c.email, c.whatsapp_number, c.phone, c.contact_person
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
@@ -322,6 +331,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
         video_url: videoUrl,
         media_type: mediaTypeFor(r.cloud_video_key || videoUrl, r.content_category),
         ig_user_id: r.ig_user_id,
+        fb_page_id: r.fb_page_id ?? null,
         ig_access_token: r.ig_access_token || null,
         scheduled_at: r.scheduled_at,
         attempt_no: Number(r.post_attempts) + 1,
@@ -397,7 +407,7 @@ export async function claimForPublish(
               d.content_category, d.campaign,
               d.cloud_video_url, d.cloud_video_key, d.edited_link,
               d.scheduled_at, d.post_attempts,
-              c.ig_user_id, c.ig_access_token,
+              c.ig_user_id, c.ig_access_token, c.fb_page_id,
               c.email, c.whatsapp_number, c.phone, c.contact_person
          FROM deliverables d JOIN clients c ON c.id = d.client_id
         WHERE d.id = ?`,
@@ -457,6 +467,7 @@ export async function claimForPublish(
           r.content_category as string | null
         ),
         ig_user_id: String(r.ig_user_id ?? ""),
+        fb_page_id: (r.fb_page_id as string | null) || null,
         ig_access_token: (r.ig_access_token as string | null) || null,
         scheduled_at: String(r.scheduled_at ?? ""),
         attempt_no: Number(r.post_attempts),
@@ -851,6 +862,14 @@ export type DeliverablePublishInfo = {
   error: string | null;
   autoPublishEnabled: boolean;
   hasInstagramAccount: boolean;
+  /**
+   * The Facebook half of the same publish.
+   *
+   * `null` where the client has no Page — not attempted is not a failure, and
+   * a permanent "not posted to Facebook" on a client who does not use it is
+   * the kind of red that teaches people to ignore red.
+   */
+  facebook: { status: string; postId: string | null; error: string | null } | null;
   /** Every condition the publish queue would fail this video on, in plain words. */
   blockers: string[];
   /** What happens next when nothing is blocking it. */
@@ -881,6 +900,19 @@ export async function getPublishInfo(
     ? "d.cloud_video_key"
     : "NULL AS cloud_video_key";
 
+  // The post id and the reason arrive with a later migration; the status has
+  // been there from the start. Read what exists, so a database part-way
+  // through still shows posted-or-failed rather than throwing.
+  const [hasFbId, hasFbErr] = await Promise.all([
+    hasColumn("deliverables", "facebook_post_id"),
+    hasColumn("deliverables", "facebook_error"),
+  ]);
+  const fbCols = [
+    "d.facebook_status",
+    hasFbId ? "d.facebook_post_id" : "NULL AS facebook_post_id",
+    hasFbErr ? "d.facebook_error" : "NULL AS facebook_error",
+  ].join(", ");
+
   const row = await queryOne<{
     instagram_status: string;
     instagram_media_id: string | null;
@@ -892,6 +924,10 @@ export async function getPublishInfo(
     post_error: string | null;
     auto_publish: number | null;
     ig_user_id: string | null;
+    fb_page_id: string | null;
+    facebook_status: string | null;
+    facebook_post_id: string | null;
+    facebook_error: string | null;
     content_category: string | null;
     edited_link: string | null;
     cloud_video_key: string | null;
@@ -900,7 +936,8 @@ export async function getPublishInfo(
     `SELECT d.instagram_status, d.instagram_media_id, d.instagram_permalink,
             d.instagram_posted_at, d.posted_at, d.scheduled_at,
             d.post_attempts, d.post_error, d.content_category, d.edited_link,
-            ${cloud}, c.auto_publish, c.ig_user_id, c.status AS client_status
+            ${cloud}, c.auto_publish, c.ig_user_id, c.fb_page_id, c.status AS client_status,
+            ${fbCols}
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
@@ -993,6 +1030,14 @@ export async function getPublishInfo(
     error: row.post_error,
     autoPublishEnabled: Boolean(row.auto_publish),
     hasInstagramAccount: Boolean(row.ig_user_id),
+    // Null when they do not post to a Page at all — see the type.
+    facebook: row.fb_page_id
+      ? {
+          status: row.facebook_status || "not_posted",
+          postId: row.facebook_post_id,
+          error: row.facebook_error,
+        }
+      : null,
     blockers,
     nextLook,
   };

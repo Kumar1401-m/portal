@@ -217,6 +217,10 @@ async function main() {
       CONSTRAINT fk_exp_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  /* ---- The same post, on the client's Facebook Page ---- */
+  await addColumn('deliverables', 'facebook_post_id', "facebook_post_id VARCHAR(64) DEFAULT NULL");
+  await addColumn('deliverables', 'facebook_error', "facebook_error TEXT DEFAULT NULL");
+
   // The content desk: when the brief was last sent to the client.
   await addColumn('deliverables', 'content_sent_at', 'content_sent_at DATETIME DEFAULT NULL');
 

@@ -39,6 +39,7 @@ export type ClientDefaults = Partial<{
   loc_whatsapp: string;
   services: ServiceKey[];
   ig_user_id: string;
+  fb_page_id: string;
   ig_username: string;
   ig_access_token: string;
   whatsapp_number: string;
@@ -200,6 +201,16 @@ export function ClientForm({
                 name="ig_user_id"
                 placeholder="e.g. 17841415221535647"
                 defaultValue={d.ig_user_id}
+              />
+            </Field>
+            {/* One field, not a Page id and a separate switch: a Page id on
+                a client record has never meant anything but "post there". */}
+            <Field label="Facebook Page id" name="fb_page_id">
+              <Input
+                id="fb_page_id"
+                name="fb_page_id"
+                placeholder="set it and posts go to the Page too"
+                defaultValue={d.fb_page_id}
               />
             </Field>
             <Field label="Instagram handle" name="ig_username">

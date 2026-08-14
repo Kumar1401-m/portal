@@ -35,6 +35,8 @@ export type ClientFull = {
   services: unknown;
   /** Meta Graph IG business account id — enables Instagram auto-posting for this client. */
   ig_user_id: string | null;
+  /** The Page the same post also goes to. Null means Instagram only. */
+  fb_page_id: string | null;
   ig_username: string | null;
   whatsapp_number: string | null;
   /** Opt-in to unattended posting. Off unless someone deliberately ticks it. */

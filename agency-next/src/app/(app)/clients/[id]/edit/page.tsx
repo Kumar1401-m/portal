@@ -64,6 +64,7 @@ export default async function EditClientPage({
     notes: str(client.notes),
     designer_id: client.designer_id ? String(client.designer_id) : "",
     editor_id: client.editor_id ? String(client.editor_id) : "",
+    fb_page_id: client.fb_page_id ?? "",
     youtube_enabled: Number(client.youtube_enabled) === 1,
     auto_payment_reminders: Number(client.auto_payment_reminders) === 1,
     // Null (column not there yet) means on — same rule the server applies.

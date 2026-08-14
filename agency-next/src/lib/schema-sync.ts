@@ -138,6 +138,27 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "deliverables",
+    column: "facebook_status",
+    definition: "facebook_status VARCHAR(20) NOT NULL DEFAULT 'not_posted'",
+    purpose:
+      "Whether the same post reached the client's Facebook Page — posted, failed, or not attempted.",
+  },
+  {
+    table: "deliverables",
+    column: "facebook_post_id",
+    definition: "facebook_post_id VARCHAR(64) DEFAULT NULL",
+    purpose:
+      "The Page post's id, which the task page links to.",
+  },
+  {
+    table: "deliverables",
+    column: "facebook_error",
+    definition: "facebook_error TEXT DEFAULT NULL",
+    purpose:
+      "Why the Page refused it, in words that say what to change.",
+  },
+  {
+    table: "deliverables",
     column: "content_sent_at",
     definition: "content_sent_at DATETIME DEFAULT NULL",
     purpose: "When the written brief went to the client, so a second send is a deliberate one.",

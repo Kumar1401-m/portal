@@ -61,6 +61,8 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
     services: JSON.stringify(fd.getAll("services").map(String).filter(isServiceKey)),
     // Meta Graph IG business account id — enables Instagram auto-posting.
     ig_user_id: orNull(s(fd, "ig_user_id")),
+    // Digits only: people paste "Page ID: 1234" out of Business Suite.
+    fb_page_id: orNull(s(fd, "fb_page_id").replace(/[^0-9]/g, "")),
   };
   if (isSuperAdmin) {
     columns.is_personal = fd.get("is_personal") ? 1 : 0;

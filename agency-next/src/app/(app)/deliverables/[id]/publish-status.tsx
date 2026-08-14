@@ -21,6 +21,8 @@ export type PublishInfo = {
   instagramStatus: string;
   mediaId: string | null;
   permalink: string | null;
+  /** Null where the client posts to Instagram only. */
+  facebook: { status: string; postId: string | null; error: string | null } | null;
   postedAt: string | null;
   /** Already rendered in the client's own clock by the server. */
   scheduledAt: string | null;
@@ -42,6 +44,17 @@ const TONE: Record<string, "success" | "warning" | "danger" | "muted"> = {
   failed: "danger",
   not_posted: "muted",
 };
+
+/**
+ * The public address of a Page post.
+ *
+ * Meta answers with "<pageId>_<postId>" from some endpoints and a bare id from
+ * others; the underscore form is the one that resolves as a URL.
+ */
+function fbLink(postId: string | null): string | null {
+  if (!postId) return null;
+  return `https://www.facebook.com/${postId.replace("_", "/posts/")}`;
+}
 
 const LABEL: Record<string, string> = {
   posted: "Live on Instagram",
@@ -179,6 +192,43 @@ export function PublishStatus({
             ) : null}
             {info.mediaId ? (
               <p className="font-mono text-xs text-muted-foreground">Media id {info.mediaId}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/*
+          The Facebook half, said separately.
+
+          It rides on the Instagram publish but succeeds and fails on its own —
+          a Page can refuse a video that Instagram took, usually because the
+          token was made for Instagram and lacks pages_manage_posts. Folding
+          the two into one status would either hide that or make a live post
+          look failed.
+        */}
+        {info.facebook ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-3">
+            <span className="text-muted-foreground">Facebook Page</span>
+            {info.facebook.status === "posted" ? (
+              <>
+                <Badge tone="success">Posted</Badge>
+                {fbLink(info.facebook.postId) ? (
+                  <a
+                    href={fbLink(info.facebook.postId)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-primary hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> View
+                  </a>
+                ) : null}
+              </>
+            ) : info.facebook.status === "failed" ? (
+              <Badge tone="danger">Not posted</Badge>
+            ) : (
+              <Badge tone="muted">Waiting on the Instagram post</Badge>
+            )}
+            {info.facebook.error ? (
+              <p className="w-full text-xs text-destructive">{info.facebook.error}</p>
             ) : null}
           </div>
         ) : null}
