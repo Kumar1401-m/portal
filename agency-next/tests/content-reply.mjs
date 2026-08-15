@@ -102,4 +102,32 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("the client is told what really happens next, not the video sentence");
 }
 
+/* ---------------- a linked group learns its own name ---------------- */
+{
+  // `linkGroup` is given a name only when somebody links from the live chat
+  // list — the least reliable thing the service does, since it runs library
+  // code inside the WhatsApp Web page. Every other route in left it null, so
+  // Settings showed a column of raw ids.
+  has(wa, "if (input.groupName?.trim()) {", "an inbound message carries the name");
+  has(wa, "SET group_name = ?", "which is stored on the group");
+  has(
+    wa,
+    "WHERE group_id = ? AND (group_name IS NULL OR group_name <> ?)",
+    "and only written when it actually changes"
+  );
+
+  // Groups linked before this existed should not have to wait for somebody to
+  // write in the chat before they stop showing as an id.
+  has(wa, "COALESCE(NULLIF(g.group_name, ''), (", "the stored name comes first");
+  has(wa, "FROM whatsapp_messages m", "and the transcript fills the gap");
+
+  const ui = readFileSync(`${SRC}/app/(app)/settings/whatsapp/group-manager.tsx`, "utf8");
+  has(ui, "const liveName = (groupId: string)", "the page has one more fallback");
+  // The old copy blamed WhatsApp for not exposing names, which was wrong and
+  // sent people looking for a problem that was not there.
+  assert.ok(!/doesn't expose group names/.test(ui), "the wrong explanation is gone");
+  has(ui, "name will appear on their first message", "and it now reads as waiting, not broken");
+  ok("a group’s name is learnt from its own messages rather than left blank");
+}
+
 await finish(pass);

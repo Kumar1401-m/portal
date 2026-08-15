@@ -44,6 +44,19 @@ export function GroupManager({
     { ok: false }
   );
 
+  /*
+   * A name for a group whose own row has none.
+   *
+   * Three sources, worst last. The stored name is checked by the caller; this
+   * covers the two that need no database write — the live chat list, and the
+   * names carried on messages the group has already sent. Both are already
+   * loaded for the picker below, so this costs nothing.
+   */
+  const liveName = (groupId: string): string | null =>
+    available.find((a) => a.groupId === groupId)?.name?.trim() ||
+    discovered.find((d) => d.group_id === groupId)?.group_name?.trim() ||
+    null;
+
   const linkedIds = new Set(linked.map((g) => g.group_id));
 
   /*
@@ -103,16 +116,23 @@ export function GroupManager({
                   <tr key={g.group_id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 font-medium">{g.company_name}</td>
                     <td className="px-3 py-2">
-                      {g.group_name || (
-                        // Not "unnamed" — the group has a name, we just can't
-                        // read it on this WhatsApp Web version. Saying it has
-                        // none invites someone to go looking for the problem
-                        // in WhatsApp, where there isn't one.
+                      {g.group_name || liveName(g.group_id) || (
+                        /*
+                         * Not "unnamed" — the group has a name, we simply have
+                         * not seen it yet. Saying it has none sends somebody
+                         * looking for a problem in WhatsApp, where there isn't
+                         * one.
+                         *
+                         * The name is learnt from the first message the group
+                         * sends, so it fills itself in. Which is worth saying,
+                         * because otherwise this reads as broken rather than
+                         * as waiting.
+                         */
                         <span
                           className="text-muted-foreground"
-                          title="WhatsApp doesn't expose group names to this version of the automation. The link works regardless — approvals are matched on the group id."
+                          title="We learn a group's name from the first message it sends. Nothing is wrong — the link works either way, because approvals are matched on the group id."
                         >
-                          name not available
+                          name will appear on their first message
                         </span>
                       )}
                       <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">

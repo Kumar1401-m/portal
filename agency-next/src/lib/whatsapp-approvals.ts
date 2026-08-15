@@ -143,8 +143,23 @@ export async function getGroupsForClient(clientId: number): Promise<WhatsAppGrou
  */
 export async function getAllGroups(): Promise<WhatsAppGroup[]> {
   if (!(await approvalsReady())) return [];
+  /*
+   * The stored name, or the last one the group used in a message.
+   *
+   * Groups linked before the name was captured have none stored, and waiting
+   * for the next inbound message to fill it in means Settings shows raw ids
+   * until somebody happens to write in that chat. The transcript already knows
+   * — it has carried `group_name` on every message from the start — so the
+   * answer is read from there rather than left blank.
+   */
   return query<WhatsAppGroup>(
-    `SELECT g.*, c.company_name FROM whatsapp_groups g
+    `SELECT g.*, c.company_name,
+            COALESCE(NULLIF(g.group_name, ''), (
+              SELECT m.group_name FROM whatsapp_messages m
+               WHERE m.group_id = g.group_id AND NULLIF(m.group_name,'') IS NOT NULL
+               ORDER BY m.id DESC LIMIT 1
+            )) AS group_name
+       FROM whatsapp_groups g
        JOIN clients c ON c.id = g.client_id
       WHERE g.is_active = 1
       ORDER BY c.company_name, g.is_default DESC`
@@ -879,6 +894,28 @@ export async function logIncomingMessage(input: {
 
   const clientId = await clientForGroup(input.groupId);
   const deliverable = input.videoCode ? await findByVideoCode(input.videoCode) : null;
+
+  /*
+   * The group's own name, taken from the message that just arrived.
+   *
+   * `linkGroup` is given a name only when somebody links from the live chat
+   * list, and that list is the least reliable thing the service does — it runs
+   * library code inside the WhatsApp Web page and fails whenever the page
+   * updates ahead of the library. Every other route in leaves the name null,
+   * which is why Settings showed a column of raw ids.
+   *
+   * Every inbound message carries the name, so the group tells us what it is
+   * called simply by being used. Only written when it changes, so this is a
+   * no-op on all but the first message from each group.
+   */
+  if (input.groupName?.trim()) {
+    await execute(
+      `UPDATE whatsapp_groups
+          SET group_name = ?
+        WHERE group_id = ? AND (group_name IS NULL OR group_name <> ?)`,
+      [input.groupName.trim(), input.groupId, input.groupName.trim()]
+    ).catch(() => {});
+  }
   const when = input.time ? new Date(input.time) : new Date();
   const mysqlTime = Number.isNaN(when.getTime())
     ? new Date().toISOString().slice(0, 19).replace("T", " ")
