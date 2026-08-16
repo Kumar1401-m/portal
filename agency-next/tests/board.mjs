@@ -118,7 +118,21 @@ await mk("ZZ next week", "pending", nextWeek);
       4,
       `${file}: both headers and both cells fold together, or the columns shear`
     );
-    assert.ok(!/>Shoot<[\s\S]{0,40}hidden/.test(src), "the link columns are never hidden");
+    /*
+     * And the two link columns fold one step earlier.
+     *
+     * Nine columns still overflowed a laptop — the scrollbar was back, and what
+     * it hid were the columns on the right. Shoot and Video are a "View" link
+     * and a dash, both of which the task page carries anyway, so they are the
+     * cheapest two to lose first.
+     */
+    assert.ok(src.includes('<th className="hidden text-center xl:table-cell">Shoot</th>'));
+    assert.ok(src.includes('<th className="hidden text-center xl:table-cell">Video</th>'));
+    assert.equal(
+      (src.match(/[^2]xl:table-cell/g) || []).length,
+      4,
+      `${file}: the link headers and their cells fold together too`
+    );
   }
   ok("the wide columns fold below 1536px, so nothing scrolls sideways on a laptop");
 }

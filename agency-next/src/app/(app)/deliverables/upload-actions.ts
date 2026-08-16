@@ -14,6 +14,7 @@ import {
   isStorageConfigured,
 } from "@/lib/storage";
 import { buildVideoPermalink } from "@/lib/video-link";
+import { suggestTitle, isPlaceholderTitle } from "@/lib/content";
 import { startAnalysisAfterUpload } from "../editor/actions";
 
 export type PresignResult =
@@ -135,6 +136,33 @@ export async function attachUploadedVideo(
    * upload report failure.
    */
   await startAnalysisAfterUpload(deliverableId);
+
+  /*
+   * And give it a name, if it is still called "Video 6".
+   *
+   * Same rule the content desk follows: only over a placeholder, never over a
+   * title somebody typed. Written from whatever the task already says about
+   * itself — the brief first, the caption second — because at upload time the
+   * analysis has not finished and the file name is "VID_20260817.mp4".
+   *
+   * Best-effort. The video is in the bucket either way, and a failed rename
+   * must not report a successful upload as failed.
+   */
+  try {
+    const t = await queryOne<{ title: string; description: string | null; caption: string | null; company_name: string }>(
+      `SELECT d.title, d.description, d.caption, c.company_name
+         FROM deliverables d JOIN clients c ON c.id = d.client_id
+        WHERE d.id = ?`,
+      [deliverableId]
+    );
+    const source = (t?.description ?? "").trim() || (t?.caption ?? "").trim();
+    if (t && source && isPlaceholderTitle(t.title)) {
+      const named = await suggestTitle(source, t.company_name);
+      if (named) await execute("UPDATE deliverables SET title = ? WHERE id = ?", [named, deliverableId]);
+    }
+  } catch (err) {
+    console.warn("[upload] could not name the video:", err instanceof Error ? err.message : err);
+  }
 
   revalidatePath("/deliverables");
   revalidatePath(`/deliverables/${deliverableId}`);

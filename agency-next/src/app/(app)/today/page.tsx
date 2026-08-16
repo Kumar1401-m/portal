@@ -241,8 +241,8 @@ export default async function TodayPage({
                     twice. */}
                 {isDesigner ? null : (
                   <>
-                    <th className="text-center">Shoot</th>
-                    <th className="text-center">Video</th>
+                    <th className="hidden text-center xl:table-cell">Shoot</th>
+                    <th className="hidden text-center xl:table-cell">Video</th>
                   </>
                 )}
                 <th className="hidden 2xl:table-cell">Remarks</th>
@@ -300,14 +300,14 @@ export default async function TodayPage({
                     </TD>
                     {isDesigner ? null : (
                       <>
-                        <TD className="whitespace-nowrap text-center">
+                        <TD className="hidden whitespace-nowrap text-center xl:table-cell">
                           {d.raw_drive_link ? (
                             <a href={d.raw_drive_link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </TD>
-                        <TD className="whitespace-nowrap text-center">
+                        <TD className="hidden whitespace-nowrap text-center xl:table-cell">
                           {d.edited_link || d.cloud_video_link ? (
                             <a href={d.edited_link || d.cloud_video_link!} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">View</a>
                           ) : (

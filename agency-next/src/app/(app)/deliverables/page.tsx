@@ -162,8 +162,8 @@ export default async function DeliverablesPage({
                   <th>Design status</th>
                   <th>Post status</th>
                   <th className="hidden 2xl:table-cell">Caption</th>
-                  <th className="text-center">Shoot</th>
-                  <th className="text-center">Video</th>
+                  <th className="hidden text-center xl:table-cell">Shoot</th>
+                  <th className="hidden text-center xl:table-cell">Video</th>
                   <th className="hidden 2xl:table-cell">Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
@@ -222,7 +222,7 @@ export default async function DeliverablesPage({
                         clients still owe footage and which videos are cut —
                         two different questions, asked of the whole board
                         rather than of one row. */}
-                    <TD className="whitespace-nowrap text-center">
+                    <TD className="hidden whitespace-nowrap text-center xl:table-cell">
                       {d.raw_drive_link ? (
                         <a
                           href={d.raw_drive_link}
@@ -236,7 +236,7 @@ export default async function DeliverablesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TD>
-                    <TD className="whitespace-nowrap text-center">
+                    <TD className="hidden whitespace-nowrap text-center xl:table-cell">
                       {d.edited_link || d.cloud_video_link ? (
                         <a
                           href={d.edited_link || d.cloud_video_link!}

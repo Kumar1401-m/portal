@@ -215,4 +215,17 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("a piece already posted is not counted as ready to post");
 }
 
+/* ---------------- and a video names itself on upload ---------------- */
+{
+  const up = readFileSync(`${SRC}/app/(app)/deliverables/upload-actions.ts`, "utf8");
+  // Same rule as the content desk — only over a placeholder, never over a
+  // title somebody typed.
+  has(up, "isPlaceholderTitle(t.title)", "a named task keeps its name");
+  has(up, "(t?.description ?? \"\").trim() || (t?.caption ?? \"\").trim()", "named from the brief, then the caption");
+  // The analysis has not finished at upload time and the file is VID_2026.mp4,
+  // so neither is a source.
+  has(up, "} catch (err) {", "and a failed rename cannot fail the upload");
+  ok("an uploaded video is named from what the task already says");
+}
+
 await finish(pass);
