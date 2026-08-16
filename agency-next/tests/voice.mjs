@@ -160,4 +160,49 @@ const politeEnough = (text, label) => {
   ok("the WhatsApp service thanks the client for every command it records");
 }
 
+/* ---------------- a voice note comes back twice: as said, and in English ---------------- */
+{
+  const route = read("app/api/whatsapp/transcribe/route.ts");
+  const router = readFileSync(`${SRC}/../../whatsapp-service/src/lib/message-router.js`, "utf8");
+
+  // Both, because they are read by different things — see below.
+  assert.match(route, /"text":"\.\.\.","english":"\.\.\."/, "the model is asked for both");
+  assert.match(route, /responseMimeType: "application\/json"/, "in a shape that can be parsed");
+  assert.match(route, /do not translate, summarise, answer or explain it/, "and told to leave the words alone");
+
+  /*
+   * The fallback is the point of the try/catch, not decoration: this endpoint
+   * used to return whatever prose came back, and approval depends on it. A day
+   * the JSON does not parse must cost the English half only.
+   */
+  assert.match(route, /let text = raw;/, "unparsable JSON still yields a transcript");
+  assert.match(route, /console\.warn\("\[whatsapp\] transcription was not JSON/, "loudly");
+
+  // A client who spoke English would otherwise have their sentence printed
+  // twice in the timeline, once labelled as a translation of itself.
+  assert.match(route, /english && english !== text \? english : ""/, "an identical translation is dropped");
+
+  /*
+   * The split that matters. `body` is what the parser, the intent model and
+   * the transcript all read as the client's own words, so it stays in their
+   * language; the English is appended only where a person reads it. Putting
+   * the translation on `body` would hand two languages to a parser looking
+   * for the word "ok".
+   */
+  assert.match(router, /body: spoken\.text, english: spoken\.english/, "their words stay on the message");
+  assert.match(
+    router,
+    /message: msg\.english \? `\$\{msg\.body\}\\n\\n🗣 English: \$\{msg\.english\}` : msg\.body/,
+    "and the translation is appended for the transcript only"
+  );
+  assert.ok(
+    !/body: spoken\.english/.test(router),
+    "nothing downstream is ever handed the translation as the message"
+  );
+
+  // Half an answer is still worth having: no translation must not lose the words.
+  assert.match(router, /typeof english === 'string' \? english\.trim\(\) : ''/, "a missing translation is empty, not fatal");
+  ok("a Telugu voice note is parsed in Telugu and read in English");
+}
+
 await finish(pass);

@@ -145,4 +145,42 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("a Page that refused the video can be retried without touching Instagram");
 }
 
+/* ---------------- and you can tell whether it is connected at all ---------------- */
+{
+  const lib = readFileSync(`${SRC}/lib/facebook.ts`, "utf8");
+  const page = readFileSync(`${SRC}/app/(app)/clients/[id]/page.tsx`, "utf8");
+
+  /*
+   * Asked, not assumed. The Instagram row beside this one goes green on
+   * `ig_user_id` being non-empty, which only proves somebody typed a number —
+   * and the number people type there most often is a Facebook Page id, which
+   * looks right and never publishes. A badge earned that way answers the
+   * question wrongly, which is worse than leaving it open.
+   */
+  has(lib, "export async function checkPageConnection", "the connection is checked against Meta");
+  has(lib, "?fields=name,tasks&access_token=", "by asking for the Page's own name");
+  has(lib, "if (j.error || !j.name)", "and no name means not connected");
+  assert.ok(
+    !/state: "connected"[\s\S]{0,80}Boolean\(pageId\)/.test(lib),
+    "never green merely because the column is filled in"
+  );
+
+  // The three states are different things and read differently: off is not a
+  // failure, and a permanent red on a client who does not use Facebook is how
+  // people learn to ignore red.
+  has(lib, 'if (!pageId) return { state: "off" }', "no Page id is off, not broken");
+  has(lib, "state: \"broken\"", "a refusal is broken");
+  has(page, '"Not connected"', "which the badge says in those words");
+  has(page, '"Connected — cannot post"', "and a readable-but-unpostable Page says so");
+  has(lib, 'tasks.includes("CREATE_CONTENT")', "which is what the permission check reads");
+  // An absent list is not a refusal — only a Page token returns one at all.
+  has(lib, "!Array.isArray(j.tasks) ||", "and an unknown permission is not reported as a no");
+
+  // It runs beside the plan queries, not after them: it is a network call to
+  // Meta on a page somebody is waiting for.
+  has(page, "checkPageConnection(c.id),", "the check is awaited in parallel");
+  has(lib, "AbortSignal.timeout(8_000)", "and cannot hang the client page");
+  ok("a client page says whether Facebook is connected, having actually asked");
+}
+
 await finish(pass);

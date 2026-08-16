@@ -56,8 +56,20 @@ class MessageRouter {
     if (msg.isVoice && !String(msg.body || '').trim()) {
       const spoken = await this.transcribe(msg);
       if (spoken) {
-        log.info('voice note transcribed', { groupId: msg.groupId, chars: spoken.length });
-        msg = { ...msg, body: spoken, transcribed: true };
+        log.info('voice note transcribed', {
+          groupId: msg.groupId,
+          chars: spoken.text.length,
+          translated: Boolean(spoken.english),
+        });
+        /*
+         * Parsed from what they said, read as what it means.
+         *
+         * `body` stays in their own language because everything downstream
+         * reads it as the client's own words — the parser, the intent model,
+         * the transcript. The English rides alongside for the person
+         * scrolling that transcript, who could not read the Telugu.
+         */
+        msg = { ...msg, body: spoken.text, english: spoken.english, transcribed: true };
       } else {
         // Log it as a voice note so the timeline shows something arrived, then
         // leave it alone — a reply we cannot read is not one we should guess at.
@@ -350,7 +362,11 @@ class MessageRouter {
   }
 
   /**
-   * The words in a voice note, or null.
+   * The words in a voice note and what they mean in English, or null.
+   *
+   * `{ text, english }` — english is '' when they already spoke English, or
+   * when the model gave us the words but not the translation. Nothing treats
+   * it as required, so half an answer is still worth having.
    *
    * Never throws: transcription is an enhancement to a message that has
    * already arrived, and a failure here must not stop it being logged.
@@ -365,7 +381,12 @@ class MessageRouter {
         groupId: msg.groupId,
       });
       const text = result?.data?.text;
-      return typeof text === 'string' && text.trim() ? text.trim() : null;
+      if (typeof text !== 'string' || !text.trim()) return null;
+      const english = result?.data?.english;
+      return {
+        text: text.trim(),
+        english: typeof english === 'string' ? english.trim() : '',
+      };
     } catch (err) {
       log.warn('could not transcribe the voice note', { error: err.message });
       return null;
@@ -380,7 +401,16 @@ class MessageRouter {
         groupName: msg.groupName,
         senderName: msg.senderName,
         senderNumber: msg.senderNumber,
-        message: msg.body,
+        /*
+         * The transcript keeps their words; the translation is appended to
+         * it rather than replacing them, because "what did the client
+         * actually say" is the question a transcript exists to answer and a
+         * translation is somebody's reading of it.
+         *
+         * Appended here and not on `msg.body`, so nothing that parses a
+         * message ever sees two languages at once.
+         */
+        message: msg.english ? `${msg.body}\n\n🗣 English: ${msg.english}` : msg.body,
         videoCode: videoCode ?? null,
         parsedCommand: command,
         /*

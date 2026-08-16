@@ -176,6 +176,72 @@ async function record(
   }
 }
 
+export type PageConnection =
+  /** Meta answered for this Page with this token. */
+  | { state: "connected"; pageName: string; canPost: boolean }
+  /** No Page id on the client. Nothing is wrong; Facebook is simply off. */
+  | { state: "off" }
+  | { state: "broken"; reason: string };
+
+/**
+ * Whether this client's Facebook is actually connected — asked, not assumed.
+ *
+ * The Instagram row beside this one goes green on `ig_user_id` being non-empty,
+ * which is a check that somebody typed a number. That is the exact shape of
+ * the bug this codebase already carries a warning about: a Facebook Page id
+ * pasted into the Instagram field looks completely correct and silently never
+ * publishes. A green badge earned that way is worse than no badge, because it
+ * answers the question wrongly instead of leaving it open.
+ *
+ * So this spends one Graph call: if Meta returns the Page's name for this
+ * token, the id is right, the token is valid, and it reaches that Page —
+ * which is the whole of what "connected" means here.
+ *
+ * `tasks` is what the token holder is allowed to do with the Page. It comes
+ * back only for a real Page token, so an absent list is reported as unknown
+ * rather than as "cannot post" — the token may still be fine.
+ */
+export async function checkPageConnection(clientId: number): Promise<PageConnection> {
+  const row = await queryOne<{ fb_page_id: string | null; ig_access_token: string | null }>(
+    "SELECT fb_page_id, ig_access_token FROM clients WHERE id = ?",
+    [clientId]
+  );
+  const pageId = row?.fb_page_id?.trim();
+  if (!pageId) return { state: "off" };
+
+  const token = row?.ig_access_token || env.meta.accessToken;
+  if (!token) return { state: "broken", reason: "No Meta access token is configured." };
+
+  try {
+    const res = await fetch(
+      `${GRAPH}/${env.meta.apiVersion}/${pageId}?fields=name,tasks&access_token=${encodeURIComponent(token)}`,
+      // Short: this runs while somebody waits for a page to render, and a slow
+      // answer about Facebook is not worth a slow client page.
+      { cache: "no-store", signal: AbortSignal.timeout(8_000) }
+    );
+    const j = (await res.json().catch(() => ({}))) as {
+      name?: string;
+      tasks?: string[];
+      error?: { message?: string; code?: number };
+    };
+
+    if (j.error || !j.name) {
+      return { state: "broken", reason: explain(j.error?.message, j.error?.code) };
+    }
+    return {
+      state: "connected",
+      pageName: j.name,
+      // No list means we were not told, which is not the same as being refused.
+      canPost: !Array.isArray(j.tasks) || j.tasks.includes("CREATE_CONTENT"),
+    };
+  } catch (err) {
+    return {
+      state: "broken",
+      reason: err instanceof Error ? err.message : "Facebook did not answer.",
+    };
+  }
+}
+
 /** The public address of a Page post, for the task page to link to. */
 export function facebookPermalink(postId: string | null): string | null {
   if (!postId) return null;

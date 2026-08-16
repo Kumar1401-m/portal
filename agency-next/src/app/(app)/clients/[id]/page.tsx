@@ -14,6 +14,7 @@ import {
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
 import { canAccessClient } from "@/lib/crm";
+import { checkPageConnection } from "@/lib/facebook";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
 import { MonthlyPlan } from "./monthly-plan";
@@ -51,10 +52,13 @@ export default async function ClientDetailPage({
   // has asked for another.
   const sp = await searchParams;
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
-  const [plan, planTasks, usedMonths] = await Promise.all([
+  // Alongside the plan queries, not after them: the Facebook check is a call
+  // to Meta, and it is the slowest thing on this page by a distance.
+  const [plan, planTasks, usedMonths, fb] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
     clientMonths(c.id),
+    checkPageConnection(c.id),
   ]);
 
   const ph = (c.placeholder_values && typeof c.placeholder_values === "object"
@@ -189,6 +193,58 @@ export default async function ClientDetailPage({
                       edit page
                     </Link>{" "}
                     to publish this client&apos;s approved Reels automatically.
+                  </p>
+                ) : null}
+
+                {/* Asked of Meta rather than read off the column, so the badge
+                    means the Page is reachable with our token rather than that
+                    somebody typed a number into a box. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">Facebook</span>
+                  <Badge
+                    tone={
+                      fb.state === "connected"
+                        ? fb.canPost
+                          ? "success"
+                          : "warning"
+                        : fb.state === "broken"
+                          ? "danger"
+                          : "muted"
+                    }
+                  >
+                    {fb.state === "connected"
+                      ? fb.canPost
+                        ? "Connected"
+                        : "Connected — cannot post"
+                      : fb.state === "broken"
+                        ? "Not connected"
+                        : "Not set up"}
+                  </Badge>
+                  {fb.state === "connected" ? (
+                    <a
+                      href={`https://facebook.com/${c.fb_page_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {fb.pageName}
+                    </a>
+                  ) : null}
+                </div>
+                {fb.state === "broken" ? (
+                  <p className="text-xs text-rose-600 dark:text-rose-400">{fb.reason}</p>
+                ) : fb.state === "connected" && !fb.canPost ? (
+                  <p className="text-xs text-muted-foreground">
+                    We can read this Page but not post to it — the Meta token needs the
+                    pages_manage_posts permission.
+                  </p>
+                ) : fb.state === "off" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Add the Facebook Page id on the{" "}
+                    <Link href={`/clients/${c.id}/edit`} className="text-primary hover:underline">
+                      edit page
+                    </Link>{" "}
+                    to put the same post on Facebook too.
                   </p>
                 ) : null}
               </div>

@@ -60,16 +60,25 @@ export async function POST(request: Request) {
     `:generateContent?key=${env.gemini.apiKey}`;
 
   /*
-   * Asked for the words and nothing else.
+   * Their words, and then what those words mean in English.
    *
-   * The transcript is fed straight into the command parser, so a model that
-   * helpfully answers "The client is approving the video" instead of "ok"
-   * would break approval outright. Hence: transcribe, don't interpret.
+   * Both, because they are read by different things. `text` is fed straight
+   * into the command parser, so it has to be what was actually said — a model
+   * that helpfully answers "The client is approving the video" instead of
+   * "sare" breaks approval outright. `english` is read by a person scrolling
+   * the transcript, and a Telugu voice note transcribed into Telugu told them
+   * no more than "[voice note]" did.
+   *
+   * One call rather than two: the audio is already uploaded, and a second
+   * round trip to translate a sentence we are holding in memory doubles both
+   * the wait and the cost of every voice note that arrives.
    */
   const instruction = [
-    "Transcribe this voice message exactly, and output only the transcription.",
-    "Keep the speaker's own language and words — do not translate, summarise, answer or explain.",
-    "If nothing intelligible was said, output nothing at all.",
+    "Transcribe this voice message, then translate the transcription into English.",
+    'Reply with JSON only: {"text":"...","english":"..."}',
+    '"text" is exactly what was said, in the speaker\'s own language and words — do not translate, summarise, answer or explain it.',
+    '"english" is a plain English translation of that same sentence, or the identical string when they already spoke English.',
+    'If nothing intelligible was said, reply {"text":"","english":""}.',
   ].join(" ");
 
   try {
@@ -93,6 +102,7 @@ export async function POST(request: Request) {
           // word — too tight and the reply comes back empty, which reads as
           // "the client said nothing" rather than "we cut them off".
           maxOutputTokens: 1200,
+          responseMimeType: "application/json",
         },
       }),
       signal: AbortSignal.timeout(45_000),
@@ -111,17 +121,43 @@ export async function POST(request: Request) {
       candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
     };
     const cand = j.candidates?.[0];
-    const text = (cand?.content?.parts || [])
+    const raw = (cand?.content?.parts || [])
       .map((p) => p.text || "")
       .join("")
       .trim();
+
+    /*
+     * A model that ignores the format must not cost us the transcription.
+     *
+     * Before the translation was asked for this endpoint returned whatever
+     * came back, and that is exactly the fallback: unparsable JSON means we
+     * have prose, and prose from this prompt is the transcript. Approval —
+     * which only ever needed `text` — keeps working on a day the JSON does
+     * not, and only the English half is lost.
+     */
+    let text = raw;
+    let english = "";
+    try {
+      const parsed = JSON.parse(
+        raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()
+      ) as { text?: unknown; english?: unknown };
+      if (typeof parsed.text === "string") {
+        text = parsed.text.trim();
+        english = typeof parsed.english === "string" ? parsed.english.trim() : "";
+      }
+    } catch {
+      console.warn("[whatsapp] transcription was not JSON, using it verbatim:", raw.slice(0, 120));
+    }
 
     // Said out loud, because the symptom of an empty transcript — a client
     // whose voice notes are simply never acted on — looks nothing like its
     // cause, and the cause is usually the token budget above.
     if (!text) console.warn("[whatsapp] transcription came back empty", { finishReason: cand?.finishReason });
 
-    return Response.json({ ok: true, text });
+    // Only when it says something the transcript did not: a client who spoke
+    // English gets the same sentence back, and printing it twice in the
+    // timeline is noise.
+    return Response.json({ ok: true, text, english: english && english !== text ? english : "" });
   } catch (err) {
     return Response.json(
       { ok: false, error: err instanceof Error ? err.message : "Transcription failed." },
