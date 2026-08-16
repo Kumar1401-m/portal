@@ -99,42 +99,55 @@ await mk("ZZ next week", "pending", nextWeek);
 /* ---------------- no sideways scrollbar on a laptop ---------------- */
 {
   /*
-   * Measured, not assumed: at 1366 the twelve columns overflowed by 75px and
-   * at 1280 by 161px, and the columns a scrollbar hides are the right-hand
-   * ones — Shoot, Video and Actions, the parts of a row you click.
+   * Not a breakpoint. Breakpoints were three guesses in a row.
+   *
+   * Columns were folded at 1536, then at 1280, and the scrollbar came back on
+   * the width the guess did not cover — each time hiding the right-hand
+   * columns, Actions among them, which are the parts of a row you click.
+   *
+   * `table-fixed` on a `w-full` table is a guarantee rather than an estimate:
+   * the table is exactly as wide as its container at every size, so the
+   * `overflow-x-auto` wrapper has nothing to scroll. The folds below stay
+   * because they buy the remaining columns room, but they are no longer what
+   * stands between the board and a sideways scroll.
    */
   const table = read("components/ui/table.tsx");
   assert.match(table, /dense &&.*\[&_td\]:px-2/s, "the boards get tighter cells");
+  assert.match(table, /dense && "table-fixed/, "and can never exceed their container");
+  assert.match(table, /\[&_td\]:overflow-hidden/, "a long value clips instead of widening the table");
+  assert.match(table, /w-full overflow-x-auto/, "the wrapper is still there, with nothing to do");
 
   for (const file of ["app/(app)/today/page.tsx", "app/(app)/deliverables/page.tsx"]) {
     const src = read(file);
     assert.match(src, /<Table dense>/, `${file} uses them`);
-    // The two text-heavy columns fold away below a wide screen; everything
-    // you act on stays.
-    assert.match(src, /<th className="hidden 2xl:table-cell">Caption<\/th>/);
-    assert.match(src, /<th className="hidden 2xl:table-cell">Remarks<\/th>/);
+
+    // Header and cell fold together, or the table shears — every value lands
+    // under the wrong heading, which is worse than a scrollbar.
     assert.equal(
       (src.match(/2xl:table-cell/g) || []).length,
       4,
-      `${file}: both headers and both cells fold together, or the columns shear`
+      `${file}: Caption and Remarks fold as header-and-cell pairs`
     );
-    /*
-     * And the two link columns fold one step earlier.
-     *
-     * Nine columns still overflowed a laptop — the scrollbar was back, and what
-     * it hid were the columns on the right. Shoot and Video are a "View" link
-     * and a dash, both of which the task page carries anyway, so they are the
-     * cheapest two to lose first.
-     */
-    assert.ok(src.includes('<th className="hidden text-center xl:table-cell">Shoot</th>'));
-    assert.ok(src.includes('<th className="hidden text-center xl:table-cell">Video</th>'));
     assert.equal(
       (src.match(/[^2]xl:table-cell/g) || []).length,
       4,
-      `${file}: the link headers and their cells fold together too`
+      `${file}: Shoot and Video do too`
+    );
+
+    /*
+     * And table-fixed shares the width equally unless told otherwise, which
+     * would give a client's name the same room as a column of dashes. The
+     * narrow columns are pinned so the readable ones keep what is left.
+     */
+    for (const w of ["w-10", "w-28", "w-32", "w-20", "w-16", "w-40"]) {
+      assert.ok(src.includes(w), `${file}: ${w} is set on the column that needs it`);
+    }
+    assert.ok(
+      src.includes("<th>Organization</th>"),
+      `${file}: Organization takes the remainder — it is the column people read`
     );
   }
-  ok("the wide columns fold below 1536px, so nothing scrolls sideways on a laptop");
+  ok("a dense board is exactly as wide as its container, at any screen size");
 }
 
 await clean();

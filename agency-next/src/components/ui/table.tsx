@@ -23,7 +23,22 @@ export function Table({
       <table
         className={cn(
           "w-full caption-bottom text-sm",
-          dense && "[&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5",
+          /*
+           * A dense board can never be wider than the screen it is on.
+           *
+           * Folding columns at breakpoints was three guesses in a row: the
+           * scrollbar came back on whatever width the guess did not cover,
+           * and the columns it hid were the ones on the right — Actions
+           * among them. `table-fixed` ends the argument. The table is
+           * exactly `w-full`, columns share that width, and the
+           * `overflow-x-auto` wrapper has nothing left to scroll at any
+           * size.
+           *
+           * The cost is that a long value is clipped rather than pushing the
+           * table wider, which is the trade the boards want: every one of
+           * them is a row you click into.
+           */
+          dense && "table-fixed [&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5 [&_td]:overflow-hidden",
           className
         )}
         {...props}

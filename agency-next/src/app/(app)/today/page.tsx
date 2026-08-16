@@ -229,24 +229,24 @@ export default async function TodayPage({
               <tr>
                 <th className="w-10 text-right">#</th>
                 <th>Organization</th>
-                <th>Creative type</th>
-                <th className="whitespace-nowrap">Schedule date</th>
-                <th>Content status</th>
-                <th>Design status</th>
-                <th>Post status</th>
-                <th className="hidden 2xl:table-cell">Caption</th>
+                <th className="w-32">Creative type</th>
+                <th className="w-28 whitespace-nowrap">Schedule date</th>
+                <th className="w-32">Content status</th>
+                <th className="w-32">Design status</th>
+                <th className="w-28">Post status</th>
+                <th className="hidden w-40 2xl:table-cell">Caption</th>
                 {/* Raw footage and the cut video are the video track's, and a
                     poster designer has neither — the two columns were a dash
                     on every row of their board, spending width to say nothing
                     twice. */}
                 {isDesigner ? null : (
                   <>
-                    <th className="hidden text-center xl:table-cell">Shoot</th>
-                    <th className="hidden text-center xl:table-cell">Video</th>
+                    <th className="hidden w-16 text-center xl:table-cell">Shoot</th>
+                    <th className="hidden w-16 text-center xl:table-cell">Video</th>
                   </>
                 )}
-                <th className="hidden 2xl:table-cell">Remarks</th>
-                <th className="text-right">Actions</th>
+                <th className="hidden w-32 2xl:table-cell">Remarks</th>
+                <th className="w-20 text-right">Actions</th>
               </tr>
             </THead>
             <TBody>
