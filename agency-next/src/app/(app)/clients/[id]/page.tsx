@@ -204,18 +204,14 @@ export default async function ClientDetailPage({
                   <Badge
                     tone={
                       fb.state === "connected"
-                        ? fb.canPost
-                          ? "success"
-                          : "warning"
+                        ? "success"
                         : fb.state === "broken"
                           ? "danger"
                           : "muted"
                     }
                   >
                     {fb.state === "connected"
-                      ? fb.canPost
-                        ? "Connected"
-                        : "Connected — cannot post"
+                      ? "Connected"
                       : fb.state === "broken"
                         ? "Not connected"
                         : "Not set up"}
@@ -233,11 +229,6 @@ export default async function ClientDetailPage({
                 </div>
                 {fb.state === "broken" ? (
                   <p className="text-xs text-rose-600 dark:text-rose-400">{fb.reason}</p>
-                ) : fb.state === "connected" && !fb.canPost ? (
-                  <p className="text-xs text-muted-foreground">
-                    We can read this Page but not post to it — the Meta token needs the
-                    pages_manage_posts permission.
-                  </p>
                 ) : fb.state === "off" ? (
                   <p className="text-xs text-muted-foreground">
                     Add the Facebook Page id on the{" "}

@@ -158,29 +158,106 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
    * question wrongly, which is worse than leaving it open.
    */
   has(lib, "export async function checkPageConnection", "the connection is checked against Meta");
-  has(lib, "?fields=name,tasks&access_token=", "by asking for the Page's own name");
-  has(lib, "if (j.error || !j.name)", "and no name means not connected");
+  has(lib, "?fields=name&", "by asking for the Page's own name");
+  has(lib, "if (nameJson.error || !nameJson.name)", "and no name means not connected");
   assert.ok(
     !/state: "connected"[\s\S]{0,80}Boolean\(pageId\)/.test(lib),
     "never green merely because the column is filled in"
   );
 
+  /*
+   * The name alone is not enough, and this was measured rather than reasoned:
+   * a Page token reads a *different* Page's public name perfectly well, so a
+   * token generated in Graph API Explorer with the wrong Page selected would
+   * have come back green. `/{page-id}/roles` separates them — verified live
+   * against a real Page token: `{"data":[]}` for the Page it administers,
+   * `(#200) ... insufficient administrative permission` for one it does not.
+   */
+  has(lib, "/roles?", "so administration is checked too");
+  has(lib, "rolesJson.error.code === 200", "and the wrong-Page case is named");
+  has(lib, "Regenerate the token with", "with the fix in the message");
+
+  /*
+   * `tasks` is not a field on a Page node. It was asked for once, on the
+   * assumption it reported what the token may do, and Meta answered "(#100)
+   * nonexisting field (tasks)" — which this code would have shown as Not
+   * connected for a Page that was working. Asserted so it cannot come back.
+   */
+  assert.ok(!/fields=name,tasks/.test(lib), "the tasks field is not asked for");
+  assert.ok(!/canPost/.test(lib) && !/canPost/.test(page), "and the guess it fed is gone");
+
   // The three states are different things and read differently: off is not a
   // failure, and a permanent red on a client who does not use Facebook is how
   // people learn to ignore red.
   has(lib, 'if (!pageId) return { state: "off" }', "no Page id is off, not broken");
-  has(lib, "state: \"broken\"", "a refusal is broken");
+  has(lib, 'state: "broken"', "a refusal is broken");
   has(page, '"Not connected"', "which the badge says in those words");
-  has(page, '"Connected — cannot post"', "and a readable-but-unpostable Page says so");
-  has(lib, 'tasks.includes("CREATE_CONTENT")', "which is what the permission check reads");
-  // An absent list is not a refusal — only a Page token returns one at all.
-  has(lib, "!Array.isArray(j.tasks) ||", "and an unknown permission is not reported as a no");
+  has(page, '"Not set up"', "and no Page id is neither");
+
+  // The commonest cause by far, so it names where to fix it rather than
+  // stating a fact about configuration.
+  has(lib, "paste this client's Page access token on their edit page", "a missing token says what to do");
 
   // It runs beside the plan queries, not after them: it is a network call to
   // Meta on a page somebody is waiting for.
   has(page, "checkPageConnection(c.id),", "the check is awaited in parallel");
   has(lib, "AbortSignal.timeout(8_000)", "and cannot hang the client page");
   ok("a client page says whether Facebook is connected, having actually asked");
+}
+
+/* ---------------- and it says the right thing about the wrong thing ---------------- */
+{
+  /*
+   * Meta's real answers, pasted verbatim from live calls against a real Page
+   * token. The advice attached to an error is the whole value of this
+   * function — a message that sends somebody to fix a permission when the
+   * actual fault is a typo in the Page id costs them an afternoon in Business
+   * Settings.
+   */
+  const MISSING_OBJECT =
+    "Unsupported get request. Object with ID '99999999999999' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api";
+  const WRONG_PAGE =
+    "(#10) This endpoint requires the 'pages_read_engagement' permission or the 'Page Public Content Access' feature or the 'Page Public Metadata Access' feature.";
+  const NOT_ADMIN =
+    "(#200) User does not have sufficient administrative permission for this action on this page.";
+
+  /*
+   * The ordering bug this block exists for: Meta's missing-object message
+   * lists every possible cause, "missing permissions" among them, so the
+   * permission catch-all matched a bad Page id first and told the user to go
+   * and grant pages_manage_posts.
+   */
+  const missing = fb.explain(MISSING_OBJECT, 100);
+  assert.match(missing, /check the Page id/i, "a Page id that does not exist blames the Page id");
+  assert.ok(
+    !/pages_manage_posts/.test(missing),
+    "and never sends them to Business Settings for a typo"
+  );
+
+  // A Page token reads its own Page freely; needing a reviewed permission to
+  // read this one means it belongs to a different Page.
+  const wrong = fb.explain(WRONG_PAGE, 10);
+  assert.match(wrong, /different Page selected/i, "a wrong-Page token says so");
+
+  // The genuine permission case still gets the genuine advice.
+  assert.match(
+    fb.explain(NOT_ADMIN, 200),
+    /pages_manage_posts/,
+    "an actual permission refusal names the permission"
+  );
+  assert.match(
+    fb.explain("Error validating access token: Session has expired", 190),
+    /expired or invalid/i,
+    "an expired token says to make a new one"
+  );
+
+  // Meta's own words survive in every case — the advice is appended, never
+  // substituted, because the original is what is searchable.
+  for (const [m, c] of [[MISSING_OBJECT, 100], [WRONG_PAGE, 10], [NOT_ADMIN, 200]]) {
+    assert.ok(fb.explain(m, c).startsWith(m), "Meta's own message is kept");
+  }
+  assert.equal(fb.explain(undefined, undefined), "Facebook refused the post.", "and silence still says something");
+  ok("each Meta error is explained as the thing that is actually wrong");
 }
 
 await finish(pass);

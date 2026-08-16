@@ -122,13 +122,40 @@ export async function publishToPage(input: Input): Promise<FacebookOutcome> {
  * about a token that visibly works for Instagram. Left in Meta's words that
  * reads as a bug in the portal.
  */
-function explain(message: string | undefined, code: number | undefined): string {
+export function explain(message: string | undefined, code: number | undefined): string {
   const base = message || "Facebook refused the post.";
-  if (code === 200 || code === 10 || /permission/i.test(base)) {
-    return `${base} — the token needs the pages_manage_posts permission, which a token made only for Instagram publishing does not have.`;
+
+  /*
+   * Order matters, and it is not the obvious one.
+   *
+   * Meta's message for a Page id that does not exist is "... does not exist,
+   * cannot be loaded due to missing permissions, or does not support this
+   * operation" — it lists every possible cause including permissions, so a
+   * `/permission/i` test matches it and a plain typo in the Page id got
+   * "the token needs pages_manage_posts". Measured, not guessed: asking for
+   * Page 99999999999999 with a working token produced exactly that.
+   *
+   * So the shapes that name themselves are matched first, and the permission
+   * catch-all only gets what is left.
+   */
+  if (/does not exist|Unsupported get request/i.test(base)) {
+    return `${base} — check the Page id. It is the Facebook Page's own id, not the Instagram account id.`;
   }
   if (code === 190) {
     return `${base} — the access token is expired or invalid. Generate a new Page token in Meta Business Settings.`;
+  }
+  /*
+   * Code 10 on a Page that plainly exists is the wrong-Page token: a Page
+   * token reads its *own* Page freely and needs a reviewed permission to read
+   * anyone else's, so this is what a token generated in Graph API Explorer
+   * with the wrong Page selected looks like. Verified against a real token
+   * pointed at a Page it does not administer.
+   */
+  if (code === 10) {
+    return `${base} — this token cannot act on that Page. It was most likely generated with a different Page selected; regenerate it with the right Page.`;
+  }
+  if (code === 200 || /permission/i.test(base)) {
+    return `${base} — the token needs the pages_manage_posts permission, which a token made only for Instagram publishing does not have.`;
   }
   if (code === 100 || code === 803) {
     return `${base} — check the Page id on the client. It is the Page's own id, not the Instagram account id.`;
@@ -177,8 +204,14 @@ async function record(
 }
 
 export type PageConnection =
-  /** Meta answered for this Page with this token. */
-  | { state: "connected"; pageName: string; canPost: boolean }
+  /**
+   * Meta answered for this Page with this token, and the token administers it.
+   * There is no "connected but cannot post" — a token that does not administer
+   * the Page fails the roles check below and is reported as broken, with the
+   * reason. A field that is true on every path it can be read on is not a
+   * signal.
+   */
+  | { state: "connected"; pageName: string }
   /** No Page id on the client. Nothing is wrong; Facebook is simply off. */
   | { state: "off" }
   | { state: "broken"; reason: string };
@@ -197,9 +230,22 @@ export type PageConnection =
  * token, the id is right, the token is valid, and it reaches that Page —
  * which is the whole of what "connected" means here.
  *
- * `tasks` is what the token holder is allowed to do with the Page. It comes
- * back only for a real Page token, so an absent list is reported as unknown
- * rather than as "cannot post" — the token may still be fine.
+ * `tasks` used to ride along on that same call to say what the token holder
+ * is allowed to do with the Page. Meta has since pulled it from a direct
+ * node fetch — confirmed live: it fails with the same "(#100) nonexisting
+ * field (tasks)" error even for a token that genuinely administers the Page
+ * being asked about, on every API version from v12 through v22. So it is no
+ * longer a signal this call can read.
+ *
+ * `/{page-id}/roles` fills the same gap and was checked the same way: it
+ * returns successfully (even an empty list) for a token that administers
+ * the Page, and a distinct `(#200) ... insufficient administrative
+ * permission` for a token that is valid but belongs to a *different* Page —
+ * which is exactly the failure mode the `tasks` check existed to catch (a
+ * token copied for the wrong Page in Graph API Explorer reads that Page's
+ * public name just fine, so the name-only call alone would have called it
+ * connected). A bad Page id gives a third, distinguishable error instead
+ * (code 100, missing-object), so `explain()` still gets the right message.
  */
 export async function checkPageConnection(clientId: number): Promise<PageConnection> {
   const row = await queryOne<{ fb_page_id: string | null; ig_access_token: string | null }>(
@@ -210,30 +256,50 @@ export async function checkPageConnection(clientId: number): Promise<PageConnect
   if (!pageId) return { state: "off" };
 
   const token = row?.ig_access_token || env.meta.accessToken;
-  if (!token) return { state: "broken", reason: "No Meta access token is configured." };
+  if (!token) {
+    // Named, because there are two places it could come from and the one that
+    // is set per client is the one people forget. META_ACCESS_TOKEN is a
+    // single token and every client has a different Page, so in practice the
+    // per-client field is the answer rather than the fallback.
+    return {
+      state: "broken",
+      reason: "No Meta access token — paste this client's Page access token on their edit page.",
+    };
+  }
 
   try {
-    const res = await fetch(
-      `${GRAPH}/${env.meta.apiVersion}/${pageId}?fields=name,tasks&access_token=${encodeURIComponent(token)}`,
-      // Short: this runs while somebody waits for a page to render, and a slow
-      // answer about Facebook is not worth a slow client page.
-      { cache: "no-store", signal: AbortSignal.timeout(8_000) }
-    );
-    const j = (await res.json().catch(() => ({}))) as {
+    const v = env.meta.apiVersion;
+    const qs = `access_token=${encodeURIComponent(token)}`;
+    const [nameRes, rolesRes] = await Promise.all([
+      fetch(`${GRAPH}/${v}/${pageId}?fields=name&${qs}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(8_000),
+      }),
+      fetch(`${GRAPH}/${v}/${pageId}/roles?${qs}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(8_000),
+      }),
+    ]);
+    const nameJson = (await nameRes.json().catch(() => ({}))) as {
       name?: string;
-      tasks?: string[];
+      error?: { message?: string; code?: number };
+    };
+    const rolesJson = (await rolesRes.json().catch(() => ({}))) as {
+      data?: unknown[];
       error?: { message?: string; code?: number };
     };
 
-    if (j.error || !j.name) {
-      return { state: "broken", reason: explain(j.error?.message, j.error?.code) };
+    if (nameJson.error || !nameJson.name) {
+      return { state: "broken", reason: explain(nameJson.error?.message, nameJson.error?.code) };
     }
-    return {
-      state: "connected",
-      pageName: j.name,
-      // No list means we were not told, which is not the same as being refused.
-      canPost: !Array.isArray(j.tasks) || j.tasks.includes("CREATE_CONTENT"),
-    };
+    if (rolesJson.error) {
+      const message =
+        rolesJson.error.code === 200
+          ? `This access token does not administer "${nameJson.name}" — it was likely generated with a different Page selected in Graph API Explorer. Regenerate the token with "${nameJson.name}" selected.`
+          : explain(rolesJson.error.message, rolesJson.error.code);
+      return { state: "broken", reason: message };
+    }
+    return { state: "connected", pageName: nameJson.name };
   } catch (err) {
     return {
       state: "broken",
