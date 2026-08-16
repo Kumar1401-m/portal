@@ -165,6 +165,13 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "auto_reminders",
+    definition: "auto_reminders TINYINT(1) NOT NULL DEFAULT 1",
+    purpose:
+      "Chase this client on WhatsApp for footage, approvals and the month's plan. On by default; off for a client who would rather hear from a person.",
+  },
+  {
+    table: "clients",
     column: "auto_payment_reminders",
     definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",
     purpose:

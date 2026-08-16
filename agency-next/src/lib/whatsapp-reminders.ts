@@ -86,25 +86,36 @@ const CHASE_AFTER_HOURS = 12;
 const AUTO_APPROVE_AFTER_HOURS = 24;
 /** Days before a shoot is due that we ask for the footage. */
 /**
- * When footage is asked for, and how many times.
+ * When footage is asked for: three times in a day, until it arrives.
  *
- * It was asked for once, on exactly one day — `due_date = CURDATE() + 3` — and
- * never again. A client who did not send it that morning was never chased,
- * and the task sat waiting until somebody noticed by hand.
+ * The first version asked once, on one day. The second asked three times but
+ * spread them across a week — three days before, on the day, two days after —
+ * which is not what was wanted either: the point is to catch somebody during
+ * the day they are actually working, not once a week for three weeks.
  *
- * Three asks now, as offsets from the due date: a few days out, on the day,
- * and once after it has passed. Three rather than a nag without end, and each
- * one says something the last did not — the message changes with the stage.
+ * So three slots in a day, and every day the footage is still missing.
+ * Morning, after lunch, and end of day, which is when a person is most likely
+ * to be at a desk and able to find the file.
  *
- * Every one stops the moment the footage arrives, because the query only ever
- * returns tasks that still have no link on them.
+ * Each one stops the moment the footage arrives — the query only ever returns
+ * tasks with no link on them — and each is claimed per client, per day, per
+ * slot, so a run happening twice cannot say the same thing twice.
  */
-const FOOTAGE_ASKS: { offset: number; stage: FootageStage }[] = [
-  { offset: -3, stage: "early" },
-  { offset: 0, stage: "due" },
-  { offset: 2, stage: "late" },
+const FOOTAGE_SLOTS = [
+  { at: "10:00", key: "morning", stage: "early" as FootageStage },
+  { at: "13:30", key: "midday", stage: "due" as FootageStage },
+  { at: "18:00", key: "evening", stage: "late" as FootageStage },
 ];
 
+/**
+ * How early the chase starts, in days before the due date.
+ *
+ * From here until the footage lands or the task stops needing it. Three a day
+ * is a lot, which is the ask — the guard against nagging for ever is that a
+ * task which is cancelled, rescheduled or fulfilled drops straight out of the
+ * query.
+ */
+const FOOTAGE_LEAD_DAYS = 3;
 /**
  * Take the right to send one reminder, or find it already taken.
  *
@@ -147,20 +158,39 @@ type Target = { client_id: number; company_name: string; group_id: string };
  * The default group wins, then the oldest. Both stable, so a client is always
  * addressed in the same place.
  */
-const ONE_GROUP = `(
+/*
+ * And the one place a client is excluded from all of it.
+ *
+ * Some clients would rather hear from a person than be chased by a robot, and
+ * every reminder below reaches them through this join — so the opt-out lives
+ * here rather than being repeated as a condition in five queries, one of
+ * which somebody would eventually forget.
+ *
+ * Computed once, because it needs `hasColumn`: a database that has not run
+ * the migration keeps chasing everybody, which is what it did before.
+ */
+let oneGroupSql: string | null = null;
+async function ONE_GROUP(): Promise<string> {
+  if (oneGroupSql) return oneGroupSql;
+  const optOut = (await hasColumn("clients", "auto_reminders"))
+    ? "AND client_id IN (SELECT id FROM clients WHERE auto_reminders = 1)"
+    : "";
+  oneGroupSql = `(
   SELECT client_id,
          SUBSTRING_INDEX(GROUP_CONCAT(group_id ORDER BY is_default DESC, id ASC), ',', 1) AS group_id
     FROM whatsapp_groups
-   WHERE is_active = 1
+   WHERE is_active = 1 ${optOut}
    GROUP BY client_id
 )`;
+  return oneGroupSql;
+}
 
 /** Clients we can actually reach: active, with a linked group. */
 async function reachableClients(): Promise<Target[]> {
   return query<Target>(
     `SELECT c.id AS client_id, c.company_name, g.group_id
        FROM clients c
-       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE c.status <> 'churned'`
   );
 }
@@ -213,12 +243,12 @@ async function deliver(
  * copy written for the preview would answer differently the first time either
  * was edited, and a preview that disagrees with the run is worse than none.
  */
-function findApprovalChases() {
+async function findApprovalChases() {
   return query<{ id: number; title: string; client_id: number; group_id: string }>(
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
-       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id AND s.status IN ('sent','delivered','read')
       WHERE d.status IN ('content_review','review')
       GROUP BY d.id, d.title, d.client_id, g.group_id
@@ -263,12 +293,12 @@ async function chaseApprovals(): Promise<{ sent: number; failed: number }> {
  * send has not been ignored by anyone, and approving it on the client's behalf
  * because our own send failed would be indefensible.
  */
-function findAutoApprovals() {
+async function findAutoApprovals() {
   return query<{ id: number; title: string; client_id: number; group_id: string }>(
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
-       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id
             AND s.status IN ('sent','delivered','read')
       WHERE d.status IN ('content_review','review')
@@ -348,7 +378,7 @@ async function autoApprove(): Promise<{ sent: number; failed: number }> {
  * footage" messages in a row reads as a malfunction, and the client's job is
  * the same either way: send a link.
  */
-function findFootageDue(offset: number) {
+async function findFootageDue(lead: number) {
   return query<{
     client_id: number;
     group_id: string;
@@ -361,42 +391,63 @@ function findFootageDue(offset: number) {
             COUNT(*) AS n
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
-       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE d.status IN ('pending','waiting_for_raw')
         AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
-        AND d.due_date = DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        AND d.due_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
       GROUP BY d.client_id, g.group_id, d.due_date
+      ORDER BY d.due_date ASC
       LIMIT 50`,
-    // An offset from the due date, expressed as "how many days ago was it
-    // due" so one query serves all three asks: -3 is three days from now,
-    // 0 is today, 2 is two days overdue.
-    [offset]
+    // Everything from `lead` days out and anything already past — the chase
+    // runs until the footage arrives, not until a date goes by.
+    [lead]
   );
 }
 
+/**
+ * The slot the clock is in, or null before the first one.
+ *
+ * Read from the database rather than this process. The times are the client's
+ * working day and the database keeps IST, while a server an hour either side
+ * of it would put the "10:00" message out at nine or eleven.
+ *
+ * A slot stays claimable until the next one, so a run that is late — or a
+ * schedule that only fires twice — still sends the one it is in rather than
+ * skipping it or firing all three at once.
+ */
+async function currentFootageSlot(): Promise<{ key: string; stage: FootageStage; today: string } | null> {
+  const [now] = await query<{ hm: string; today: string }>(
+    "SELECT DATE_FORMAT(NOW(), '%H:%i') AS hm, CURDATE() AS today"
+  );
+  if (!now) return null;
+  const passed = FOOTAGE_SLOTS.filter((s) => now.hm >= s.at);
+  const slot = passed[passed.length - 1];
+  return slot ? { key: slot.key, stage: slot.stage, today: String(now.today).slice(0, 10) } : null;
+}
+
 async function requestFootage(): Promise<{ sent: number; failed: number }> {
+  const slot = await currentFootageSlot();
+  // Before the first slot of the day there is nothing to send. A run at 6am
+  // should not use up the morning's message.
+  if (!slot) return { sent: 0, failed: 0 };
+
   let sent = 0, failed = 0;
+  const rows = await findFootageDue(FOOTAGE_LEAD_DAYS);
+  for (const r of rows) {
+    /*
+     * Claimed per client, per day, per slot. The date is in the key because
+     * the chase repeats daily — without it the first day's claim would
+     * silence every day after it.
+     */
+    const key = `c:${r.client_id}:${slot.today}:${slot.key}`;
+    if (!(await claim("footage_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
 
-  /*
-   * Each ask is claimed under its own key, so the three are independent and
-   * none of them can go twice. A client who sends the footage after the first
-   * simply stops matching the query, and the second and third never happen.
-   */
-  for (const ask of FOOTAGE_ASKS) {
-    const rows = await findFootageDue(ask.offset);
-    for (const r of rows) {
-      const key = `c:${r.client_id}:${r.due_date}:${ask.stage}`;
-      if (!(await claim("footage_due", key, { clientId: r.client_id, groupId: r.group_id }))) continue;
-
-      // Grouped by a single due_date in the query above, so every item carries
-      // the same one and the message leads with that date.
-      const text = footageText(
-        r.titles.split("||").map((title) => ({ title, due_date: r.due_date })),
-        ask.stage
-      );
-      if (await deliver("footage_due", key, r.group_id, text)) sent++;
-      else failed++;
-    }
+    const text = footageText(
+      r.titles.split("||").map((title) => ({ title, due_date: r.due_date })),
+      slot.stage
+    );
+    if (await deliver("footage_due", key, r.group_id, text)) sent++;
+    else failed++;
   }
   return { sent, failed };
 }
@@ -473,7 +524,7 @@ async function findUnpaidInvoices() {
             DATE_FORMAT(CURDATE(), '%x-W%v') AS week
        FROM invoices i
        JOIN clients c ON c.id = i.client_id AND c.status <> 'churned'
-       JOIN ${ONE_GROUP} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE i.status IN ('sent','overdue','partial')
         AND i.due_date IS NOT NULL AND i.due_date <= CURDATE()
         ${gated}
@@ -649,17 +700,14 @@ export async function pendingReminders(month?: string): Promise<PendingReminders
   // All three asks, since "what would the next run do" means every one of them
   // that is due today — not only the first.
   out.footage_due = await count(async () => {
-    let n = 0;
-    for (const ask of FOOTAGE_ASKS) {
-      const rows = await findFootageDue(ask.offset);
-      n += await unclaimedCount(
-        "footage_due",
-        rows.map((r) => `c:${r.client_id}:${r.due_date}:${ask.stage}`)
-      );
-    }
-    return n;
-  });
-  out.invoice_due = await count(async () =>
+    const slot = await currentFootageSlot();
+    if (!slot) return 0;
+    const rows = await findFootageDue(FOOTAGE_LEAD_DAYS);
+    return unclaimedCount(
+      "footage_due",
+      rows.map((r) => `c:${r.client_id}:${slot.today}:${slot.key}`)
+    );
+  });  out.invoice_due = await count(async () =>
     unclaimedCount("invoice_due", (await findUnpaidInvoices()).map((r) => `inv:${r.id}:${r.week}`))
   );
   out.monthly_plan = await count(async () => {

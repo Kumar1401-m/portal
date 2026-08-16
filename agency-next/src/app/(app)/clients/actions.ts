@@ -87,6 +87,11 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   if (await hasColumn("clients", "auto_payment_reminders")) {
     columns.auto_payment_reminders = fd.get("auto_payment_reminders") ? 1 : 0;
   }
+  // Being chased by the portal at all. Ticked by default, so an unticked box
+  // is a client who asked not to be.
+  if (await hasColumn("clients", "auto_reminders")) {
+    columns.auto_reminders = fd.get("auto_reminders") ? 1 : 0;
+  }
   // Whether the client reads the brief before the work starts. Ticked by
   // default in the form, so an unticked box here is a deliberate "no".
   if (await hasColumn("clients", "content_approval")) {

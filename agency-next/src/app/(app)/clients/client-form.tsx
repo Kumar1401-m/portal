@@ -47,6 +47,7 @@ export type ClientDefaults = Partial<{
   youtube_enabled: boolean;
   auto_payment_reminders: boolean;
   content_approval: boolean;
+  auto_reminders: boolean;
   youtube_channel_id: string;
   meta_ad_account_id: string;
   ads_access_token: string;
@@ -325,6 +326,29 @@ export function ClientForm({
                 The written brief goes to them, and the designer or editor starts once they say
                 yes. Untick it and the brief goes straight to the team — nothing is sent to the
                 client until the finished work is ready.
+              </span>
+            </span>
+          </label>
+
+          <label
+            htmlFor="auto_reminders"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="auto_reminders"
+              type="checkbox"
+              name="auto_reminders"
+              value="1"
+              defaultChecked={d.auto_reminders !== false}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Chase this client on WhatsApp</span>
+              <br />
+              <span className="text-muted-foreground">
+                Footage, approvals and the month&apos;s plan, sent to their group on a schedule.
+                Untick it for a client who would rather hear from a person — everything else,
+                including content and finished videos, still goes to them.
               </span>
             </span>
           </label>

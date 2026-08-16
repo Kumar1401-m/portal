@@ -68,6 +68,7 @@ export default async function EditClientPage({
     youtube_enabled: Number(client.youtube_enabled) === 1,
     auto_payment_reminders: Number(client.auto_payment_reminders) === 1,
     // Null (column not there yet) means on — same rule the server applies.
+    auto_reminders: client.auto_reminders === null || Number(client.auto_reminders) === 1,
     content_approval: client.content_approval === null || Number(client.content_approval) === 1,
     youtube_channel_id: client.youtube_channel_id ?? "",
     meta_ad_account_id: client.meta_ad_account_id ?? "",

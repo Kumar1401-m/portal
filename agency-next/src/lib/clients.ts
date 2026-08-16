@@ -42,6 +42,8 @@ export type ClientFull = {
   /** Opt-in to unattended posting. Off unless someone deliberately ticks it. */
   auto_publish: number | null;
   youtube_enabled: number | null;
+  /** Null pre-migration, which reads as on. */
+  auto_reminders: number | null;
   auto_payment_reminders: number | null;
   /** Null on a database without the column, which reads as on. */
   content_approval: number | null;
