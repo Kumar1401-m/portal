@@ -22,3 +22,6 @@ deploy/*.secret.txt
 
 # Generated per-server by deploy/hostinger.sh — machine-specific, never shared.
 deploy/docker-compose.override.yml
+
+# Scratch diagnostics. Swept into a public repo once by `git add -A`.
+_to_delete/
