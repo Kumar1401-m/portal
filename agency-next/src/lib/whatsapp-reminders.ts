@@ -15,6 +15,7 @@
  * data, so a reminder can only ever say something the boards already say.
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, execute, hasColumn, hasTable } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { sendDueMessages } from "./reminder-outbox";
@@ -191,7 +192,7 @@ async function reachableClients(): Promise<Target[]> {
     `SELECT c.id AS client_id, c.company_name, g.group_id
        FROM clients c
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
-      WHERE c.status <> 'churned'`
+      WHERE ${onTheFloor()}`
   );
 }
 
@@ -247,7 +248,7 @@ async function findApprovalChases() {
   return query<{ id: number; title: string; client_id: number; group_id: string }>(
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
-       JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
+       JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id AND s.status IN ('sent','delivered','read')
       WHERE d.status IN ('content_review','review')
@@ -297,7 +298,7 @@ async function findAutoApprovals() {
   return query<{ id: number; title: string; client_id: number; group_id: string }>(
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
-       JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
+       JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id
             AND s.status IN ('sent','delivered','read')
@@ -390,7 +391,7 @@ async function findFootageDue(lead: number) {
             GROUP_CONCAT(d.title ORDER BY d.id SEPARATOR '||') AS titles,
             COUNT(*) AS n
        FROM deliverables d
-       JOIN clients c ON c.id = d.client_id AND c.status <> 'churned'
+       JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE d.status IN ('pending','waiting_for_raw')
         AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
@@ -523,7 +524,7 @@ async function findUnpaidInvoices() {
     `SELECT i.id, i.invoice_no, i.total, i.due_date, i.client_id, g.group_id,
             DATE_FORMAT(CURDATE(), '%x-W%v') AS week
        FROM invoices i
-       JOIN clients c ON c.id = i.client_id AND c.status <> 'churned'
+       JOIN clients c ON c.id = i.client_id AND ${onTheFloor()}
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE i.status IN ('sent','overdue','partial')
         AND i.due_date IS NOT NULL AND i.due_date <= CURDATE()
@@ -575,13 +576,13 @@ async function teamDigest(teamGroupId: string, today: string): Promise<{ sent: n
   const rows = await query<{ company_name: string; title: string; due_date: string | null; status: string }>(
     `SELECT c.company_name, d.title, d.due_date, d.status
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned' AND d.due_date <= CURDATE()
+      WHERE ${onTheFloor()} AND d.due_date <= CURDATE()
         AND d.status NOT IN ('posted','completed','cancelled','rejected')
       ORDER BY d.due_date ASC LIMIT 25`
   );
   const awaiting = await query<{ n: number }>(
     `SELECT COUNT(*) AS n FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned' AND d.status IN ('content_review','review')`
+      WHERE ${onTheFloor()} AND d.status IN ('content_review','review')`
   );
 
   if (rows.length === 0) return { sent: 0, failed: 0 };
@@ -736,7 +737,7 @@ export async function unreachableClients(): Promise<{ id: number; company_name: 
   try {
     return await query<{ id: number; company_name: string }>(
       `SELECT c.id, c.company_name FROM clients c
-        WHERE c.status <> 'churned'
+        WHERE ${onTheFloor()}
           AND NOT EXISTS (
             SELECT 1 FROM whatsapp_groups g WHERE g.client_id = c.id AND g.is_active = 1
           )

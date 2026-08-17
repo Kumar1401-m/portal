@@ -177,7 +177,7 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   // desk did not, so a client who left kept an unwritten month on it for ever
   // — growing, never actionable, counted in the heading as work outstanding.
   const lib = readFileSync(`${SRC}/lib/content.ts`, "utf8");
-  has(lib, "AND c.status != 'churned'", "a client who left owes nobody a brief");
+  has(lib, "AND ${onTheFloor()}", "a client who left owes nobody a brief — nor does a paused one");
 
   // "❤️" is two code points, and inside [❤️…] the class holds both — so it
   // matched a bare variation selector, and "☺️" came back as a heart.

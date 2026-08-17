@@ -1,5 +1,6 @@
 /** Poster workflow queries (deliverables where video_type = 'Poster'). */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query } from "./db";
 import type { SessionUser } from "./auth";
 import { DONE_STATUSES } from "./constants";
@@ -33,7 +34,7 @@ export async function getPosters(user: SessionUser): Promise<PosterRow[]> {
     conds.push("d.assigned_to = ?");
     params.push(user.id);
   } else {
-    conds.push("c.status != 'churned'");
+    conds.push(onTheFloor());
   }
   return query<PosterRow>(
     `SELECT d.id, d.title, d.status, d.edited_link, d.reject_reason, d.due_date,

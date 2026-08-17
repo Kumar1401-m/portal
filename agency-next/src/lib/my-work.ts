@@ -12,6 +12,7 @@
  * queries can express.
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, queryOne, hasColumn } from "./db";
 import type { SessionUser } from "./auth";
 
@@ -95,7 +96,7 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
        COALESCE(SUM(d.status IN ${TO_DO} AND d.due_date < CURDATE()),0)  AS overdue,
        COALESCE(SUM(d.status IN ${TO_DO} AND d.due_date = CURDATE()),0)  AS dueToday
      FROM deliverables d JOIN clients c ON c.id = d.client_id
-     WHERE c.status <> 'churned' AND ${mine}`,
+     WHERE ${onTheFloor()} AND ${mine}`,
     [month]
   );
 
@@ -107,7 +108,7 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
             COALESCE(SUM(d.status IN ${TO_DO}),0)           AS toDo,
             MIN(CASE WHEN d.status IN ${TO_DO} THEN d.due_date END) AS nextDue
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned' AND ${mine}
+      WHERE ${onTheFloor()} AND ${mine}
       GROUP BY c.id, c.company_name
       ORDER BY (COALESCE(SUM(d.status IN ${TO_DO}),0) = 0), c.company_name`,
     [month]
@@ -124,7 +125,7 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
     `SELECT d.id, d.title, c.company_name AS company, d.status, d.due_date AS dueDate,
             (d.due_date IS NOT NULL AND d.due_date < CURDATE()) AS overdue
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned' AND d.assigned_to = ${me} AND ${COUNTS}
+      WHERE ${onTheFloor()} AND d.assigned_to = ${me} AND ${COUNTS}
         AND d.status IN ${TO_DO}
       ORDER BY d.due_date IS NULL, d.due_date ASC, d.id ASC
       LIMIT 8`
@@ -198,7 +199,7 @@ export async function awaitingAdminReview(user: SessionUser): Promise<
   return query(
     `SELECT d.id, d.title, c.company_name AS company, ${since} AS since
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned' AND d.assigned_to = ?
+      WHERE ${onTheFloor()} AND d.assigned_to = ?
         AND d.status IN ${WITH_ADMIN}
       ORDER BY ${since} ASC LIMIT 20`,
     [Math.trunc(Number(user.id))]

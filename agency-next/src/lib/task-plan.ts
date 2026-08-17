@@ -22,6 +22,7 @@
  * Every date is still movable from the plan.
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, queryOne, execute } from "./db";
 import { getCategoryMap } from "./categories";
 import { DEFAULT_CATEGORIES, videoTypeForService, type ServiceKey } from "./services";
@@ -656,7 +657,7 @@ export async function generateForAllClients(
   const mk = safeMonth(month);
   const clients = await query<{ id: number }>(
     `SELECT id FROM clients
-      WHERE status <> 'churned'
+      WHERE ${onTheFloor("")}
         AND (COALESCE(monthly_deliverables,0) > 0 OR COALESCE(monthly_posters,0) > 0)
       ORDER BY id`
   );
@@ -682,7 +683,7 @@ export async function pendingAcrossClients(
   const mk = safeMonth(month);
   const clients = await query<{ id: number }>(
     `SELECT id FROM clients
-      WHERE status <> 'churned'
+      WHERE ${onTheFloor("")}
         AND (COALESCE(monthly_deliverables,0) > 0 OR COALESCE(monthly_posters,0) > 0)`
   );
   let n = 0, videos = 0, posters = 0;

@@ -1,5 +1,6 @@
 /** Read/write queries for the deliverables (content) module. */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, queryOne, hasColumn } from "./db";
 import { buildVideoPermalink } from "./video-link";
 import type { CaptionSource } from "./ai";
@@ -102,7 +103,7 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
     conds.push("d.client_id = ?");
     params.push(f.clientId);
   } else {
-    conds.push("c.status != 'churned'");
+    conds.push(onTheFloor());
   }
   if (f.status) {
     conds.push("d.status = ?");
@@ -187,7 +188,7 @@ function buildWhere(f: DeliverableFilters): { where: string; params: (string | n
   return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
 }
 
-/** Admin/staff deliverables list with filters (churned clients hidden by default). */
+/** Admin/staff deliverables list with filters (a client who is not on the floor is hidden). */
 export async function getDeliverables(
   f: DeliverableFilters = {}
 ): Promise<DeliverableListRow[]> {
@@ -323,7 +324,7 @@ export type ApprovalCounts = {
   written: number;
 };
 
-/** Counts for the Approvals worklist tabs (churned clients excluded). */
+/** Counts for the Approvals worklist tabs (clients not on the floor excluded). */
 export async function getApprovalCounts(crmClientIds?: number[] | null): Promise<ApprovalCounts> {
   if (crmClientIds && crmClientIds.length === 0) {
     return { content: 0, final: 0, changes: 0, approved: 0, scheduled: 0, posted: 0, written: 0 };
@@ -342,7 +343,7 @@ export async function getApprovalCounts(crmClientIds?: number[] | null): Promise
        COALESCE(SUM(d.posting_status = 'posted' OR d.status IN ('posted','completed')),0) AS posted,
        COALESCE(SUM(d.status = 'pending' AND TRIM(COALESCE(d.description,'')) <> ''),0) AS written
      FROM deliverables d JOIN clients c ON c.id = d.client_id
-     WHERE c.status != 'churned' ${scope}`,
+     WHERE ${onTheFloor()} ${scope}`,
     crmClientIds && crmClientIds.length ? crmClientIds : []
   );
   return {
@@ -401,7 +402,7 @@ export async function boardEmptyReason(
               COALESCE(SUM(d.due_date IS NULL),0) AS undated,
               COALESCE(SUM(d.status IN ('posted','completed','cancelled','rejected')),0) AS finished
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-        WHERE c.status != 'churned' ${scope}`,
+        WHERE ${onTheFloor()} ${scope}`,
       params
     ),
     queryOne<Record<string, unknown>>(
@@ -425,7 +426,13 @@ export async function boardEmptyReason(
 
 export type ClientMini = { id: number; company_name: string };
 
-/** Active/non-churned clients for dropdowns. */
+/**
+ * Clients you can still pick in a dropdown.
+ *
+ * Deliberately wider than onTheFloor(): a paused or inactive client is not
+ * work on the floor, but you must still be able to choose them — reassigning
+ * an old task, or setting one up for the month they come back.
+ */
 export async function getClientsMini(crmClientIds?: number[] | null): Promise<ClientMini[]> {
   if (crmClientIds && crmClientIds.length === 0) return [];
   const scope =

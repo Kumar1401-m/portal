@@ -4,6 +4,7 @@
  * components (no HTTP round-trip).
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, queryOne, hasColumn } from "./db";
 import { nowUtc } from "./posting";
 
@@ -83,7 +84,7 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
           SUM(d.due_date > CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
           SUM(d.due_date < CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-         WHERE c.status != 'churned'`
+         WHERE ${onTheFloor()}`
       ),
       queryOne<Record<string, unknown>>(
         `SELECT
@@ -99,13 +100,13 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
           COALESCE(SUM(d.status IN ('content_review','review')),0) AS awaiting,
           COALESCE(SUM(d.status = 'changes_requested'),0) AS changes
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-         WHERE c.status != 'churned'`
+         WHERE ${onTheFloor()}`
       ),
       query<AdminDashboard["upcoming_tasks"][number]>(
         `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
                 d.video_type, d.content_category, c.company_name
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-         WHERE c.status != 'churned'
+         WHERE ${onTheFloor()}
            AND d.due_date >= CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')
          ORDER BY d.due_date ASC LIMIT 8`
       ),
@@ -182,7 +183,7 @@ export async function getServiceMix(): Promise<ServiceMixRow[]> {
               ) AS service,
               d.status, d.due_date, d.month_key
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-       WHERE c.status != 'churned'
+       WHERE ${onTheFloor()}
      ) t
      GROUP BY t.service`
   );
@@ -291,7 +292,7 @@ export async function getProductionSummary(clientIds?: number[] | null): Promise
      LEFT JOIN deliverables d
        ON d.client_id = c.id AND d.month_key = DATE_FORMAT(CURDATE(), '%Y-%m')
        AND d.status NOT IN ('cancelled','rejected')
-     WHERE c.status != 'churned' ${scope}
+     WHERE ${onTheFloor()} ${scope}
      GROUP BY c.id ORDER BY c.company_name`
   );
   return rows.map((r) => {
@@ -406,19 +407,19 @@ export async function getCrmDashboard(clientIds: number[] | null): Promise<CrmDa
          SUM(d.due_date > CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS upcoming,
          SUM(d.due_date < CURDATE() AND d.status NOT IN ('posted','completed','cancelled','rejected')) AS overdue
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-       WHERE c.status != 'churned' ${jScope}`
+       WHERE ${onTheFloor()} ${jScope}`
     ),
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS awaiting
          FROM deliverables d JOIN clients c ON c.id = d.client_id
         WHERE d.status IN ('content_review','review')
-          AND c.status != 'churned' ${jScope}`
+          AND ${onTheFloor()} ${jScope}`
     ),
     query<AdminDashboard["upcoming_tasks"][number]>(
       `SELECT d.id, d.title, d.due_date, d.status, d.platform, d.service,
               d.video_type, d.content_category, c.company_name
          FROM deliverables d JOIN clients c ON c.id = d.client_id
-        WHERE c.status != 'churned'
+        WHERE ${onTheFloor()}
           AND d.due_date >= CURDATE()
           AND d.status NOT IN ('posted','completed','cancelled','rejected') ${jScope}
         ORDER BY d.due_date ASC LIMIT 8`
@@ -470,6 +471,11 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
         AND d.scheduled_at IS NOT NULL
         AND d.scheduled_at < ? - INTERVAL 30 MINUTE
         AND d.instagram_status <> 'posted'
+        -- This one had no client filter at all, not even for churned: it
+        -- joined clients only to read the company name. A post scheduled
+        -- before a client was stopped stayed on the dashboard as late, for
+        -- ever, with nobody able to make it un-late.
+        AND ${onTheFloor()}
         ${scope}
       ORDER BY d.scheduled_at ASC
       LIMIT 20`,

@@ -12,6 +12,7 @@
  * Today's Tasks' job, so it appears there too.
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, queryOne, execute } from "./db";
 import { getGroupsForClient } from "./whatsapp-approvals";
 import { sendTextToGroup } from "./whatsapp-service-client";
@@ -99,7 +100,7 @@ export async function getContentBoard(
        JOIN clients c ON c.id = d.client_id
        LEFT JOIN users u ON u.id = d.assigned_to
       WHERE d.status IN ('pending','content_review')
-        AND c.status != 'churned'${scope}
+        AND ${onTheFloor()}${scope}
       ORDER BY c.company_name ASC, d.campaign IS NULL, d.campaign ASC,
                d.due_date IS NULL, d.due_date ASC, d.id ASC`
   );
