@@ -584,26 +584,17 @@ async function applyStatus(
   const contentGate = status === "approved" && d.status === "content_review";
 
   /*
-   * Not every client signs the copy off, and waiting on one who doesn't
-   * approve stalls the work indefinitely.
+   * Content review is a step inside the agency now.
    *
-   * Most do: the brief goes to them, they read it, the maker starts. But some
-   * hand us the month and want it made — sending those a content approval
-   * gets no reply, and the task sits in `content_review` until somebody
-   * notices and nudges it along by hand.
-   *
-   * So for a client with the sign-off switched off, "send for content review"
-   * skips the client and hands the brief straight to the maker. Same button,
-   * same one press; only the middle step disappears. `content_approval` is
-   * null on a database the column hasn't reached, which reads as on — the
-   * behaviour everything had before this.
+   * There used to be a per-client switch here: some clients read the month's
+   * copy before anything was made and some handed us the month and wanted it
+   * made, so "send for content review" either went to the client or skipped
+   * them. Content no longer goes to a client at all, so there is nothing to
+   * skip — every task passes through the step and the team moves it on.
    */
-  const clientSignsOffContent = d.content_approval === null || Number(d.content_approval) === 1;
-  const skipsClientContent = status === "content_review" && !clientSignsOffContent;
-
-  const effective = contentGate || skipsClientContent ? "waiting_for_raw" : status;
-  /** Either route into the maker's hands: approved by the client, or straight through. */
-  const handedToMaker = contentGate || skipsClientContent;
+  const effective = contentGate ? "waiting_for_raw" : status;
+  /** Approving the copy is what puts it in the maker's hands. */
+  const handedToMaker = contentGate;
 
   const updates: Record<string, string | null> = { status: effective };
   if (reason) updates.reject_reason = reason;
@@ -759,12 +750,10 @@ async function applyStatus(
     const isPoster =
       d.service === "poster_designing" ||
       (!d.service && String(d.video_type ?? "").toLowerCase() === "poster");
-    // Who released it changes the sentence, not the fact. Telling a designer
-    // the client approved something the client never saw would be a lie they
-    // might repeat back to that client.
-    const released = skipsClientContent
-      ? `The content for "${d.title}" (${d.company_name}) is written and it's yours. `
-      : `${d.company_name} approved the content for "${d.title}". `;
+    // It never says the client approved it, because the client never saw it —
+    // content is settled inside the agency, and a designer told otherwise
+    // might repeat it back to that client.
+    const released = `The content for "${d.title}" (${d.company_name}) is written and it's yours. `;
     await notifyUser(
       d.assigned_to,
       "general",

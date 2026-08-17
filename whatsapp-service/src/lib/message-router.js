@@ -226,41 +226,7 @@ class MessageRouter {
    * the reply should say so.
    */
   async acknowledge(groupId, command, videoCode, data) {
-    /*
-     * Content is answered as a batch, and needs its own sentences.
-     *
-     * "We'll get it scheduled for posting" is the right thing to say about an
-     * approved video and the wrong thing to say about approved copy — nothing
-     * has been made yet. The portal tells us which kind this was, because only
-     * it knows what was in front of the client.
-     */
-    if (data?.kind === 'content') {
-      const n = Number(data.count) || 1;
-      /*
-       * The noun and its pronoun are decided together, once.
-       *
-       * Choosing them separately is how "we'll rework all 2 pieces and send it
-       * back" happens — and "all 2" is not something anybody says. Two is
-       * "both", more is "all five", one is just "the content".
-       */
-      const [subject, pronoun, verb] =
-        n === 1
-          ? ['The content', 'it', 'is']
-          : n === 2
-            ? ['Both pieces', 'them', 'are']
-            : [`All ${n} pieces`, 'them', 'are'];
-
-      const text =
-        command === 'approve'
-          ? `✅ Thank you! ${subject} ${verb} approved — we'll get started on ${pronoun} right away.`
-          : command === 'change'
-            ? `📝 Thank you — noted. We'll rework ${pronoun} and send ${pronoun} back to you here.`
-            : `🚫 Understood — we've set ${pronoun} aside. Someone from our team will follow up with you shortly.`;
-      await this.replySafely(groupId, text);
-      return;
-    }
-
-    /*
+        /*
      * The title, not the code.
      *
      * The video message stopped showing a code a while ago, so echoing one

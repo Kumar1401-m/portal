@@ -70,7 +70,7 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
     queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS total,
         SUM(status IN ('approved','scheduled','posted','completed')) AS approved,
-        SUM(status IN ('content_review','review')) AS awaiting,
+        SUM(status = 'review') AS awaiting,
         SUM(status IN ('posted','completed')) AS posted
        FROM deliverables WHERE client_id = ? AND month_key = DATE_FORMAT(CURDATE(),'%Y-%m')`,
       [clientId]
@@ -83,7 +83,7 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
     ),
     query<PortalOverview["awaiting_items"][number]>(
       `SELECT id, title, status, service, video_type, content_category FROM deliverables
-       WHERE client_id = ? AND status IN ('content_review','review')
+       WHERE client_id = ? AND status = 'review'
        ORDER BY id DESC`,
       [clientId]
     ),
@@ -252,7 +252,7 @@ export async function getPortalActionCounts(clientId: number): Promise<PortalAct
   const [content, invoices] = await Promise.all([
     queryOne<{ n: number }>(
       `SELECT COUNT(*) AS n FROM deliverables
-       WHERE client_id = ? AND status IN ('content_review','review','waiting_for_raw')`,
+       WHERE client_id = ? AND status IN ('review','waiting_for_raw')`,
       [clientId]
     ),
     queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM invoices WHERE client_id = ? AND status != 'paid'", [

@@ -54,20 +54,29 @@ async function clientTransition(
     [id, user.clientId]
   );
   if (!d) return { ok: false, error: "Not found." };
-  if (!["content_review", "review"].includes(d.status)) {
+  if (d.status !== "review") {
     return { ok: false, error: "This item isn't awaiting your review." };
   }
   if (action === "changes" && !reason) {
     return { ok: false, error: "Please describe the change you'd like." };
   }
 
-  // Gate 1: approving content_review approves the CONTENT → waiting_for_raw.
-  const contentGate = action === "approve" && d.status === "content_review";
+  /*
+   * One gate, not two.
+   *
+   * There used to be a content gate here as well: a client approved the
+   * written brief, which moved the task to `waiting_for_raw`, and then
+   * approved the finished video later. The content half is gone — the copy is
+   * now settled inside the agency and only the finished piece is put in front
+   * of a client — so this is the final approval and nothing else. The check
+   * above is what enforces it; a task in `content_review` is not the client's
+   * to answer and is refused as not awaiting their review.
+   */
   let effective: string;
   const updates: Record<string, string | null> = {};
   if (action === "approve") {
-    effective = contentGate ? "waiting_for_raw" : "approved";
-    updates.approval_status = contentGate ? "pending" : "approved";
+    effective = "approved";
+    updates.approval_status = "approved";
     updates.reject_reason = null;
   } else {
     effective = "changes_requested";
@@ -145,11 +154,9 @@ async function clientTransition(
 
   const msg =
     action === "approve"
-      ? contentGate
-        ? `${d.title}: content approved — ready for the video.`
-        : scheduledFor
-          ? `${d.title}: approved by the client — auto-posting to Instagram at ${scheduledFor} UTC.`
-          : `${d.title}: approved by the client.`
+      ? scheduledFor
+        ? `${d.title}: approved by the client — auto-posting to Instagram at ${scheduledFor} UTC.`
+        : `${d.title}: approved by the client.`
       : `${d.title}: client requested changes — ${reason}`;
   await notifyAdmins(
     action === "approve" ? "approval_needed" : "changes_requested",
@@ -166,9 +173,8 @@ async function clientTransition(
   revalidatePath("/approvals");
   return {
     ok: true,
-    message: contentGate
-      ? "Content approved — thank you! We'll start on the video."
-      : action === "approve"
+    message:
+      action === "approve"
         ? scheduledFor
           ? "Approved — thank you! This will post automatically at the best time."
           : "Approved — thank you!"

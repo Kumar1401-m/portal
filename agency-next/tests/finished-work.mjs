@@ -84,49 +84,6 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("a generated name is told apart from one somebody chose");
 }
 
-/* ---------------- and renaming only ever replaces a placeholder ---------------- */
-{
-  const actions = readFileSync(`${SRC}/app/(app)/content/actions.ts`, "utf8");
-
-  has(
-    actions,
-    "if (body && isPlaceholderTitle(row[0].title))",
-    "a title somebody typed is never overwritten"
-  );
-  // Best-effort in every other way: no model, thin copy, an unusable answer.
-  // The save succeeded either way, because it did.
-  has(actions, "let renamedTo: string | null = null", "the rename is separate from the save");
-  has(actions, "} catch (err) {", "and cannot fail it");
-
-  const lib = readFileSync(`${SRC}/lib/content.ts`, "utf8");
-  has(lib, "if (copy.length < 25) return null", "three words are not worth summarising");
-  has(lib, "if (!title || isPlaceholderTitle(title)) return null", "and an echoed placeholder is not a name");
-  // Models add quotes and full stops however firmly they are asked not to.
-  has(lib, "const title = raw.replace(", "the answer is trimmed, not trusted");
-  has(lib, ".slice(0, 120)", "and bounded, so a paragraph cannot become a title");
-  ok("a piece is named from its copy, and only when it had no name");
-}
-
-/* ---------------- the writing happens in a popup ---------------- */
-{
-  const brief = readFileSync(`${SRC}/app/(app)/content/brief-row.tsx`, "utf8");
-
-  // Eight open textareas down a page is how you scroll past two you were not
-  // working on to reach the third. The tasks already exist by this screen —
-  // it is for filling them in, one at a time.
-  has(brief, "<Modal open={open}", "the editor is a dialog");
-  has(brief, "const [open, setOpen] = useState(false)", "closed until asked for");
-  has(brief, "preview.slice(0, 70)", "and the row shows enough to tell two apart");
-
-  // The card keeps one textarea — the box for what the client asked to be
-  // changed, which belongs with their answer and is typed once, not eight
-  // times down a page. What must not be there is a second way to edit a brief.
-  const card = readFileSync(`${SRC}/app/(app)/content/client-card.tsx`, "utf8");
-  assert.ok(!/saveBriefAction/.test(card), "the card has no brief editor of its own");
-  assert.ok(!/value=\{body\}/.test(card), "and nothing on it is bound to a brief's copy");
-  ok("briefs are a list of lines, written in a popup");
-}
-
 /* ---------------- and it is findable, in exactly one place ---------------- */
 {
   // The hole this change would otherwise have opened: hidden from both working
@@ -153,32 +110,8 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   ok("posted work is findable, in exactly one place");
 }
 
-/* ---------------- a month approved at once is one notification ---------------- */
-{
-  const wf = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
-  has(wf, "if (handedToMaker && d.assigned_to && !quiet) {", "the per-task alert can be held");
-  has(wf, 'formData.get("quiet") === "1"', "by the caller that is sending its own");
-
-  const actions = readFileSync(`${SRC}/app/(app)/content/actions.ts`, "utf8");
-  has(actions, 'one.set("quiet", "1")', "which the batch approval does");
-  has(actions, "const byPerson = new Map", "and then sends one summary per person");
-  // Read before the loop: once approved these rows no longer match the query
-  // that found them.
-  const readAt = actions.indexOf("d.status = 'content_review'`");
-  const loopAt = actions.indexOf("for (const id of ids) {");
-  assert.ok(readAt > 0 && loopAt > readAt, "the makers are read before the statuses move");
-  has(actions, "!settled.has(m.id)", "and only what actually moved is announced");
-  ok("approving fifteen pieces tells the designer once, not fifteen times");
-}
-
 /* ---------------- housekeeping the boards already did ---------------- */
 {
-  // Every other board excludes churned clients via buildWhere. The content
-  // desk did not, so a client who left kept an unwritten month on it for ever
-  // — growing, never actionable, counted in the heading as work outstanding.
-  const lib = readFileSync(`${SRC}/lib/content.ts`, "utf8");
-  has(lib, "AND ${onTheFloor()}", "a client who left owes nobody a brief — nor does a paused one");
-
   // "❤️" is two code points, and inside [❤️…] the class holds both — so it
   // matched a bare variation selector, and "☺️" came back as a heart.
   const ai = readFileSync(`${SRC}/lib/whatsapp-ai.ts`, "utf8");

@@ -844,13 +844,3 @@ function postingDay(scheduledAt: string | null, country: string | null): string 
   return local ? local.slice(0, 10) : null;
 }
 
-/** Months that already have tasks, newest first — for the month picker. */
-export async function clientMonths(clientId: number): Promise<string[]> {
-  const rows = await query<{ month_key: string }>(
-    `SELECT DISTINCT month_key FROM deliverables
-      WHERE client_id = ? AND month_key IS NOT NULL AND month_key <> ''
-      ORDER BY month_key DESC LIMIT 24`,
-    [clientId]
-  );
-  return rows.map((r) => r.month_key);
-}

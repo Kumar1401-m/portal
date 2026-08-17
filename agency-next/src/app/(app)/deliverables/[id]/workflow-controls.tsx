@@ -15,7 +15,7 @@ type Variant = "default" | "outline" | "destructive";
 type Action = { label: string; status: string; variant?: Variant; reason?: boolean };
 
 const NEXT: Record<string, Action[]> = {
-  pending: [{ label: "Send for content review", status: "content_review" }],
+  pending: [{ label: "Move to content review", status: "content_review" }],
   content_review: [{ label: "Approve content", status: "approved" }],
   waiting_for_raw: [{ label: "Mark raw uploaded", status: "raw_uploaded" }],
   raw_uploaded: [{ label: "Start editing", status: "editing" }],
@@ -37,28 +37,21 @@ const NEXT: Record<string, Action[]> = {
   cancelled: [{ label: "Reopen", status: "content_review" }],
 };
 
-/** Sending content to the client (either gate) is restricted to super_admin and crm. */
-const SEND_TO_CLIENT_STATUSES = ["content_review", "review"];
+/**
+ * Putting something in front of a client is restricted to super_admin and crm.
+ *
+ * Only the finished piece now. Content review used to be here too, back when
+ * a client signed the copy off; it is an internal step now and anyone who can
+ * move the task can move it.
+ */
+const SEND_TO_CLIENT_STATUSES = ["review"];
 
-function actionsFor(
-  status: string,
-  canSendToClient: boolean,
-  editingOnly: boolean,
-  clientApprovesContent: boolean
-): Action[] {
-  // Copied, not referenced: the label below is rewritten per client, and NEXT
-  // is a module-level constant shared by every render on the server.
+function actionsFor(status: string, canSendToClient: boolean, editingOnly: boolean): Action[] {
+  // Copied, not referenced: NEXT is a module-level constant shared by every
+  // render on the server, and callers must not be able to mutate it.
   const out = (NEXT[status] || [])
     .filter((a) => canSendToClient || !SEND_TO_CLIENT_STATUSES.includes(a.status))
-    .map((a) =>
-      // For a client who doesn't sign the copy off, the same press hands it
-      // straight to the maker (see applyStatus). The button has to say so — one
-      // labelled "send for content review" that sends nothing to anybody for
-      // review is how people stop trusting the buttons.
-      !clientApprovesContent && a.status === "content_review"
-        ? { ...a, label: "Hand the content to the team" }
-        : { ...a }
-    );
+    .map((a) => ({ ...a }));
   if (["content_review", "review"].includes(status)) {
     out.push({ label: "Request changes", status: "changes_requested", variant: "outline", reason: true });
   }
@@ -79,21 +72,18 @@ export function WorkflowControls({
   status,
   canSendToClient,
   editingOnly = false,
-  clientApprovesContent = true,
 }: {
   deliverableId: number;
   status: string;
   canSendToClient: boolean;
   /** True for a video editor: the edit's own stages, nothing beyond them. */
   editingOnly?: boolean;
-  /** False when this client has content sign-off switched off in their settings. */
-  clientApprovesContent?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<StatusState, FormData>(
     changeStatusAction,
     { ok: false }
   );
-  const actions = actionsFor(status, canSendToClient, editingOnly, clientApprovesContent);
+  const actions = actionsFor(status, canSendToClient, editingOnly);
   const needsReason = actions.some((a) => a.reason);
 
   return (

@@ -166,7 +166,7 @@ const ALL = [
   // an answer. The client-facing wording is deliberately left alone.
   assert.equal(c.contentStatusLabel("pending"), "Yet to start", "the client's board is untouched");
   assert.equal(c.contentStageLabel("pending"), "Content to write");
-  assert.equal(c.contentStageLabel("content_review"), "Content with client");
+  assert.equal(c.contentStageLabel("content_review"), "Content in review");
 
   // A brief nobody has written is our own move, so it is not the grey that
   // let it be missed.

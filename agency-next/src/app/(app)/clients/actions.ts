@@ -94,9 +94,6 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   }
   // Whether the client reads the brief before the work starts. Ticked by
   // default in the form, so an unticked box here is a deliberate "no".
-  if (await hasColumn("clients", "content_approval")) {
-    columns.content_approval = fd.get("content_approval") ? 1 : 0;
-  }
   if (await hasColumn("clients", "ads_access_token")) {
     // Blank leaves the stored token alone — the field is a password input and
     // is never populated, so treating blank as a clear would wipe it on every

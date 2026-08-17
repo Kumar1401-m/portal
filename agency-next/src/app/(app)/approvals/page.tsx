@@ -11,7 +11,7 @@ import { ApprovalBoard } from "./approval-board";
 import { crmClientIds } from "@/lib/crm";
 import { isServiceKey } from "@/lib/services";
 import { quickStatus } from "../deliverables/actions";
-import { sendContentToClient, approveContentToTeam } from "../content/approval-actions";
+import { approveContentToTeam } from "./content-actions";
 import { Card } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
@@ -37,10 +37,11 @@ const TABS: {
   /*
    * First, because it is the step before everything below it.
    *
-   * Somebody writes the copy and it lands here. The super admin reads it and
-   * makes the one decision that is theirs: to the client for sign-off, or
-   * straight to the team. Those two buttons are on the rows rather than in
-   * the single `action` slot, because this is the one tab with a choice on it.
+   * Somebody writes the copy and it lands here, and the super admin releases
+   * it to whoever makes it. It used to be a choice — to the client for
+   * sign-off, or past them — but content is settled inside the agency now, so
+   * one button is left. It sits on the row rather than in the `action` slot
+   * because it moves the task somewhere `quickStatus` does not.
    */
   { key: "written", label: "Content ready", status: "pending", contentWritten: true },
   { key: "content", label: "Content review", status: "content_review", action: { label: "Approve content", status: "approved" } },
@@ -102,7 +103,7 @@ export default async function ApprovalsPage({
           Approvals
         </h1>
         <p className="text-sm text-muted-foreground">
-          Track content through the two approval gates.
+          Track work through to the client&apos;s approval.
         </p>
       </div>
 
@@ -187,24 +188,17 @@ export default async function ApprovalsPage({
                   <TD className="text-muted-foreground">{fmtDate(d.due_date)}</TD>
                   <TD>
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      {/* The super admin's choice, and the only place it is
-                          offered: to the client for sign-off, or past them
-                          and straight to whoever makes it. */}
+                      {/* One button, where there were two. The other sent the
+                          copy to the client for sign-off; content no longer
+                          goes to a client at all, so the only way out of this
+                          tab is into the hands of whoever makes it. */}
                       {active.contentWritten && canSend ? (
-                        <>
-                          <form action={sendContentToClient}>
-                            <input type="hidden" name="deliverable_id" value={d.id} />
-                            <Button type="submit" size="sm">
-                              Send to client
-                            </Button>
-                          </form>
-                          <form action={approveContentToTeam}>
-                            <input type="hidden" name="deliverable_id" value={d.id} />
-                            <Button type="submit" size="sm" variant="secondary">
-                              Approve — to the team
-                            </Button>
-                          </form>
-                        </>
+                        <form action={approveContentToTeam}>
+                          <input type="hidden" name="deliverable_id" value={d.id} />
+                          <Button type="submit" size="sm">
+                            Approve — to the team
+                          </Button>
+                        </form>
                       ) : null}
                       {active.action ? (
                         <form action={quickStatus}>

@@ -197,7 +197,7 @@ export default async function PortalDashboard() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{it.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {it.status === "content_review" ? "Content approval" : "Final approval"}
+                      Final approval
                       {it.content_category ? ` · ${it.content_category}` : ""}
                     </p>
                   </div>

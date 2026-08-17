@@ -189,16 +189,16 @@ export default async function TodayPage({
               className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-1 font-medium text-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--warning)_20%,transparent)]"
             >
               <Hourglass className="h-3.5 w-3.5" />
-              {withClient} waiting on client approval
+              {withClient} in content review
             </Link>
           ) : null}
           {onContentDesk > 0 && !isDesigner ? (
             <Link
-              href="/content"
+              href="/approvals?tab=written"
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-muted-foreground transition-colors hover:bg-muted"
             >
               <PenLine className="h-3.5 w-3.5" />
-              {onContentDesk} not sent to the client yet
+              {onContentDesk} written, not handed over yet
             </Link>
           ) : null}
         </div>

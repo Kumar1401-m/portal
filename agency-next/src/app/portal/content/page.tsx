@@ -50,7 +50,7 @@ export default async function PortalContentPage() {
   const items = user.clientId ? await getPortalContent(user.clientId) : [];
 
   const needsReview = (it: PortalContentRow) =>
-    ["content_review", "review"].includes(it.status);
+    it.status === "review";
 
   return (
     <div className="space-y-6">

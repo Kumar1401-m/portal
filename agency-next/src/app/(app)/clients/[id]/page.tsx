@@ -19,7 +19,7 @@ import { checkYouTubeConnection } from "@/lib/youtube";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
 import { MonthlyPlan } from "./monthly-plan";
-import { monthPlan, monthTasks, clientMonths, safeMonth } from "@/lib/task-plan";
+import { monthPlan, monthTasks, safeMonth } from "@/lib/task-plan";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge, ServiceChip } from "@/components/ui/service-badge";
@@ -55,10 +55,9 @@ export default async function ClientDetailPage({
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
   // Alongside the plan queries, not after them: the Facebook check is a call
   // to Meta, and it is the slowest thing on this page by a distance.
-  const [plan, planTasks, usedMonths, fb, yt] = await Promise.all([
+  const [plan, planTasks, fb, yt] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
-    clientMonths(c.id),
     checkPageConnection(c.id),
     checkYouTubeConnection(c.id),
   ]);
@@ -374,7 +373,6 @@ export default async function ClientDetailPage({
               clientId={c.id}
               plan={plan}
               tasks={planTasks}
-              usedMonths={usedMonths}
               canForce={user.role === "super_admin"}
             />
           ) : null}

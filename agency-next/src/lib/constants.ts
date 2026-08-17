@@ -122,12 +122,13 @@ export function contentStatusTone(status: string): BadgeTone {
  * `contentStatusLabel` is written for the client's own board, where "Yet to
  * start" is a fair answer to "where is my post". On Today's Tasks it is not:
  * it names a state without naming whose move it is, so a month of briefs
- * nobody has written looks identical to a month of briefs sitting with a
- * client. These two are the ones that need a person, so these two say who.
+ * nobody has written looks identical to a month already written and waiting
+ * to be released. Both are the agency's own move — content does not go to a
+ * client any more — and these two labels are what tell them apart.
  */
 export function contentStageLabel(status: string): string {
   if (status === "pending") return "Content to write";
-  if (status === "content_review") return "Content with client";
+  if (status === "content_review") return "Content in review";
   return contentStatusLabel(status);
 }
 

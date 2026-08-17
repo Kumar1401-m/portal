@@ -31,11 +31,10 @@ export default async function PortalContentDetail({
   // link, so the client streams from R2 without the bucket being public.
   const videoUrl = await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url);
 
-  const needsReview = ["content_review", "review"].includes(d.status);
+  const needsReview = d.status === "review";
   // The same list the dashboard offers the link on and the action accepts, so
   // a "Add Drive link" button can never lead to a page with no form on it.
   const needsRawFootage = (ACCEPTS_RAW as readonly string[]).includes(d.status);
-  const gate = d.status === "content_review" ? "content" : d.status === "review" ? "final" : null;
 
   // Null on a database that predates the WhatsApp approval feature, in which
   // case the timeline is simply not rendered.
@@ -59,11 +58,13 @@ export default async function PortalContentDetail({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          {gate ? (
+          {/* One gate. A client used to be asked twice — once for the written
+              content and again for the finished video — and the copy is
+              settled inside the agency now, so only the finished piece
+              reaches them. */}
+          {needsReview ? (
             <div className="rounded-lg border border-primary/30 bg-primary/[0.04] px-4 py-3 text-sm">
-              {gate === "content"
-                ? "Please review the content below and approve it, or request changes. Once approved, we'll produce the video."
-                : "Please review the final version below and approve it, or request changes."}
+              Please review the final version below and approve it, or request changes.
             </div>
           ) : null}
 

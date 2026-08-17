@@ -3,7 +3,17 @@
 import { useActionState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { CalendarRange, Wand2, Check, TriangleAlert, Loader2, Plus, Minus } from "lucide-react";
+import {
+  CalendarRange,
+  Wand2,
+  Check,
+  TriangleAlert,
+  Loader2,
+  Plus,
+  Minus,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import {
   respaceMonthAction,
   generateMonthAction,
@@ -44,16 +54,16 @@ function startDayLabel(mk: string): string {
   return day.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-/** The months worth offering: half a year either side, plus any that already have work. */
-function monthOptions(current: string, used: string[]): string[] {
-  const out = new Set<string>(used);
-  const now = new Date();
-  for (let i = -6; i <= 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    out.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-  out.add(current);
-  return [...out].sort().reverse();
+/**
+ * One month either way from "2026-08".
+ *
+ * Through `Date` rather than by adding to the number, so December rolls the
+ * year: "2026-12" + 1 is "2027-01", and month 13 is not a month.
+ */
+function shiftMonth(mk: string, delta: number): string {
+  const [y, m] = mk.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function Note({ state }: { state: PlanState }) {
@@ -121,13 +131,11 @@ export function MonthlyPlan({
   clientId,
   plan,
   tasks,
-  usedMonths,
   canForce = false,
 }: {
   clientId: number;
   plan: MonthPlan;
   tasks: PlannedTask[];
-  usedMonths: string[];
   /** Super admin only — deleting work somebody has started. */
   canForce?: boolean;
 }) {
@@ -176,18 +184,34 @@ export function MonthlyPlan({
         <CardTitle className="flex items-center gap-2 text-base">
           <CalendarRange className="h-4 w-4 text-muted-foreground" /> Monthly plan
         </CardTitle>
-        <Select
-          aria-label="Month"
-          value={plan.month}
-          onChange={(e) => router.push(`?plan=${e.target.value}`, { scroll: false })}
-          className="h-8 w-36 text-xs"
-        >
-          {monthOptions(plan.month, usedMonths).map((m) => (
-            <option key={m} value={m}>
-              {monthLabel(m)}
-            </option>
-          ))}
-        </Select>
+        {/* Stepped, not picked. Reading a plan means walking through the
+            months in order — last month, this one, next — and a dropdown of
+            thirteen made every one of those a two-click hunt through a list
+            where the option you want is the one either side of the one you
+            are on. */}
+        <div className="flex items-center rounded-lg border border-border">
+          <button
+            type="button"
+            aria-label="Previous month"
+            onClick={() => router.push(`?plan=${shiftMonth(plan.month, -1)}`, { scroll: false })}
+            className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          {/* Fixed width, so the row does not jump as the label changes
+              between "May 2026" and "Sept 2026". */}
+          <span className="w-24 text-center text-xs font-medium tabular-nums">
+            {monthLabel(plan.month)}
+          </span>
+          <button
+            type="button"
+            aria-label="Next month"
+            onClick={() => router.push(`?plan=${shiftMonth(plan.month, 1)}`, { scroll: false })}
+            className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-4 text-sm">

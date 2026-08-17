@@ -36,28 +36,6 @@ const say = async (command, data) => {
 };
 assert.ok(typeof make === "function", "the acknowledgement could be lifted out");
 
-/* ---------------- the noun and its pronoun agree ---------------- */
-{
-  const one = await say("approve", { kind: "content", count: 1 });
-  const two = await say("approve", { kind: "content", count: 2 });
-  const many = await say("approve", { kind: "content", count: 12 });
-
-  assert.match(one, /The content is approved/, "one piece is singular throughout");
-  // "all 2" is not something anybody says.
-  assert.match(two, /Both pieces are approved/, "two is 'both', never 'all 2'");
-  assert.ok(!/all 2/i.test(two), "and definitely not 'all 2'");
-  assert.match(many, /All 12 pieces are approved/, "more than two is counted");
-
-  // The bug this replaces: plural noun, singular pronoun, in one sentence.
-  const change2 = await say("change", { kind: "content", count: 2 });
-  assert.ok(!/pieces[\s\S]*\bit\b/.test(change2), "a plural is never referred to as 'it'");
-  assert.match(change2, /rework them and send them back/, "plural all the way through");
-
-  const change1 = await say("change", { kind: "content", count: 1 });
-  assert.ok(!/\bthem\b/.test(change1), "and a single piece is never 'them'");
-  ok("singular and plural agree in every content reply");
-}
-
 /* ---------------- and a missing title does not leave a gap ---------- */
 {
   const titled = await say("approve", { title: "Diwali reel" });
@@ -76,24 +54,21 @@ assert.ok(typeof make === "function", "the acknowledgement could be lifted out")
   ok("a video with no title still reads as a sentence");
 }
 
-/* ---------------- content and video promise different things -------- */
+/* ---------------- an approved video is promised the slot -------- */
 {
-  const content = await say("approve", { kind: "content", count: 1 });
+  // There used to be a second shape here: a batch reply about written content,
+  // which deliberately did NOT promise a posting slot because nothing had been
+  // made yet. Content is not sent to a client any more, so a video is the only
+  // thing this ever answers about — and it does have a slot to promise.
   const video = await say("approve", { title: "Diwali reel" });
-
-  // Nothing has been made yet when copy is approved.
-  assert.ok(!/scheduled for posting/.test(content), "approved copy is not promised a posting slot");
-  assert.match(content, /we'll get started on it/, "it promises the work instead");
   assert.match(video, /scheduled for posting/, "an approved video is promised the slot");
-  ok("each says what actually happens next");
+  ok("the reply says what actually happens next");
 }
 
 /* ---------------- and all of them stay courteous ---------------- */
 {
   const all = [];
   for (const cmd of ["approve", "change", "reject"]) {
-    all.push(await say(cmd, { kind: "content", count: 1 }));
-    all.push(await say(cmd, { kind: "content", count: 3 }));
     all.push(await say(cmd, { title: "Diwali reel" }));
     all.push(await say(cmd, {}));
   }

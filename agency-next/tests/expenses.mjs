@@ -243,8 +243,6 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   has(table, 'className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"', "the body scrolls");
   has(table, "flex shrink-0 items-center justify-end gap-2 border-t border-border p-4", "the footer stays put");
 
-  const brief = readFileSync(`${SRC}/app/(app)/content/brief-row.tsx`, "utf8");
-  has(brief, "min-h-0 flex-1", "and the other dialog is pinned the same way");
   ok("a long dialog scrolls its body instead of pushing the buttons off-screen");
 }
 

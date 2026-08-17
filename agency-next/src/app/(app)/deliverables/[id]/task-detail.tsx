@@ -4,7 +4,6 @@ import { ArrowLeft, Building2, Calendar, Link2, MessageSquareWarning } from "luc
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
-import { clientApprovesContent } from "@/lib/clients";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge } from "@/components/ui/service-badge";
@@ -67,7 +66,6 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   // every control on it would be dead.
   const [aiOn, analysis] = await Promise.all([videoAiReady(), getAnalysis(d.id)]);
   // Whether the content goes to the client first, or straight to the maker.
-  const contentToClient = await clientApprovesContent(d.client_id);
 
   const service = serviceOf(d);
   const canSendToClient = user.role === "super_admin" || user.role === "crm";
@@ -115,7 +113,6 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             status={d.status}
             canSendToClient={canSendToClient}
             editingOnly={editingOnly}
-            clientApprovesContent={contentToClient}
           />
 
           {/*

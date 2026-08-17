@@ -180,18 +180,3 @@ export async function clientDefaults(clientId: number): Promise<ClientTaskOwners
   );
 }
 
-/**
- * Does this client sign the written content off before the work starts?
- *
- * On for everyone unless it is turned off on their record, and on for every
- * client on a database the column hasn't reached — the sign-off step is what
- * the portal has always done, so "unknown" has to mean "keep doing it".
- */
-export async function clientApprovesContent(clientId: number): Promise<boolean> {
-  if (!(await hasColumn("clients", "content_approval"))) return true;
-  const row = await queryOne<{ content_approval: number | null }>(
-    "SELECT content_approval FROM clients WHERE id = ?",
-    [clientId]
-  );
-  return !row || row.content_approval === null || Number(row.content_approval) === 1;
-}

@@ -1,9 +1,13 @@
 /**
  * A poster, from written brief to the client's screen.
  *
- *   super admin writes the content  →  client approves it
+ *   super admin writes the content  →  super admin releases it
  *     →  designer designs it        →  super admin approves it
  *       →  client sees the poster
+ *
+ * The client used to sit at that first arrow, signing the copy off before
+ * anything was made. They no longer do — content is settled inside the agency
+ * and the only thing put in front of a client is the finished poster.
  *
  * Two hand-offs matter more than the rest, because in both the work changes
  * hands and the person receiving it has no reason to be looking.
@@ -111,8 +115,8 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   // step.
   assert.match(
     controls,
-    /const SEND_TO_CLIENT_STATUSES = \["content_review", "review"\]/,
-    "both client-facing gates are named"
+    /const SEND_TO_CLIENT_STATUSES = \["review"\]/,
+    "the client-facing gate is named — one now, since content stays in-house"
   );
   assert.match(
     controls,
@@ -129,85 +133,39 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   ok("only the super admin sends a poster on to the client");
 }
 
-/* ---------------- unless the client doesn't do content approval ---------------- */
+/* ---------------- and content never reaches a client at all ---------------- */
 {
   const actions = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
 
-  // Some clients hand over the month and want it made. Sending those a content
-  // approval gets no reply, and the task sits in `content_review` until
-  // somebody notices — so the middle step is skipped and the brief goes
-  // straight to the maker.
+  /*
+   * There used to be a per-client switch here — some clients read the month's
+   * copy before anything was made, some handed us the month and wanted it made
+   * — and "send for content review" either went to the client or skipped them.
+   * Content is settled inside the agency now, so there is nothing to skip and
+   * nothing to switch.
+   */
+  assert.ok(!/skipsClientContent/.test(actions), "the per-client skip is gone");
+  assert.ok(!/clientSignsOffContent/.test(actions), "and so is the flag behind it");
   assert.match(
     actions,
-    /const skipsClientContent = status === "content_review" && !clientSignsOffContent/,
-    "a client with sign-off off never gets sent a brief"
-  );
-  assert.match(
-    actions,
-    /const effective = contentGate \|\| skipsClientContent \? "waiting_for_raw" : status/,
-    "and the task lands where the client's approval would have left it"
+    /const effective = contentGate \? "waiting_for_raw" : status/,
+    "approving the copy is the only thing that hands it to the maker"
   );
 
-  // Null is what a database without the column returns, and what a client
-  // added before it existed holds. Both have to mean the old behaviour.
-  assert.match(
-    actions,
-    /d\.content_approval === null \|\| Number\(d\.content_approval\) === 1/,
-    "unknown means the client does approve — the step the portal has always had"
-  );
-
-  // The client is told nothing, because there is nothing for them to do. That
-  // falls out of `effective` rather than a second rule: the notification block
-  // keys off it, so there is no way for the two to disagree.
-  assert.match(
-    actions,
-    /if \(effective === "content_review" \|\| effective === "review"\)[\s\S]{0,400}notifyClientById/,
-    "the client mail keys off the status actually reached, not the button pressed"
-  );
-
-  // And the maker is not told the client approved something the client never
-  // saw — they might repeat it back to that client.
-  assert.match(actions, /skipsClientContent\s*\n?\s*\?\s*`The content for/, "the wording differs");
-
-  const controls = readFileSync(
-    `${SRC}/app/(app)/deliverables/[id]/workflow-controls.tsx`,
-    "utf8"
-  );
-  assert.match(controls, /Hand the content to the team/, "and so does the button");
-  // NEXT is a module constant shared by every render on the server; relabelling
-  // it in place would rename the button for every other client too.
+  // The maker must never be told the client approved something no client saw.
   assert.ok(
-    !/for \(const a of out\)/.test(controls),
-    "the per-client label is a copy, not a mutation of the shared table"
+    !/approved the content for/.test(actions),
+    "the handover never claims a client approved it"
   );
-  ok("a client who does not sign content off is never waited on");
-}
+  assert.match(actions, /is written and it's yours/, "it says what actually happened");
 
-/* ---------------- and the setting is per client, defaulting to on ---------------- */
-{
+  const controls = readFileSync(`${SRC}/app/(app)/deliverables/[id]/workflow-controls.tsx`, "utf8");
+  assert.ok(!/clientApprovesContent/.test(controls), "the buttons no longer vary by client");
+  assert.match(controls, /label: "Move to content review"/, "and the label says an internal move");
+
   const form = readFileSync(`${SRC}/app/(app)/clients/client-form.tsx`, "utf8");
-  assert.match(form, /name="content_approval"/, "it is on the client's own record");
-  assert.match(
-    form,
-    /defaultChecked=\{d\.content_approval !== false\}/,
-    "ticked for a new client, so nobody switches the gate off by not noticing it"
-  );
-
-  const save = readFileSync(`${SRC}/app/(app)/clients/actions.ts`, "utf8");
-  assert.match(
-    save,
-    /hasColumn\("clients", "content_approval"\)[\s\S]{0,200}content_approval = fd\.get\("content_approval"\) \? 1 : 0/,
-    "saved only where the column exists — the same gate every other new column uses"
-  );
-
-  const clients = readFileSync(`${SRC}/lib/clients.ts`, "utf8");
-  assert.match(clients, /export async function clientApprovesContent/, "and readable on its own");
-  assert.match(
-    clients,
-    /if \(!\(await hasColumn\("clients", "content_approval"\)\)\) return true/,
-    "which also answers true on a database the migration has not reached"
-  );
-  ok("the switch lives on the client, and its default is the old behaviour");
+  assert.ok(!/content_approval/.test(form), "the client record has no such setting any more");
+  ok("content is an internal step, with no client and no switch");
 }
 
 await finish(pass);
