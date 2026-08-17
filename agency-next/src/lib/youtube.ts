@@ -27,12 +27,103 @@
  * two things to learn instead of one.
  */
 import "server-only";
+import { onTheFloor } from "./client-status";
 import { query, execute, queryOne, transaction, hasColumn } from "./db";
 import { resolveVideoUrl } from "./storage";
 import { nowUtc } from "./posting";
 // Both from the Instagram publisher on purpose: the same window and the same
 // caption, so the two platforms are due in the same minute and read alike.
 import { composeCaption, PUBLISH_WINDOW_HOURS } from "./instagram";
+
+export type YouTubeConnection =
+  /** Uploads have actually landed on the channel. */
+  | { state: "connected"; lastUrl: string | null; postedAt: string | null; channelId: string | null }
+  /** Switched on, but nothing has gone out yet — so nothing proves it works. */
+  | { state: "untested"; channelId: string | null }
+  /** Switched off for this client. Not a fault. */
+  | { state: "off" }
+  | { state: "broken"; reason: string; failed: number };
+
+/**
+ * Whether this client's YouTube is really connected.
+ *
+ * Unlike Instagram and Facebook, this cannot be answered by asking Google.
+ * The portal holds no YouTube credential at all — `videos.insert` is a
+ * resumable upload of the whole file, so n8n does the carrying on the machine
+ * that already stores the Google account. There is nothing here to
+ * authenticate with, and a "Connected" badge derived from the `youtube_enabled`
+ * tickbox would be a badge for having ticked a box.
+ *
+ * What the portal does hold is the record of what n8n actually did, which is
+ * better evidence than a credential check anyway: a video with a
+ * `youtube_video_id` is a video that is on the channel. So connected means
+ * something has been published, and the last failure is shown when the recent
+ * ones failed — that error text comes back from the Google API through n8n and
+ * is the only place an expired channel authorisation ever surfaces.
+ *
+ * "Untested" is deliberately its own state rather than being folded into
+ * either neighbour. Switched on with nothing published yet is the normal
+ * condition of a client set up this morning, and calling that either
+ * "Connected" or "Not connected" would be a guess in one direction or the
+ * other.
+ */
+export async function checkYouTubeConnection(clientId: number): Promise<YouTubeConnection> {
+  if (!(await hasColumn("clients", "youtube_enabled"))) return { state: "off" };
+
+  const c = await queryOne<{ youtube_enabled: number | null; youtube_channel_id: string | null }>(
+    "SELECT youtube_enabled, youtube_channel_id FROM clients WHERE id = ?",
+    [clientId]
+  );
+  if (!c || Number(c.youtube_enabled) !== 1) return { state: "off" };
+  const channelId = c.youtube_channel_id || null;
+
+  if (!(await hasColumn("deliverables", "youtube_status"))) {
+    return { state: "untested", channelId };
+  }
+
+  const row = await queryOne<{
+    posted: number;
+    failed: number;
+    last_url: string | null;
+    last_at: string | null;
+    last_error: string | null;
+  }>(
+    `SELECT COALESCE(SUM(youtube_status = 'posted'),0) AS posted,
+            COALESCE(SUM(youtube_status = 'failed'),0) AS failed,
+            SUBSTRING_INDEX(GROUP_CONCAT(youtube_url ORDER BY youtube_posted_at DESC), ',', 1) AS last_url,
+            MAX(youtube_posted_at) AS last_at,
+            SUBSTRING_INDEX(GROUP_CONCAT(youtube_error ORDER BY id DESC), ',', 1) AS last_error
+       FROM deliverables
+      WHERE client_id = ?`,
+    [clientId]
+  );
+
+  const posted = Number(row?.posted ?? 0);
+  const failed = Number(row?.failed ?? 0);
+
+  /*
+   * One upload that worked outranks any number of failures. A channel that
+   * has published is connected; the failures after it are this video's
+   * problem — a file too large, a quota, a title the API refused — and
+   * belong on that video's own page, not on a red badge about the account.
+   */
+  if (posted > 0) {
+    return {
+      state: "connected",
+      lastUrl: row?.last_url || null,
+      postedAt: row?.last_at ? String(row.last_at) : null,
+      channelId,
+    };
+  }
+  if (failed > 0) {
+    return {
+      state: "broken",
+      reason: row?.last_error || "The upload failed and n8n gave no reason.",
+      failed,
+    };
+  }
+  return { state: "untested", channelId };
+}
 
 /** Attempts before a video is left alone for a person to look at. */
 export const MAX_UPLOAD_ATTEMPTS = 3;
@@ -173,7 +264,7 @@ export async function getYouTubeQueue(limit = 10): Promise<YouTubeQueueItem[]> {
             d.scheduled_at, d.youtube_attempts, c.youtube_channel_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
-      WHERE c.status <> 'churned'
+      WHERE ${onTheFloor()}
         AND c.youtube_enabled = 1
         -- Against the app's UTC, not NOW(): scheduled_at is written by the app
         -- in UTC and this database's clock is IST. youtube_locked_at below is

@@ -15,6 +15,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
 import { canAccessClient } from "@/lib/crm";
 import { checkPageConnection } from "@/lib/facebook";
+import { checkYouTubeConnection } from "@/lib/youtube";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
 import { MonthlyPlan } from "./monthly-plan";
@@ -54,11 +55,12 @@ export default async function ClientDetailPage({
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
   // Alongside the plan queries, not after them: the Facebook check is a call
   // to Meta, and it is the slowest thing on this page by a distance.
-  const [plan, planTasks, usedMonths, fb] = await Promise.all([
+  const [plan, planTasks, usedMonths, fb, yt] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
     clientMonths(c.id),
     checkPageConnection(c.id),
+    checkYouTubeConnection(c.id),
   ]);
 
   const ph = (c.placeholder_values && typeof c.placeholder_values === "object"
@@ -236,6 +238,66 @@ export default async function ClientDetailPage({
                       edit page
                     </Link>{" "}
                     to put the same post on Facebook too.
+                  </p>
+                ) : null}
+
+                {/* Read from what n8n actually uploaded, because there is no
+                    YouTube credential here to ask with — the portal decides
+                    what and when, n8n carries the file. A published video is
+                    better proof than a token check anyway. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">YouTube</span>
+                  <Badge
+                    tone={
+                      yt.state === "connected"
+                        ? "success"
+                        : yt.state === "broken"
+                          ? "danger"
+                          : yt.state === "untested"
+                            ? "warning"
+                            : "muted"
+                    }
+                  >
+                    {yt.state === "connected"
+                      ? "Connected"
+                      : yt.state === "broken"
+                        ? "Not connected"
+                        : yt.state === "untested"
+                          ? "On — nothing published yet"
+                          : "Not set up"}
+                  </Badge>
+                  {yt.state === "connected" && yt.lastUrl ? (
+                    <a
+                      href={yt.lastUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Latest upload
+                    </a>
+                  ) : null}
+                </div>
+                {yt.state === "broken" ? (
+                  <p className="text-xs text-rose-600 dark:text-rose-400">
+                    {yt.failed} upload{yt.failed === 1 ? "" : "s"} failed and none has succeeded.
+                    YouTube said: {yt.reason}
+                  </p>
+                ) : yt.state === "untested" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Switched on, but nothing has gone out yet — so nothing has proved the channel
+                    works. The first scheduled video will settle it.
+                  </p>
+                ) : yt.state === "off" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Turn YouTube on for this client on the{" "}
+                    <Link href={`/clients/${c.id}/edit`} className="text-primary hover:underline">
+                      edit page
+                    </Link>{" "}
+                    to upload the same video as a Short.
+                  </p>
+                ) : yt.state === "connected" && yt.postedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Last upload {fmtDate(yt.postedAt)}.
                   </p>
                 ) : null}
               </div>

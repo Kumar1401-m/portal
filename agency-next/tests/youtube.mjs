@@ -244,5 +244,74 @@ const mk = async (clientId, title, ytStatus, scheduledAt, category = "Instagram 
   ok("the n8n workflow is valid, wired to the real endpoints, and reports both failures");
 }
 
+/* ---------------- and the client page can say whether it is connected ---------------- */
+{
+  const CONN = "ZZ yt conn";
+  const wipe = async () => {
+    await db.execute(
+      "DELETE FROM deliverables WHERE client_id IN (SELECT id FROM clients WHERE company_name = ?)",
+      [CONN]
+    );
+    await db.execute("DELETE FROM clients WHERE company_name = ?", [CONN]);
+  };
+  await wipe();
+
+  const id = Number(
+    (await db.execute(
+      "INSERT INTO clients (company_name, status, youtube_enabled) VALUES (?, 'active', 0)",
+      [CONN]
+    )).insertId
+  );
+
+  // Off is off. A client not on YouTube must never show a fault about it —
+  // permanent red on something nobody asked for is how people stop reading red.
+  assert.equal((await yt.checkYouTubeConnection(id)).state, "off", "not enabled is off");
+
+  await db.execute("UPDATE clients SET youtube_enabled = 1 WHERE id = ?", [id]);
+  const untested = await yt.checkYouTubeConnection(id);
+  assert.equal(untested.state, "untested", "switched on with nothing published proves nothing");
+
+  /*
+   * The distinction that matters. There is no YouTube credential in the
+   * portal — n8n holds the Google account and carries the file — so a badge
+   * built on the `youtube_enabled` tickbox would only ever mean somebody
+   * ticked a box. What is knowable is what n8n actually did.
+   */
+  const mkVideo = (status, extra = "") =>
+    db.execute(
+      `INSERT INTO deliverables (client_id, title, status, due_date, month_key, service,
+                                 instagram_status, youtube_status ${extra ? ", " + extra.split("=")[0].trim() : ""})
+       VALUES (?, 'ZZ yt piece', 'posted', CURDATE(), ?, 'video_editing', 'none', ?
+               ${extra ? ", " + extra.split("=").slice(1).join("=").trim() : ""})`,
+      [id, MONTH, status]
+    );
+
+  await mkVideo("failed", "youtube_error = 'The request metadata specifies an invalid video title.'");
+  const broken = await yt.checkYouTubeConnection(id);
+  assert.equal(broken.state, "broken", "a failure with nothing ever posted is not connected");
+  assert.match(broken.reason, /invalid video title/, "and it repeats what YouTube said");
+  assert.equal(broken.failed, 1, "and counts how many");
+
+  // One upload that worked outranks any number of failures: the channel is
+  // plainly connected, and the failures belong to those videos.
+  await mkVideo("posted", "youtube_url = 'https://youtu.be/ZZtest123'");
+  const conn = await yt.checkYouTubeConnection(id);
+  assert.equal(conn.state, "connected", "one successful upload settles it");
+  assert.equal(conn.lastUrl, "https://youtu.be/ZZtest123", "and links the latest one");
+
+  await wipe();
+  ok("YouTube reads as connected from what was published, not from a tickbox");
+}
+
+/* ---------------- and a removed client gets no uploads ---------------- */
+{
+  const src = readFileSync(`${SRC}/lib/youtube.ts`, "utf8");
+  // The queue asked only about 'churned', so a client switched to Inactive
+  // kept having videos uploaded to their channel.
+  assert.ok(!/c\.status <> 'churned'/.test(src), "the queue no longer asks the narrow question");
+  assert.match(src, /\$\{onTheFloor\(\)\}/, "it asks the shared one");
+  ok("no uploads for a client who is off the floor");
+}
+
 await clean();
 await finish(pass);
