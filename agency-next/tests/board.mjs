@@ -176,14 +176,21 @@ await mk("ZZ next week", "pending", nextWeek);
   assert.match(table, /dense &&\s*"table-fixed/, "and can never exceed their container");
   assert.match(table, /\[&_td\]:overflow-hidden/, "a long value clips instead of widening the table");
   /*
-   * And the headings, which were missed the first time. Only the values were
-   * clipped, so at a narrow width "ORGANIZATION" ran straight through
-   * "CREATIVE TYPE" and the two words sat on top of each other — a heading
-   * overflowing is worse than a value doing it, since it is the thing naming
-   * what it has collided with.
+   * A heading wraps rather than shortening, and this took two goes.
+   *
+   * First it collided — "ORGANIZATION" printed straight through "CREATIVE
+   * TYPE" — because only the values were clipped. Clipping the headings too
+   * fixed the collision and produced "SCHEDULE …", "CONTENT STA…", "SH…":
+   * the same problem with an ellipsis on it, and a column whose name you
+   * cannot read is one you work out from its contents instead.
+   *
+   * Two short lines cost one row of header height, once. Widening ten columns
+   * to fit their names on one line costs the client's name on every row.
    */
-  assert.match(table, /\[&_th\]:overflow-hidden/, "and a heading clips rather than colliding");
-  assert.match(table, /\[&_th\]:text-ellipsis/, "with an ellipsis, so a clipped word looks clipped");
+  assert.match(table, /\[&_th\]:whitespace-normal/, "a heading wraps instead of shortening");
+  assert.match(table, /\[&_th\]:break-words/, "and a word too long to wrap breaks rather than escaping");
+  assert.ok(!/\[&_th\]:text-ellipsis/.test(table), "nothing truncates a heading");
+  assert.ok(!/\[&_th\]:whitespace-nowrap/.test(table), "and nothing stops one wrapping");
   assert.match(table, /w-full overflow-x-auto/, "the wrapper is still there, with nothing to do");
 
   for (const file of ["app/(app)/today/page.tsx", "app/(app)/deliverables/page.tsx"]) {
@@ -208,7 +215,7 @@ await mk("ZZ next week", "pending", nextWeek);
      * would give a client's name the same room as a column of dashes. The
      * narrow columns are pinned so the readable ones keep what is left.
      */
-    for (const w of ["w-10", "w-28", "w-32", "w-20", "w-16", "w-40"]) {
+    for (const w of ["w-10", "w-28", "w-32", "w-20"]) {
       assert.ok(src.includes(w), `${file}: ${w} is set on the column that needs it`);
     }
 

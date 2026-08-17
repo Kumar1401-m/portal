@@ -39,16 +39,25 @@ export function Table({
            * them is a row you click into.
            */
           /*
-           * The headings are clipped too, and that was missed the first time.
+           * A heading wraps; it never shortens.
            *
-           * Only `td` got `overflow-hidden`, so the values behaved and the
-           * headings above them did not: at a narrow width "ORGANIZATION" ran
-           * straight through "CREATIVE TYPE" and the two words sat on top of
-           * each other. A heading that overflows is worse than a value that
-           * does, because it is the thing naming what it has collided with.
+           * Clipping them stopped the collision and replaced it with
+           * "SCHEDULE …", "CONTENT STA…", "SH…" — which is the same problem
+           * wearing an ellipsis, since a column whose name you cannot read is
+           * a column you have to work out from its contents.
+           *
+           * Wrapping is the fix rather than more width: two short lines cost
+           * one row of header height, once, while widening ten columns costs
+           * the client's name on every row. `break-words` is the backstop for
+           * a single word too long for its column — it breaks rather than
+           * escaping the cell, which is what `table-fixed` cannot allow.
+           *
+           * `h-11` is a minimum in table layout, not a cap, so the header row
+           * grows to fit the second line instead of hiding it.
            */
           dense &&
-            "table-fixed [&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5 [&_td]:overflow-hidden [&_th]:overflow-hidden [&_th]:text-ellipsis [&_th]:whitespace-nowrap",
+            "table-fixed [&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5 [&_td]:overflow-hidden " +
+              "[&_th]:whitespace-normal [&_th]:break-words [&_th]:leading-tight [&_th]:tracking-normal [&_th]:py-2",
           className
         )}
         {...props}

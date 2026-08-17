@@ -54,7 +54,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   // board both were a dash on every row.
   assert.match(
     src,
-    /\{isDesigner \? null : \(\s*\n\s*<>\s*\n\s*<th className="hidden w-16 text-center xl:table-cell">Shoot<\/th>\s*\n\s*<th className="hidden w-16 text-center xl:table-cell">Video<\/th>/,
+    /\{isDesigner \? null : \(\s*\n\s*<>\s*\n\s*<th className="hidden w-20 text-center xl:table-cell">Shoot<\/th>\s*\n\s*<th className="hidden w-20 text-center xl:table-cell">Video<\/th>/,
     "the two headers are hidden for a designer"
   );
   assert.match(
