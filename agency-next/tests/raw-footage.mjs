@@ -100,17 +100,24 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 {
   const today = readFileSync(`${SRC}/app/(app)/today/page.tsx`, "utf8");
 
-  // Footage no longer advances a pending task — it cannot, or it would skip
-  // the content gate — so without this the client's video sits on the content
-  // desk alone and nobody on the day board knows it came.
-  has(today, "const arrived = (d: (typeof board)[number]) =>", "a slot with footage is recognised");
+  /*
+   * Footage does not advance a pending task, so a slot the client has sent
+   * their video for stays `pending` — and this board used to hide `pending`,
+   * carving out that one case so the arrival was still visible.
+   *
+   * The carve-out is gone because the rule it excepted is gone: `pending` is
+   * on the board now, footage or not. There is no content desk left for it to
+   * be hidden in favour of, so hiding it meant hiding it everywhere.
+   */
   has(
     today,
-    '(d.status !== "pending" || arrived(d)) && !isFinished(d.status, d.posting_status)',
-    "and shown on Today's Tasks, unwritten or not"
+    "const all = board.filter((d) => !isFinished(d.status, d.posting_status))",
+    "an unwritten slot with the client's footage on it is on the day board"
   );
-  // It is still unwritten, so it is still on the desk as well.
-  has(today, 'board.filter((d) => d.status === "pending").length', "and still counted there");
+  assert.ok(
+    !/const arrived = /.test(today),
+    "without needing a special case for it any more"
+  );
 
   // Content approval was never the missing half — waiting_for_raw is neither
   // pending nor finished, so it has always been on the board. Named here so a

@@ -79,36 +79,36 @@ export default async function TodayPage({
   /*
    * This board is work that still needs doing, and only that.
    *
-   * It fills from both ends. A month is created as thirty tasks at once, all
-   * `pending` and none of them workable — thirty rows of "yet to start" that
-   * the four late ones hid behind. Writing those is a real job with its own
-   * screen now. And nothing ever left at the other end either: a video went
-   * out and its row stayed, so the board grew by every piece the agency had
-   * ever finished.
-   *
-   * Both ends go. What is left is what is moving — with the client, being
-   * made, waiting to go out.
-   *
-   * Content sent to the client stays: that is the one content state waiting
-   * on somebody, which is exactly what this board is for. A posted piece is
-   * waiting on nobody, and lives on Approvals → Posted.
+   * Finished work leaves it. A video went out and its row stayed, so the board
+   * grew by every piece the agency had ever finished until the things needing
+   * attention were a minority of their own list. A posted piece is waiting on
+   * nobody and lives on Approvals → Posted.
    */
   /*
-   * Except a slot the client has already sent footage for.
+   * `pending` used to be left off this board, and must not be any more.
    *
-   * That is the one kind of unwritten brief that is not just a line on next
-   * month's plan: somebody outside the agency has done something, and it is
-   * now waiting on us. Since footage no longer advances a pending task — it
-   * cannot, or it would skip the content gate — such a task would otherwise
-   * sit only on the content desk, with the client's video attached and nobody
-   * on the day board any the wiser.
+   * The reasoning was sound while it lasted: a pending task is a brief nobody
+   * has written, that belonged on the content desk, and putting a month of
+   * them here buried the work actually in flight. Only one exception got
+   * through — a slot whose footage had already arrived, because somebody
+   * outside the agency had acted and it was waiting on us.
+   *
+   * The content desk is gone. So every one of those tasks now had nowhere at
+   * all to be seen: hidden here, and no desk to be hidden in favour of. A
+   * month generated on the 1st showed an empty day board.
    */
-  const arrived = (d: (typeof board)[number]) => Boolean((d.raw_drive_link ?? "").trim());
-  const all = board.filter(
-    (d) => (d.status !== "pending" || arrived(d)) && !isFinished(d.status, d.posting_status)
-  );
-  // Everything unwritten is still on the desk, including the ones showing here.
-  const onContentDesk = board.filter((d) => d.status === "pending").length;
+  const all = board.filter((d) => !isFinished(d.status, d.posting_status));
+
+  /*
+   * Written and waiting to be released, which is not the same as pending.
+   *
+   * The count has to match the tab it links to. Approvals → Content ready is
+   * `pending` with something actually written in it; counting bare `pending`
+   * here would promise a number of rows that tab does not hold.
+   */
+  const written = board.filter(
+    (d) => d.status === "pending" && Boolean((d.description ?? "").trim())
+  ).length;
 
   /*
    * The tab counts are counted from the same rows the table shows.
@@ -128,12 +128,11 @@ export default async function TodayPage({
   const dueNow = all.filter((d) => d.due_date && new Date(d.due_date) <= today).length;
 
   /*
-   * Content that has gone out and is waiting on an answer.
+   * Copy written and waiting to be released.
    *
    * Said at the top rather than left to a column, because it is the state
-   * nobody owns: the work is not ours and not moving, and a piece can sit
-   * there for a week without anyone noticing. The link is into the content
-   * desk, where the answer is recorded.
+   * nobody owns: it is finished, it is not moving, and it can sit for a week
+   * without anyone noticing. The link goes to Approvals, where it is released.
    *
    * A designer's board is their own posters and never carries this — content
    * is not their job and the count would be nought.
@@ -180,7 +179,7 @@ export default async function TodayPage({
       {/* The content strip, above the table rather than inside a column of it.
           Only shown when there is something in it — a strip that always reads
           "0" is a strip people stop seeing. */}
-      {withClient > 0 || (onContentDesk > 0 && !isDesigner) ? (
+      {withClient > 0 || (written > 0 && !isDesigner) ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Content:</span>
           {withClient > 0 ? (
@@ -192,13 +191,13 @@ export default async function TodayPage({
               {withClient} in content review
             </Link>
           ) : null}
-          {onContentDesk > 0 && !isDesigner ? (
+          {written > 0 && !isDesigner ? (
             <Link
               href="/approvals?tab=written"
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-muted-foreground transition-colors hover:bg-muted"
             >
               <PenLine className="h-3.5 w-3.5" />
-              {onContentDesk} written, not handed over yet
+              {written} written, not handed over yet
             </Link>
           ) : null}
         </div>

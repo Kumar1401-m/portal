@@ -24,10 +24,10 @@ const TAG = "ZZ board client";
 const MONTH = new Date().toISOString().slice(0, 7);
 const clean = async () => {
   await db.execute(
-    "DELETE FROM deliverables WHERE client_id IN (SELECT id FROM clients WHERE company_name = ?)",
-    [TAG]
+    "DELETE FROM deliverables WHERE client_id IN (SELECT id FROM clients WHERE company_name LIKE ?)",
+    [`${TAG}%`]
   );
-  await db.execute("DELETE FROM clients WHERE company_name = ?", [TAG]);
+  await db.execute("DELETE FROM clients WHERE company_name LIKE ?", [`${TAG}%`]);
 };
 await clean();
 
@@ -94,6 +94,66 @@ await mk("ZZ next week", "pending", nextWeek);
   );
   assert.match(today, /due today or overdue, first/, "while still saying how much is actually due");
   ok("Today's Tasks shows the whole board and says how much of it is due");
+
+  /*
+   * And a brief nobody has written is on it.
+   *
+   * It used not to be: `pending` was filtered out because those tasks lived on
+   * the content desk, and putting a whole generated month here buried the four
+   * things actually in flight. Then the desk was removed and that filter was
+   * left behind — so a month generated on the 1st was hidden here and had
+   * nowhere else to be, and the day board came up empty.
+   */
+  assert.equal(
+    (today.match(/status !== "pending"/g) || []).length,
+    0,
+    "pending work is not filtered off the board"
+  );
+  assert.match(
+    today,
+    /const all = board\.filter\(\(d\) => !isFinished\(d\.status, d\.posting_status\)\)/,
+    "the only thing that leaves the board is finished work"
+  );
+  // The count beside it links to Approvals → Content ready, which is pending
+  // *with copy in it*. Counting bare pending would promise rows that tab has
+  // not got.
+  assert.match(
+    today,
+    /d\.status === "pending" && Boolean\(\(d\.description \?\? ""\)\.trim\(\)\)/,
+    "and the chip counts what its own link will show"
+  );
+}
+
+/* ---------------- a generated month is visible the day it is made ---------------- */
+{
+  // Behaviour, not source: four tasks exactly as generateMonthTasks writes
+  // them — pending, nothing written, no footage — plus one being worked on.
+  const c = await load("lib/constants.ts");
+  const fresh = Number(
+    (await db.execute("INSERT INTO clients (company_name, status) VALUES (?, 'active')", [
+      `${TAG} fresh`,
+    ])).insertId
+  );
+  const add = (title, status) =>
+    db.execute(
+      `INSERT INTO deliverables (client_id, title, status, due_date, month_key, service, instagram_status)
+       VALUES (?, ?, ?, CURDATE(), ?, 'video_editing', 'none')`,
+      [fresh, title, status, MONTH]
+    );
+  for (const t of ["ZZ Video 1", "ZZ Video 2", "ZZ Video 3"]) await add(t, "pending");
+  await add("ZZ being edited", "editing");
+
+  const board = await d.getDeliverables({ openFirst: true, clientId: fresh });
+  const shown = board.filter((r) => !c.isFinished(r.status, r.posting_status));
+  assert.equal(
+    shown.length,
+    4,
+    `a month generated today is on the day board, got ${shown.length}: ${shown.map((r) => r.title).join(", ")}`
+  );
+
+  await db.execute("DELETE FROM deliverables WHERE client_id = ?", [fresh]);
+  await db.execute("DELETE FROM clients WHERE id = ?", [fresh]);
+  ok("the day a month is generated, its tasks are on the day board");
 }
 
 /* ---------------- no sideways scrollbar on a laptop ---------------- */
