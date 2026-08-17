@@ -23,7 +23,6 @@ import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { ServiceTabs } from "@/components/admin/service-tabs";
 import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
-import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
 import { fmtDate } from "@/lib/utils";
 
@@ -227,8 +226,7 @@ export default async function TodayPage({
             <THead>
               <tr>
                 <th className="w-10 text-right">#</th>
-                <th>Organization</th>
-                <th className="w-32">Creative type</th>
+                <th>Client name</th>
                 <th className="w-28 whitespace-nowrap">Schedule date</th>
                 <th className="w-32">Content status</th>
                 <th className="w-32">Design status</th>
@@ -268,9 +266,6 @@ export default async function TodayPage({
                         {d.company_name}
                       </Link>
                       <div className="truncate text-xs text-muted-foreground">{d.title}</div>
-                    </TD>
-                    <TD>
-                      <ServiceBadge task={d} category={d.content_category} />
                     </TD>
                     <TD className="whitespace-nowrap tabular-nums">
                       <span className={overdue ? "font-medium text-destructive" : "text-muted-foreground"}>

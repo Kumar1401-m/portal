@@ -21,7 +21,6 @@ import { buttonClasses } from "@/components/ui/button";
 import { ServiceTabs } from "@/components/admin/service-tabs";
 import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
-import { ServiceBadge } from "@/components/ui/service-badge";
 import { EditVideoModal } from "./edit-video-modal";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
@@ -155,8 +154,7 @@ export default async function DeliverablesPage({
               <THead>
                 <tr>
                   <th className="w-10 text-right">#</th>
-                  <th>Organization</th>
-                  <th className="w-32">Creative type</th>
+                  <th>Client name</th>
                   <th className="w-28 whitespace-nowrap">Schedule date</th>
                   <th className="w-32">Content status</th>
                   <th className="w-32">Design status</th>
@@ -182,9 +180,6 @@ export default async function DeliverablesPage({
                         {d.company_name}
                       </Link>
                       <div className="truncate text-xs text-muted-foreground">{d.title}</div>
-                    </TD>
-                    <TD>
-                      <ServiceBadge task={d} category={d.content_category} />
                     </TD>
                     {/* The scheduled slot when there is one; the due date is
                         what we aim at, the schedule is what actually happens. */}

@@ -38,7 +38,17 @@ export function Table({
            * table wider, which is the trade the boards want: every one of
            * them is a row you click into.
            */
-          dense && "table-fixed [&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5 [&_td]:overflow-hidden",
+          /*
+           * The headings are clipped too, and that was missed the first time.
+           *
+           * Only `td` got `overflow-hidden`, so the values behaved and the
+           * headings above them did not: at a narrow width "ORGANIZATION" ran
+           * straight through "CREATIVE TYPE" and the two words sat on top of
+           * each other. A heading that overflows is worse than a value that
+           * does, because it is the thing naming what it has collided with.
+           */
+          dense &&
+            "table-fixed [&_td]:px-2 [&_th]:px-2 [&_td]:py-2.5 [&_td]:overflow-hidden [&_th]:overflow-hidden [&_th]:text-ellipsis [&_th]:whitespace-nowrap",
           className
         )}
         {...props}

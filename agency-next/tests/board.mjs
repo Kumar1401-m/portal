@@ -173,8 +173,17 @@ await mk("ZZ next week", "pending", nextWeek);
    */
   const table = read("components/ui/table.tsx");
   assert.match(table, /dense &&.*\[&_td\]:px-2/s, "the boards get tighter cells");
-  assert.match(table, /dense && "table-fixed/, "and can never exceed their container");
+  assert.match(table, /dense &&\s*"table-fixed/, "and can never exceed their container");
   assert.match(table, /\[&_td\]:overflow-hidden/, "a long value clips instead of widening the table");
+  /*
+   * And the headings, which were missed the first time. Only the values were
+   * clipped, so at a narrow width "ORGANIZATION" ran straight through
+   * "CREATIVE TYPE" and the two words sat on top of each other — a heading
+   * overflowing is worse than a value doing it, since it is the thing naming
+   * what it has collided with.
+   */
+  assert.match(table, /\[&_th\]:overflow-hidden/, "and a heading clips rather than colliding");
+  assert.match(table, /\[&_th\]:text-ellipsis/, "with an ellipsis, so a clipped word looks clipped");
   assert.match(table, /w-full overflow-x-auto/, "the wrapper is still there, with nothing to do");
 
   for (const file of ["app/(app)/today/page.tsx", "app/(app)/deliverables/page.tsx"]) {
@@ -202,9 +211,17 @@ await mk("ZZ next week", "pending", nextWeek);
     for (const w of ["w-10", "w-28", "w-32", "w-20", "w-16", "w-40"]) {
       assert.ok(src.includes(w), `${file}: ${w} is set on the column that needs it`);
     }
-    assert.ok(
-      src.includes("<th>Organization</th>"),
-      `${file}: Organization takes the remainder — it is the column people read`
+
+    /*
+     * The client's name takes the remainder, and it is the only unpinned
+     * column — which is what makes "the remainder" mean anything. A second
+     * unpinned column would split it.
+     */
+    assert.ok(src.includes("<th>Client name</th>"), `${file}: names the client column`);
+    assert.equal(
+      (src.match(/<th>/g) || []).length,
+      1,
+      `${file}: exactly one column is left to take the space`
     );
   }
   ok("a dense board is exactly as wide as its container, at any screen size");
