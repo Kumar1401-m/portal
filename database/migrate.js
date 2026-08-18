@@ -621,6 +621,50 @@ async function main() {
       CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // The accounts a client is measured against. Read through Meta's business
+  // discovery, which only sees public Business and Creator profiles — nothing
+  // is scraped and nothing private can be read at all.
+  await run('competitors table', `
+    CREATE TABLE IF NOT EXISTS competitors (
+      id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id   BIGINT UNSIGNED NOT NULL,
+      handle      VARCHAR(64) NOT NULL,
+      label       VARCHAR(150) DEFAULT NULL,
+      followers   BIGINT UNSIGNED DEFAULT NULL,
+      media_count BIGINT UNSIGNED DEFAULT NULL,
+      snapshot_json JSON DEFAULT NULL,
+      checked_at  DATETIME DEFAULT NULL,
+      last_error  VARCHAR(400) DEFAULT NULL,
+      added_by    BIGINT UNSIGNED DEFAULT NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_competitor (client_id, handle),
+      CONSTRAINT fk_comp_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // Comments on a client's published posts, with what each one is. `sentiment`
+  // stays null until classified, so an unclassified comment is visibly
+  // unclassified rather than quietly filed as neutral.
+  await run('post_comments table', `
+    CREATE TABLE IF NOT EXISTS post_comments (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      media_id   VARCHAR(64) NOT NULL,
+      comment_id VARCHAR(64) NOT NULL,
+      username   VARCHAR(190) DEFAULT NULL,
+      text       TEXT DEFAULT NULL,
+      posted_at  DATETIME DEFAULT NULL,
+      sentiment  VARCHAR(16) DEFAULT NULL,
+      suggested_reply VARCHAR(600) DEFAULT NULL,
+      handled    TINYINT(1) NOT NULL DEFAULT 0,
+      fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_comment (comment_id),
+      KEY idx_pc_client (client_id, posted_at),
+      KEY idx_pc_sentiment (client_id, sentiment, handled),
+      CONSTRAINT fk_pc_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // A client's requested changes, split into separate jobs somebody can tick
   // off. One round of revisions per task; what the client actually said stays
   // on the deliverable and is never rewritten here.

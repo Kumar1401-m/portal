@@ -5,8 +5,9 @@ import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { crmClientIds, canAccessClient } from "@/lib/crm";
 import { refreshInsights, insightsReady } from "@/lib/ai-insights";
 import { ask } from "@/lib/brain";
-import { setEngine, type EngineKey } from "@/lib/ai-engines";
+import { setEngine, isEngineOn, type EngineKey } from "@/lib/ai-engines";
 import { recordRun } from "@/lib/automation-runs";
+import { advise } from "@/lib/business-advisor";
 
 export type RefreshState = { ok: boolean; message: string };
 
@@ -63,4 +64,22 @@ export async function setEngineAction(key: EngineKey, on: boolean): Promise<Refr
   await setEngine(key, on);
   revalidatePath("/ai");
   return { ok: true, message: on ? "Switched on." : "Switched off." };
+}
+
+export type AdviseState = { ok: true; data: unknown } | { ok: false; error: string };
+
+/**
+ * The agency's own month.
+ *
+ * Admins only, and not because of the model — this is revenue, outstanding
+ * invoices and which clients are worth what. A crm is scoped to their own
+ * clients everywhere else in the portal and has no business seeing the book.
+ */
+export async function adviseAction(): Promise<AdviseState> {
+  await requireUser(ADMIN_ROLES);
+  if (!(await isEngineOn("business_advisor"))) {
+    return { ok: false, error: "That engine is switched off. Turn it back on below." };
+  }
+  const advice = await advise().catch(() => null);
+  return advice ? { ok: true, data: advice } : { ok: false, error: "Couldn't read this month's figures." };
 }

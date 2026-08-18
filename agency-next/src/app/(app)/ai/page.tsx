@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { prettyLocal } from "@/lib/posting";
 import { RefreshInsights, AskBrain, EngineList, type EngineRow } from "./panels";
+import { BusinessAdvisor } from "./advisor";
 
 export const metadata = { title: "AI · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -301,6 +302,10 @@ export default async function AiPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      {/* The book, not a client. Admins only, and behind a button because it
+          is read once a month rather than on every visit. */}
+      {ADMIN_ROLES.includes(user.role) ? <BusinessAdvisor /> : null}
 
       <EngineList engines={engines} canToggle={ADMIN_ROLES.includes(user.role)} />
     </div>

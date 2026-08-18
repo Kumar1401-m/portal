@@ -214,10 +214,40 @@ export const ENGINES: Engine[] = [
     needs: [],
     built: true,
   },
-  { key: "sentiment", label: "Sentiment Analyzer", purpose: "What the comments are actually saying", module: "—", needs: [], built: false },
-  { key: "business_advisor", label: "Business Advisor", purpose: "Which clients earn, which cost, what to do this month", module: "—", needs: [], built: false },
-  { key: "competitors", label: "Competitor Analyzer", purpose: "The gap between this client and the ones they name", module: "—", needs: [], built: false },
-  { key: "trends", label: "Trend Detector", purpose: "Only the trends that fit this particular client", module: "—", needs: [], built: false },
+  {
+    key: "sentiment",
+    label: "Sentiment Analyzer",
+    purpose: "Which comments are questions, complaints, or somebody asking to buy",
+    module: "lib/sentiment.ts",
+    needs: ["post_comments"],
+    built: true,
+  },
+  {
+    key: "business_advisor",
+    label: "Business Advisor",
+    purpose: "Which clients earn, which cost, and who is about to leave",
+    module: "lib/business-advisor.ts",
+    needs: [],
+    built: true,
+  },
+  {
+    key: "competitors",
+    label: "Competitor Analyzer",
+    purpose: "The gap between this client and the rivals they name",
+    module: "lib/competitors.ts",
+    needs: ["competitors"],
+    built: true,
+  },
+  {
+    key: "trends",
+    label: "Trend Detector",
+    // Honest about what it is. The portal has no trending-topics feed, and
+    // inventing one would undo the credibility of everything above it.
+    purpose: "Subjects rivals are covering that this client is not — no trending feed exists to read",
+    module: "lib/competitors.ts",
+    needs: ["competitors"],
+    built: true,
+  },
 ];
 
 export const engine = (key: EngineKey): Engine | undefined => ENGINES.find((e) => e.key === key);

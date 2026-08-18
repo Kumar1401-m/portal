@@ -527,6 +527,57 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "competitors",
+    purpose:
+      "The accounts a client is measured against. Public Instagram handles, read through Meta's business discovery — no scraping, and nothing a client could not see themselves.",
+    ddl: `CREATE TABLE IF NOT EXISTS competitors (
+      id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id   BIGINT UNSIGNED NOT NULL,
+      handle      VARCHAR(64) NOT NULL,
+      label       VARCHAR(150) DEFAULT NULL,
+      /* Last read from Meta, so a stale comparison can say it is stale. */
+      followers   BIGINT UNSIGNED DEFAULT NULL,
+      media_count BIGINT UNSIGNED DEFAULT NULL,
+      /* Their recent posts as Meta returned them — kept whole so the gap
+         analysis can be re-run without spending another API call. */
+      snapshot_json JSON DEFAULT NULL,
+      checked_at  DATETIME DEFAULT NULL,
+      last_error  VARCHAR(400) DEFAULT NULL,
+      added_by    BIGINT UNSIGNED DEFAULT NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_competitor (client_id, handle),
+      CONSTRAINT fk_comp_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "post_comments",
+    purpose:
+      "Comments on a client's own published posts, with what each one is — a question, a complaint, or somebody asking to buy. What the sentiment board reads.",
+    ddl: `CREATE TABLE IF NOT EXISTS post_comments (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      media_id   VARCHAR(64) NOT NULL,
+      comment_id VARCHAR(64) NOT NULL,
+      username   VARCHAR(190) DEFAULT NULL,
+      text       TEXT DEFAULT NULL,
+      posted_at  DATETIME DEFAULT NULL,
+      /* positive | neutral | negative | question | complaint | lead — null
+         until it has been classified, so an unclassified comment is visibly
+         unclassified rather than quietly filed as neutral. */
+      sentiment  VARCHAR(16) DEFAULT NULL,
+      /* A reply the agency could send, for a person to edit and use. */
+      suggested_reply VARCHAR(600) DEFAULT NULL,
+      handled    TINYINT(1) NOT NULL DEFAULT 0,
+      fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_comment (comment_id),
+      KEY idx_pc_client (client_id, posted_at),
+      KEY idx_pc_sentiment (client_id, sentiment, handled),
+      CONSTRAINT fk_pc_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "feedback_items",
     purpose:
       "A client's requested changes, split into separate jobs somebody can tick off. One round of revisions per task — what the client actually said stays on the task itself.",

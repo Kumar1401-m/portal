@@ -14,6 +14,8 @@ import {
   ImageIcon,
   Search,
   CalendarRange,
+  Swords,
+  MessageCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
@@ -40,8 +42,9 @@ import {
   seoAction,
   ideaToTaskAction,
 } from "./actions";
+import { RivalsPanel, CommentsPanel } from "./outside";
 
-type Tab = "strategy" | "ideas" | "script" | "thumbnail" | "seo";
+type Tab = "strategy" | "ideas" | "script" | "thumbnail" | "seo" | "rivals" | "comments";
 
 const TABS: { key: Tab; label: string; Icon: typeof Lightbulb }[] = [
   { key: "strategy", label: "Strategy", Icon: CalendarRange },
@@ -49,6 +52,8 @@ const TABS: { key: Tab; label: string; Icon: typeof Lightbulb }[] = [
   { key: "script", label: "Script", Icon: FileText },
   { key: "thumbnail", label: "Thumbnail", Icon: ImageIcon },
   { key: "seo", label: "SEO", Icon: Search },
+  { key: "rivals", label: "Rivals", Icon: Swords },
+  { key: "comments", label: "Comments", Icon: MessageCircle },
 ];
 
 /**
@@ -128,6 +133,8 @@ export function Studio({
       {tab === "script" ? <ScriptPanel clientId={clientId} clientName={clientName} /> : null}
       {tab === "thumbnail" ? <ThumbnailPanel clientId={clientId} /> : null}
       {tab === "seo" ? <SeoPanel clientId={clientId} city={city} /> : null}
+      {tab === "rivals" ? <RivalsPanel clientId={clientId} /> : null}
+      {tab === "comments" ? <CommentsPanel clientId={clientId} /> : null}
     </div>
   );
 }
