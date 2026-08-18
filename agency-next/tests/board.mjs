@@ -234,5 +234,64 @@ await mk("ZZ next week", "pending", nextWeek);
   ok("a dense board is exactly as wide as its container, at any screen size");
 }
 
+
+/* ---------------- and a phone gets the name, not two letters of it ---------------- */
+{
+  /*
+   * table-fixed shares the width between whatever columns are showing, which
+   * is the guarantee that killed the sideways scrollbar and, on a 390px
+   * screen, gave seven columns fifty pixels each. "4insitestudio" rendered as
+   * "4in…" — the board's most-read column, unreadable on the device it is
+   * most often read on.
+   *
+   * So the narrow repeatable columns fold away on the way down, and what they
+   * were carrying is restacked under the name. A phone loses the grid and
+   * keeps the facts.
+   */
+  for (const file of ["app/(app)/today/page.tsx", "app/(app)/deliverables/page.tsx"]) {
+    const src = read(file);
+
+    // Header and cell fold together at every breakpoint, or the table shears.
+    // "2xl:table-cell" contains "xl:table-cell", hence the subtraction.
+    const count = (bp) => (src.match(new RegExp(bp + ":table-cell", "g")) || []).length;
+    const pairs = {
+      sm: count("sm"),
+      md: count("md"),
+      lg: count("lg"),
+      xl: count("xl") - count("2xl"),
+      "2xl": count("2xl"),
+    };
+    for (const [bp, n] of Object.entries(pairs)) {
+      assert.equal(n % 2, 0, `${file}: ${bp} folds ${n} cells — a header without its cell shears it`);
+    }
+
+    // What a phone is left holding. The name is the point, the post status
+    // answers "where is this", and Actions is how you do anything about it.
+    assert.ok(src.includes("<th>Client name</th>"), `${file}: the name never folds`);
+    assert.match(src, /<th className="w-28">Post status<\/th>/, `${file}: nor does the post status`);
+    assert.match(src, /<th className="w-20 text-right">Actions<\/th>/, `${file}: nor the actions`);
+
+    // And the folded facts are restacked rather than dropped.
+    assert.match(
+      src,
+      /className="mt-1 flex flex-wrap items-center gap-1\.5 md:hidden"/,
+      `${file}: the date and statuses reappear under the name while folded`
+    );
+  }
+  ok("a phone keeps the client's name, the post status and the actions");
+}
+
+/* ---------------- and the report scrolls rather than squashing ---------------- */
+{
+  const rep = read("app/(app)/reports/page.tsx");
+  /*
+   * "fits" counted categories, never screens: three of them share 100%
+   * comfortably on a laptop and give the client column 70px on a phone.
+   */
+  assert.match(rep, /min-w-\[46rem\] md:min-w-0 md:table-fixed/, "a narrow screen scrolls the report");
+  assert.ok(!/\{fits \? "w-full" :/.test(rep), "the wrapper always scrolls");
+  ok("a report on a phone is scrolled, not squashed");
+}
+
 await clean();
 await finish(pass);

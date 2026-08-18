@@ -1,13 +1,10 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
-
-/** "2026-07" -> "2026-06" / "2026-08". */
-function shift(month: string, by: number): string {
-  const [y, m] = month.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + by, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-}
+// The third copy of "one month either way" in this codebase, now the same one
+// the ads board and the client plan use. Verified identical to the UTC version
+// it replaces across every month of 2023–2028.
+import { shiftMonth as shift } from "@/lib/date-range";
 
 const LONG = (month: string) => {
   const [y, m] = month.split("-").map(Number);

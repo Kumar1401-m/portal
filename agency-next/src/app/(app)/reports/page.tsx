@@ -86,8 +86,18 @@ export default async function ReportsPage({
 
         </div>
 
-        <div className={fits ? "w-full" : "w-full overflow-x-auto"}>
-          <table className={`w-full text-sm ${fits ? "table-fixed" : "min-w-[70rem]"}`}>
+        {/*
+          Always scrollable, because "fits" was only ever about the number of
+          categories and never about the screen. Three categories share 100%
+          happily on a laptop and give the client column 70px on a phone,
+          which is a name rendered as two letters and an ellipsis. Below md the
+          table keeps a readable minimum and the panel scrolls; from md up it
+          goes back to sharing the width exactly as before.
+        */}
+        <div className="w-full overflow-x-auto">
+          <table
+            className={`w-full text-sm ${fits ? "min-w-[46rem] md:min-w-0 md:table-fixed" : "min-w-[70rem]"}`}
+          >
             <thead className="border-b border-border">
               <tr className="[&_th]:px-3 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
                 <th style={{ width: pc(w.sno) }}>S.No</th>

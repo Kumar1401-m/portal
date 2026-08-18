@@ -225,11 +225,21 @@ export default async function TodayPage({
           <Table dense>
             <THead>
               <tr>
-                <th className="w-10 text-right">#</th>
+                {/*
+                  What a phone keeps.
+
+                  `table-fixed` shares the width between whatever columns are
+                  showing, so seven of them on a 390px screen is fifty pixels
+                  each and a client called "4insitestudio" renders as "4in…".
+                  The narrow, repeatable columns therefore fold away first and
+                  what they said is restacked under the name in the cell below,
+                  so a phone loses the grid and never the facts.
+                */}
+                <th className="hidden w-10 text-right sm:table-cell">#</th>
                 <th>Client name</th>
-                <th className="w-28">Schedule date</th>
-                <th className="w-32">Content status</th>
-                <th className="w-32">Design status</th>
+                <th className="hidden w-28 md:table-cell">Schedule date</th>
+                <th className="hidden w-32 lg:table-cell">Content status</th>
+                <th className="hidden w-32 md:table-cell">Design status</th>
                 <th className="w-28">Post status</th>
                 <th className="hidden w-32 2xl:table-cell">Caption</th>
                 {/* Raw footage and the cut video are the video track's, and a
@@ -255,10 +265,10 @@ export default async function TodayPage({
                   <TR key={d.id}>
                     {/* Numbering runs on across pages, so row 9 is the ninth
                         task and not the first of page two. */}
-                    <TD className="text-right tabular-nums text-muted-foreground">
+                    <TD className="hidden text-right tabular-nums text-muted-foreground sm:table-cell">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </TD>
-                    <TD className="max-w-[9rem]">
+                    <TD>
                       <Link
                         href={`/deliverables/${d.id}`}
                         className="font-medium text-foreground transition-colors hover:text-primary hover:underline"
@@ -266,16 +276,31 @@ export default async function TodayPage({
                         {d.company_name}
                       </Link>
                       <div className="truncate text-xs text-muted-foreground">{d.title}</div>
+                      {/* What the folded columns were carrying, restacked
+                          under the name and shown only while they are folded.
+                          A phone loses the grid; it must not lose the date the
+                          task is due on. */}
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
+                        <span
+                          className={`text-xs tabular-nums ${overdue ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                        >
+                          {fmtDate(d.scheduled_at ?? d.due_date)}
+                        </span>
+                        <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
+                        <span className="lg:hidden">
+                          <Badge tone={contentStageTone(d.status)}>{contentStageLabel(d.status)}</Badge>
+                        </span>
+                      </div>
                     </TD>
-                    <TD className="whitespace-nowrap tabular-nums">
+                    <TD className="hidden whitespace-nowrap tabular-nums md:table-cell">
                       <span className={overdue ? "font-medium text-destructive" : "text-muted-foreground"}>
                         {fmtDate(d.scheduled_at ?? d.due_date)}
                       </span>
                     </TD>
-                    <TD>
+                    <TD className="hidden lg:table-cell">
                       <Badge tone={contentStageTone(d.status)}>{contentStageLabel(d.status)}</Badge>
                     </TD>
-                    <TD>
+                    <TD className="hidden md:table-cell">
                       <Badge tone={editorStatusTone(d.status)}>{editorStatusLabel(d.status)}</Badge>
                     </TD>
                     <TD>
