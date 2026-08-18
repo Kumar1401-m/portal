@@ -379,5 +379,79 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   ok("every figure comes from Meta, is dated, and refreshes itself nightly");
 }
 
+/* ---------------- the audience beside the spend ---------------- */
+{
+  const aud = await load("lib/audience.ts");
+  const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
+
+  const NAME = "ZZ ads audience";
+  await db.execute("DELETE FROM clients WHERE company_name = ?", [NAME]);
+  const id = Number(
+    (await db.execute("INSERT INTO clients (company_name, status) VALUES (?, 'active')", [NAME]))
+      .insertId
+  );
+
+  /*
+   * The case that must not print a zero.
+   *
+   * A client with no Instagram account and no Page has an unknown audience,
+   * not an audience of none — and "0 followers" next to their ad spend is a
+   * number somebody would repeat to them.
+   */
+  assert.equal(await aud.getAudience(id), null, "nothing configured means nothing to show");
+
+  // A Page id with no token cannot be asked, and must fail the same quiet way
+  // rather than throwing into a page whose real job is the ad figures.
+  await db.execute("UPDATE clients SET fb_page_id = '973697795837500' WHERE id = ?", [id]);
+  assert.equal(await aud.getAudience(id), null, "and an unaskable account does too");
+
+  await db.execute("DELETE FROM clients WHERE id = ?", [id]);
+
+  const lib = read("lib/audience.ts");
+  // One call for both numbers where the client has a Page: the linked
+  // Instagram account comes back nested rather than costing a second request.
+  assert.match(
+    lib,
+    /instagram_business_account\{username,followers_count\}/,
+    "a Page and its Instagram account are read together"
+  );
+  // But Instagram alone still works — a client can have an IG account here
+  // without their Page id ever being filled in.
+  assert.match(lib, /if \(!instagram && c\.ig_user_id\)/, "and Instagram alone is still asked");
+  // followers_count superseded fan_count (page likes); both are requested so
+  // an older API version still yields something.
+  assert.match(lib, /page\.followers_count \?\? page\.fan_count/, "followers wins, likes are the fallback");
+  assert.match(lib, /AbortSignal\.timeout\(6_000\)/, "and it cannot hold the page up");
+
+  const page = read("app/(app)/ads/[id]/page.tsx");
+  assert.match(page, /audience \? \(/, "the block renders only when there is something to say");
+  assert.match(page, /getAudience\(clientId\),/, "fetched alongside the ad figures, not after them");
+  ok("followers show per client, and their absence shows nothing rather than nought");
+}
+
+/* ---------------- and the board can be pointed at one client ---------------- */
+{
+  const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
+  const picker = read("app/(app)/ads/client-picker.tsx");
+
+  /*
+   * "By client" already linked to each client's page, but only for a client
+   * who spent something in the range on screen. A client who paused their ads
+   * last month was reachable from no range that showed them — which is
+   * exactly the moment somebody goes looking for them.
+   */
+  assert.match(picker, /<option value="">All clients<\/option>/, "and there is a way back out");
+  assert.match(picker, /\/ads\/\$\{v\}\?range=\$\{range\}/, "the range travels with the client");
+  assert.match(picker, /`\/ads\?range=\$\{range\}`/, "in both directions");
+
+  for (const f of ["app/(app)/ads/page.tsx", "app/(app)/ads/[id]/page.tsx"]) {
+    const src = read(f);
+    assert.match(src, /<ClientPicker/, `${f} offers it`);
+    // Every client, not only the ones with spend in this range.
+    assert.match(src, /getClientsMini\(await crmClientIds\(user\)\)/, `${f}: scoped to what the viewer may see`);
+  }
+  ok("the ads board can be narrowed to one client, and back again");
+}
+
 await clean();
 await finish(pass);

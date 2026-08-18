@@ -9,6 +9,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { crmClientIds } from "@/lib/crm";
+import { getClientsMini } from "@/lib/deliverables";
 import { adSummary, adsReadiness, lastAdSync } from "@/lib/ads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
@@ -16,6 +18,7 @@ import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { RangePicker } from "./range-picker";
 import { resolveRange } from "@/lib/date-range";
 import { SyncButton } from "./sync-button";
+import { ClientPicker } from "./client-picker";
 import { fmtDate } from "@/lib/utils";
 import { prettyLocal } from "@/lib/posting";
 
@@ -56,7 +59,7 @@ export default async function AdsPage({
 }: {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
-  await requireUser(ADMIN_OR_CRM_ROLES);
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const sp = await searchParams;
 
   const readiness = await adsReadiness();
@@ -80,7 +83,13 @@ export default async function AdsPage({
   }
 
   const { from, to, key } = resolveRange(sp.range, sp.from, sp.to);
-  const [data, syncedAt] = await Promise.all([adSummary(from, to), lastAdSync()]);
+  // Every client the viewer may see, not only the ones that spent in this
+  // range — a client who paused last month is exactly who gets looked up.
+  const [data, syncedAt, clients] = await Promise.all([
+    adSummary(from, to),
+    lastAdSync(),
+    getClientsMini(await crmClientIds(user)),
+  ]);
   const t = data.totals;
 
   // One currency is the normal case and reads best; two means the totals row
@@ -100,6 +109,7 @@ export default async function AdsPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ClientPicker clients={clients} range={key} />
           <RangePicker current={key} />
           <SyncButton />
         </div>

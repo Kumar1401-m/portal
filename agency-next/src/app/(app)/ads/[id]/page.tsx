@@ -13,9 +13,11 @@ import {
   TrendingDown,
   TrendingUp,
   TriangleAlert,
+  AtSign,
+  Users,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
-import { canAccessClient } from "@/lib/crm";
+import { canAccessClient, crmClientIds } from "@/lib/crm";
 import { clientAdDetail } from "@/lib/ads";
 import { resolveRange } from "@/lib/date-range";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,9 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
 import { RangePicker } from "../range-picker";
+import { ClientPicker } from "../client-picker";
+import { getAudience } from "@/lib/audience";
+import { getClientsMini } from "@/lib/deliverables";
 import { fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Client ads · NVK Hub" };
@@ -73,7 +78,13 @@ export default async function ClientAdsPage({
   if (!(await canAccessClient(user, clientId))) notFound();
 
   const { from, to, key } = resolveRange(sp.range, sp.from, sp.to);
-  const detail = await clientAdDetail(clientId, from, to);
+  // The audience call goes to Meta, so it runs alongside rather than after —
+  // and it returns null on any failure, so it can never hold this page up.
+  const [detail, audience, clients] = await Promise.all([
+    clientAdDetail(clientId, from, to),
+    getAudience(clientId),
+    getClientsMini(await crmClientIds(user)),
+  ]);
   if (!detail) notFound();
 
   const { client, days, totals, best, worst } = detail;
@@ -96,8 +107,52 @@ export default async function ClientAdsPage({
             </p>
           </div>
         </div>
-        <RangePicker current={key} basePath={`/ads/${clientId}`} />
+        <div className="flex items-center gap-2">
+          <ClientPicker clients={clients} current={clientId} range={key} />
+          <RangePicker current={key} basePath={`/ads/${clientId}`} />
+        </div>
       </div>
+
+      {/*
+        The audience the spend is buying.
+
+        Read live from Meta rather than from anything we store, so it is
+        whatever the account says right now. A client with neither an
+        Instagram account nor a Page configured gets nothing here rather than
+        two zeroes, which would read as an audience of none.
+      */}
+      {audience ? (
+        <div className="flex flex-wrap gap-3">
+          {audience.instagram ? (
+            <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+              <AtSign className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-lg font-semibold tabular-nums leading-none">
+                  {num(audience.instagram.followers)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Instagram followers
+                  {audience.instagram.username ? ` · @${audience.instagram.username}` : ""}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {audience.facebook ? (
+            <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+              <Users className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="text-lg font-semibold tabular-nums leading-none">
+                  {num(audience.facebook.followers)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Facebook followers
+                  {audience.facebook.name ? ` · ${audience.facebook.name}` : ""}
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Who to ring about these numbers. The reason this page exists rather
           than a filter on the board: the figures and the person go together. */}
