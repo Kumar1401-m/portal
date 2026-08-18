@@ -479,6 +479,106 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "post_insights",
+    purpose:
+      "How each published post actually performed — reach, likes, comments, saves and shares, read back from Instagram. What the Analytics board is built on.",
+    /*
+     * Word for word what `database/migrate.js` already creates.
+     *
+     * The table was in the schema before anything read from it, so the
+     * Analytics board was written against the columns that were already there
+     * rather than a second, near-identical table beside them. Any difference
+     * between this and migrate.js is a bug in one of them.
+     */
+    ddl: `CREATE TABLE IF NOT EXISTS post_insights (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED DEFAULT NULL,
+      client_id      BIGINT UNSIGNED NOT NULL,
+      platform       VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      media_id       VARCHAR(64) NOT NULL,
+      media_type     VARCHAR(30) DEFAULT NULL,
+      permalink      VARCHAR(500) DEFAULT NULL,
+      thumbnail_url  VARCHAR(700) DEFAULT NULL,
+      caption        TEXT DEFAULT NULL,
+      published_at   DATETIME DEFAULT NULL,
+      snapshot_date  DATE NOT NULL,
+      reach          BIGINT NOT NULL DEFAULT 0,
+      impressions    BIGINT NOT NULL DEFAULT 0,
+      views          BIGINT NOT NULL DEFAULT 0,
+      plays          BIGINT NOT NULL DEFAULT 0,
+      likes          BIGINT NOT NULL DEFAULT 0,
+      comments       BIGINT NOT NULL DEFAULT 0,
+      shares         BIGINT NOT NULL DEFAULT 0,
+      saves          BIGINT NOT NULL DEFAULT 0,
+      total_interactions BIGINT NOT NULL DEFAULT 0,
+      engagement_rate DECIMAL(7,2) NOT NULL DEFAULT 0.00,
+      raw_json       JSON DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      /* One row per post per day, so a re-read the same day corrects the
+         figures and a read tomorrow records how the post has since grown. */
+      UNIQUE KEY uq_post_insight (media_id, snapshot_date),
+      KEY idx_pi_client_date (client_id, snapshot_date),
+      KEY idx_pi_deliv (deliverable_id),
+      KEY idx_pi_published (published_at),
+      CONSTRAINT fk_pi_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      CONSTRAINT fk_pi_deliv FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "scheduled_reports",
+    purpose:
+      "One row per client per month of the automatic report — what was generated and whether it reached them. Its unique key is what stops the job on the 1st sending everybody two copies.",
+    /* Word for word what `database/migrate.js` creates. */
+    ddl: `CREATE TABLE IF NOT EXISTS scheduled_reports (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      period       ENUM('weekly','monthly') NOT NULL,
+      period_start DATE NOT NULL,
+      period_end   DATE NOT NULL,
+      status       ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+      sent_to      VARCHAR(190) DEFAULT NULL,
+      error_message TEXT DEFAULT NULL,
+      summary_json JSON DEFAULT NULL,
+      sent_at      DATETIME DEFAULT NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_report_period (client_id, period, period_start),
+      KEY idx_sr_client (client_id),
+      CONSTRAINT fk_sr_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "leads",
+    purpose:
+      "Enquiries on their way to becoming clients — the pipeline the Leads board reads, from first contact to won or lost.",
+    ddl: `CREATE TABLE IF NOT EXISTS leads (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      name           VARCHAR(150) NOT NULL,
+      company        VARCHAR(190) DEFAULT NULL,
+      phone          VARCHAR(32) DEFAULT NULL,
+      email          VARCHAR(190) DEFAULT NULL,
+      source         VARCHAR(32) NOT NULL DEFAULT 'manual',
+      stage          VARCHAR(16) NOT NULL DEFAULT 'new',
+      value          DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      owner_user_id  BIGINT UNSIGNED DEFAULT NULL,
+      next_follow_up DATE DEFAULT NULL,
+      note           TEXT DEFAULT NULL,
+      lost_reason    VARCHAR(190) DEFAULT NULL,
+      /* Set when the lead is won and becomes a client, so the pipeline can
+         point at what it produced instead of losing the thread there. */
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_lead_stage (stage),
+      KEY idx_lead_follow (next_follow_up),
+      KEY idx_lead_owner (owner_user_id),
+      CONSTRAINT fk_lead_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "expenses",
     purpose:
       "What the agency spends — salaries, subscriptions, ad budgets, rent — with the recurring ones due again on a date.",

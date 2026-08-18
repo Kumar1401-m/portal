@@ -621,6 +621,48 @@ async function main() {
       CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // The enquiries that have not become clients yet. One row per lead with a
+  // stage on it — deliberately not a second contacts model: what loses a lead
+  // is nobody following it up on the day they said they would, so the fields
+  // that earn their place are the ones saying who is chasing it, and when.
+  await run('leads table', `
+    CREATE TABLE IF NOT EXISTS leads (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      name           VARCHAR(150) NOT NULL,
+      company        VARCHAR(190) DEFAULT NULL,
+      phone          VARCHAR(32) DEFAULT NULL,
+      email          VARCHAR(190) DEFAULT NULL,
+      source         VARCHAR(32) NOT NULL DEFAULT 'manual',
+      stage          VARCHAR(16) NOT NULL DEFAULT 'new',
+      value          DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      owner_user_id  BIGINT UNSIGNED DEFAULT NULL,
+      next_follow_up DATE DEFAULT NULL,
+      note           TEXT DEFAULT NULL,
+      lost_reason    VARCHAR(190) DEFAULT NULL,
+      client_id      BIGINT UNSIGNED DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_lead_stage (stage),
+      KEY idx_lead_follow (next_follow_up),
+      KEY idx_lead_owner (owner_user_id),
+      CONSTRAINT fk_lead_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // One follower count per client, per platform, per day — what the growth
+  // lines on the ads and analytics boards are drawn from.
+  await run('audience_snapshots table', `
+    CREATE TABLE IF NOT EXISTS audience_snapshots (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      platform   VARCHAR(16) NOT NULL,
+      followers  INT UNSIGNED NOT NULL,
+      taken_on   DATE NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_audience_day (client_id, platform, taken_on),
+      KEY idx_audience_client (client_id, platform, taken_on)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // Guards against emailing a client the same weekly/monthly report twice.
   await run('scheduled_reports table', `
     CREATE TABLE IF NOT EXISTS scheduled_reports (
