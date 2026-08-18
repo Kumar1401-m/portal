@@ -274,8 +274,7 @@ await clean();
     assert.equal(plan[plan.length - 1].to, secs, `${secs}s still ends exactly at ${secs}`);
   }
 
-  // The four asks, in the order they should be made. Follow is last because it
-  // is the biggest thing to ask a stranger for.
+  // The vocabulary a CTA draws from. A script asks for ONE of these.
   assert.deepEqual(kinds.ENGAGEMENT_ASKS, ["save", "share", "comment", "follow"]);
 
   const src = read("lib/content-ai.ts");
@@ -283,12 +282,94 @@ await clean();
   assert.match(src, /No introduction and no separate examples section/i);
   assert.match(src, /an example belongs inside the body/i, "the example did not vanish, it moved");
 
-  // "Follow us for more" is the weakest ending a reel can have.
-  assert.match(src, /Ask for two or three of these by name/i);
-  assert.match(src, /Give a REASON for each ask/i, "an ask without a reason is ignored");
-  assert.match(src, /comment ask must be a real question/i);
-  assert.match(src, /Put the follow last/i);
-  ok("three sections, and a CTA that asks for saves, shares and comments by name");
+  // One ask, not four. "Like, share, save, comment and follow" is the ending
+  // every account runs, and it is why none of them get any of it.
+  assert.match(src, /one ask, and only one/i);
+  assert.match(src, /and nothing else/i);
+  assert.match(src, /Why this one: \$\{kind\.askWhy\}/, "the reason comes from the format, not the model");
+  assert.match(src, /An ask without a reason is skipped/i);
+  assert.doesNotMatch(src, /Ask for two or three/i, "the four-ask ending is gone");
+  ok("three sections, and one ask the format has earned");
+}
+
+/* ---------------- the format decides the shape, the clock and the ask ---------------- */
+{
+  const kinds = await load("lib/content-kinds.ts");
+  const types = kinds.CONTENT_TYPES;
+
+  // The nine the agency actually makes: the work, then the borrowed formats.
+  assert.deepEqual(
+    types.map((t) => t.key),
+    ["education", "ad", "lead_magnet", "graphic", "rating", "clone", "funny", "rapid_fire", "myths"]
+  );
+  assert.equal(new Set(types.map((t) => t.key)).size, types.length, "keys are distinct");
+  assert.equal(kinds.contentType("education").key, "education");
+  // An unknown key must never throw — it arrives from a form post.
+  assert.equal(kinds.contentType("nonsense").key, "education", "unknown falls back to the default");
+  assert.equal(kinds.contentType(undefined).key, "education");
+  assert.equal(kinds.contentType(null).key, "education");
+
+  for (const t of types) {
+    assert.ok(t.label && t.what && t.shape && t.askWhy, `${t.key} is described`);
+    // Every format ends by asking for exactly one thing, and it is either one
+    // of the four or the client's own action. "All of them" is not an option.
+    assert.ok(
+      [...kinds.ENGAGEMENT_ASKS, "direct"].includes(t.ask),
+      `${t.key} asks for one nameable thing (got ${t.ask})`
+    );
+  }
+
+  // The ad is the one that must not ask for engagement: a paid second spent on
+  // a save is a second not spent on the enquiry being paid for.
+  assert.equal(types.find((t) => t.key === "ad").ask, "direct");
+  // And a joke is not a lesson — nobody saves a punchline, they send it on.
+  assert.equal(types.find((t) => t.key === "funny").ask, "share");
+  assert.equal(types.find((t) => t.key === "education").ask, "save");
+  assert.equal(types.find((t) => t.key === "lead_magnet").ask, "comment");
+
+  // Not every format ends the same, or the picker changes nothing that matters.
+  assert.ok(new Set(types.map((t) => t.ask)).size >= 4, "the asks genuinely differ by format");
+  assert.ok(new Set(types.map((t) => t.ctaShare)).size >= 3, "and so does the time the ending gets");
+
+  // Whatever the format, the clock still has to add up.
+  for (const t of types) {
+    for (const secs of [15, 30, 60, 90, 180]) {
+      const plan = kinds.scriptPlan(secs, t.key);
+      const [hook, body, cta] = plan;
+      assert.deepEqual(plan.map((p) => p.key), ["hook", "body", "cta"], `${t.key} @${secs}s`);
+      assert.equal(hook.from, 0, `${t.key} @${secs}s starts at zero`);
+      assert.equal(cta.to, secs, `${t.key} @${secs}s ends exactly at ${secs}`);
+      assert.equal(body.from, hook.to, `${t.key} @${secs}s: no gap after the hook`);
+      assert.equal(cta.from, body.to, `${t.key} @${secs}s: no gap before the ending`);
+      assert.ok(hook.to - hook.from >= 3, `${t.key} @${secs}s: the hook keeps its 3 seconds`);
+      assert.ok(cta.to - cta.from >= 4, `${t.key} @${secs}s: the ending keeps its 4`);
+      assert.ok(
+        body.to - body.from > cta.to - cta.from,
+        `${t.key} @${secs}s: the body is still the longest part`
+      );
+    }
+  }
+
+  // The ad closes and needs room to; the joke ends on the punchline.
+  const secondsOf = (key, secs) => {
+    const cta = kinds.scriptPlan(secs, key).find((p) => p.key === "cta");
+    return cta.to - cta.from;
+  };
+  assert.ok(secondsOf("ad", 60) > secondsOf("funny", 60), "an ad's ending gets more of the clock than a joke's");
+
+  // On-screen text is read, not spoken, and slower. Holding a graphic reel to a
+  // talking script's word count fills the cards with sentences nobody can read.
+  assert.ok(
+    kinds.wordFloor(60, "graphic") < kinds.wordFloor(60, "education"),
+    "a graphic reel is not held to a spoken word count"
+  );
+  assert.equal(kinds.wordFloor(60), kinds.wordFloor(60, "education"), "the default is the education reel");
+
+  const src = read("lib/content-ai.ts");
+  assert.match(src, /THIS ONE IS A \$\{kind\.label\.toUpperCase\(\)\}/, "the model is told which format it is writing");
+  assert.match(src, /Build the body like this: \$\{kind\.shape\}/, "and how that format is built");
+  assert.match(src, /This is an ad\./i, "an ad is told not to ask for engagement");
+  ok("nine formats, each with its own shape, its own clock and one ask");
 }
 
 /* ---------------- the floor is checked, not merely requested ---------------- */

@@ -50,6 +50,7 @@ import {
   type ThumbnailConcept,
   type SeoPack,
   ENGAGEMENT_ASKS,
+  contentType,
   scriptPlan,
   wordFloor,
   countWords,
@@ -340,10 +341,13 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
 
   const seconds = Math.min(180, Math.max(10, input.seconds ?? 40));
   const language = (input.language ?? "English") as ScriptLanguage;
+  // The format is picked first, because everything below follows from it: how
+  // the body is built, how long the ending runs, and what it asks for.
+  const kind = contentType(input.type);
 
-  const plan = scriptPlan(seconds);
+  const plan = scriptPlan(seconds, kind.key);
   const target = plan.reduce((t, s) => t + s.targetWords, 0);
-  const floor = wordFloor(seconds);
+  const floor = wordFloor(seconds, kind.key);
 
   /*
    * A per-section budget, in seconds and in words.
@@ -363,38 +367,53 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
 
   const system = [
     "You write short-video scripts for a digital-marketing agency's client.",
-    "The script is spoken aloud by the business owner or their presenter — write words a person can say, not prose.",
+    kind.key === "graphic"
+      ? "This one is not spoken: the words go on screen as cards, so write lines that can be read at a glance."
+      : "The script is spoken aloud by the business owner or their presenter — write words a person can say, not prose.",
     LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
     "A script has exactly three parts: HOOK, BODY, CALL TO ACTION. No introduction and no separate examples section — an example belongs inside the body.",
     "The hook is the first three seconds and decides whether anything else is watched.",
     "The body carries everything: the substance, the steps, the reasons and any example.",
+    // The one line that stops every format coming out as the same reel with a
+    // different subject in it.
+    `THIS ONE IS A ${kind.label.toUpperCase()} — ${kind.what} Build the body like this: ${kind.shape}`,
     "LENGTH IS A REQUIREMENT, NOT A GUIDE. Every section must reach at least the words given for it.",
     "Going over is fine — an editor can trim. Coming in under is a failure: it leaves the video short on the day of the shoot.",
     "Reply with JSON only.",
   ].join(" ");
 
   /*
-   * What the closing line has to actually ask for.
+   * One ask, chosen by the format.
    *
-   * "Follow us for more" is the weakest ending a reel can have: it asks a
-   * stranger for a commitment before they have a reason to give one. Save,
-   * share and comment cost the viewer nothing, they are what the algorithm
-   * counts, and a comment prompt is the only one that produces a reply the
-   * agency can answer — which is how a reel becomes an enquiry.
+   * Asking for all four in ten seconds gets none of them — it is the ending
+   * every account runs and the reason "like, share, save, comment, follow"
+   * reads as noise. Each format has earned exactly one: a lesson earns a save,
+   * a joke earns a share, a ranking earns an argument in the comments, and an
+   * ad has bought the second it is standing on, so it asks for the enquiry and
+   * nothing else.
    */
   const ctaRule = [
-    "THE CALL TO ACTION — this is not one line, it is the section that earns the engagement:",
-    `- Ask for two or three of these by name: ${ENGAGEMENT_ASKS.join(", ")}.`,
-    "- Give a REASON for each ask, tied to this video: save it because they will need it later,",
-    "  share it with the person it is about, comment a specific word or answer.",
-    "- The comment ask must be a real question or prompt somebody can answer in three words.",
-    "- Put the follow last and make it the reason to come back, not a plea.",
-    "- Then the client's own call to action from their rules above, if they have one.",
-  ].join("\n");
+    "THE CALL TO ACTION — one ask, and only one:",
+    kind.ask === "direct"
+      ? "- This is an ad. The only ask is the client's own action from their rules above — call, DM, book, walk in. " +
+        `Do not ask for a ${ENGAGEMENT_ASKS.join(", a ")}: this second is paid for and none of them is the enquiry.`
+      : `- Ask for a ${kind.ask.toUpperCase()} and nothing else. Naming all of ` +
+        `${ENGAGEMENT_ASKS.join(", ")} in one breath is how an ending gets none of them.`,
+    `- Why this one: ${kind.askWhy}`,
+    "- Give the reason in the viewer's own terms, tied to what they have just watched. An ask without a reason is skipped.",
+    kind.ask === "comment"
+      ? "- The prompt must be a real question or word somebody can answer in three words."
+      : "",
+    kind.ask === "direct"
+      ? ""
+      : "- The client's own call to action, if their rules give one, comes last on its own line.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const ask = (extra?: string) =>
     [
-      `Write a ${seconds}-second ${input.platform || "Instagram Reel"} script for ${b.client}.`,
+      `Write a ${seconds}-second ${kind.label.toLowerCase()} for ${b.client}, for ${input.platform || "Instagram Reels"}.`,
       `Topic: ${input.topic}`,
       input.audience ? `Audience: ${input.audience}` : "",
       input.tone ? `Tone: ${input.tone}` : "",
@@ -403,8 +422,8 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
       `THE CLOCK — ${seconds} seconds, at least ${target} words in total:`,
       budget,
       "",
-      "Fill the body with actual substance — the steps, the reasons, the detail somebody",
-      "would stay to hear, and a concrete example inside it. Do not pad the hook to reach the count.",
+      `Build the body the way a ${kind.label.toLowerCase()} is built: ${kind.shape}`,
+      "Fill it with actual substance — the detail somebody would stay to hear. Do not pad the hook to reach the count.",
       "",
       ctaRule,
       extra ?? "",
@@ -412,8 +431,8 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
       "Reply as JSON:",
       "{",
       '  "hook": "the opening line",',
-      '  "body": "everything of substance, including the example — by far the longest section",',
-      '  "cta": "the closing section: the engagement asks with their reasons, then the client\'s own CTA",',
+      '  "body": "everything of substance, built the way this format is built — by far the longest section",',
+      '  "cta": "the closing section: the one ask with its reason, then the client\'s own CTA",',
       '  "full": "the whole script as it would be read aloud, in order",',
       '  "alt_hooks": ["two or three other openings"]',
       "}",
@@ -464,8 +483,8 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
       system,
       ask(
         `\nYour previous draft was ${script.totalWords} words and needs at least ${floor}. ` +
-          `Short sections: ${thin}. Rewrite the whole script longer — add real content to the body ` +
-          `and the example. Do not pad, do not repeat, do not stretch the hook.`
+          `Short sections: ${thin}. Rewrite the whole script longer — add real content to the body: ` +
+          `${kind.shape} Do not pad, do not repeat, do not stretch the hook, do not add a second ask.`
       )
     );
     if (second) {
@@ -504,16 +523,26 @@ export async function regenerateSection(
   if (!b) return null;
 
   const language = (input.language ?? "English") as ScriptLanguage;
-  const slot = scriptPlan(input.seconds ?? 40).find((p) => p.key === section);
+  const kind = contentType(input.type);
+  const slot = scriptPlan(input.seconds ?? 40, kind.key).find((p) => p.key === section);
   const data = await generate(
     b,
     [
       "You are rewriting one section of a short-video script that is otherwise finished.",
       LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
+      `It is a ${kind.label.toLowerCase()} — ${kind.what} ${kind.shape}`,
+      // Rewriting the ending is exactly where the four-ask habit creeps back in.
+      section === "cta"
+        ? kind.ask === "direct"
+          ? "The ending asks for the client's own action only — no save, share, comment or follow."
+          : `The ending asks for one thing: a ${kind.ask}, with its reason. Not two, not four.`
+        : "",
       "Return only the replacement for that section. It must fit what comes before and after it.",
       "Length is a requirement: reach the words asked for. Over is fine, under is not.",
       "Reply with JSON only.",
-    ].join(" "),
+    ]
+      .filter(Boolean)
+      .join(" "),
     [
       `Topic: ${input.topic}`,
       "",

@@ -43,6 +43,8 @@ export type ScriptInput = {
   tone?: string;
   audience?: string;
   objective?: string;
+  /** Which kind of content this is. Decides the shape, the clock and the ask. */
+  type?: ContentTypeKey;
 };
 
 /**
@@ -75,16 +77,178 @@ export type Script = {
 export type ScriptSection = "hook" | "body" | "cta";
 
 /**
- * What the closing line has to ask for.
- *
- * "Follow us" on its own is the weakest ending a reel can have — it asks a
- * stranger for a commitment before they have any reason to give one. Save,
- * share and comment cost nothing, they are what the algorithm actually counts,
- * and a comment prompt is the only one of the four that reliably produces a
- * reply worth answering. So the CTA asks for two or three of these by name,
- * and the follow is the one that comes last.
+ * The four things a viewer can be asked for, and the vocabulary the CTA draws
+ * from. A script asks for exactly ONE of them — see `ContentType.ask`.
  */
 export const ENGAGEMENT_ASKS = ["save", "share", "comment", "follow"] as const;
+export type EngagementAsk = (typeof ENGAGEMENT_ASKS)[number];
+
+export type ContentTypeKey =
+  | "education"
+  | "ad"
+  | "lead_magnet"
+  | "graphic"
+  | "rating"
+  | "clone"
+  | "funny"
+  | "rapid_fire"
+  | "myths";
+
+/**
+ * One kind of content, and everything that follows from being that kind.
+ *
+ * A rating video and an ad are not the same thing written on different
+ * subjects — they are built differently, they run at a different speed, and
+ * they end by asking for different things. Writing them all as "a reel" is
+ * what produces the content that is technically fine and does nothing.
+ *
+ * So the format is chosen first and it decides three things: how the body is
+ * built (`shape`), how much of the clock the ending owns (`ctaShare`), and the
+ * one thing the ending asks for (`ask`).
+ */
+export type ContentType = {
+  key: ContentTypeKey;
+  label: string;
+  /** What this format is, in one line. Shown under the picker and given to the model. */
+  what: string;
+  /** How the body of this one is built. The part that stops every script reading alike. */
+  shape: string;
+  /**
+   * The single ask this format has earned. `direct` means the client's own
+   * action — call, DM, book — and no engagement ask at all.
+   */
+  ask: EngagementAsk | "direct";
+  /** Why that one and not another, in the words the model is given. */
+  askWhy: string;
+  /** Share of the clock the ending owns. An ad closes; a joke does not. */
+  ctaShare: number;
+  /**
+   * Words per second against a spoken script.
+   *
+   * On-screen text is read, not spoken, and it is read slower — holding a
+   * graphic reel to a talking script's word count fills the cards with
+   * sentences nobody can read before they cut.
+   */
+  pace: number;
+  /** Grouped apart in the picker: these are formats borrowed from the feed. */
+  trending?: boolean;
+};
+
+/**
+ * The formats this agency actually makes. Order is the order in the picker,
+ * and the first one is the default.
+ */
+export const CONTENT_TYPES: ContentType[] = [
+  {
+    key: "education",
+    label: "Education reel",
+    what: "Teaching one thing properly, start to finish.",
+    shape:
+      "One problem, why it happens, then the steps in order. Depth over breadth — one thing explained fully beats five mentioned.",
+    ask: "save",
+    askWhy: "They will need this again the day the problem happens, and a save is where they will look for it.",
+    ctaShare: 0.15,
+    pace: 1,
+  },
+  {
+    key: "ad",
+    label: "Ad video",
+    what: "A paid promo with one offer and one action.",
+    shape:
+      "The problem in the first line, then the offer, then what it includes or costs, then why now. No teaching — this is not a free lesson with a price at the end.",
+    ask: "direct",
+    askWhy:
+      "Every second is bought. A save or a follow spends it on something that is not the enquiry the client is paying for.",
+    ctaShare: 0.22,
+    pace: 1,
+  },
+  {
+    key: "lead_magnet",
+    label: "Lead magnet",
+    what: "A free thing given in exchange for a comment or a DM.",
+    shape:
+      "Name what they get in the first line, prove in the body that it is worth having — show one piece of it — then say the exact word to send.",
+    ask: "comment",
+    askWhy: "The whole video exists to produce that one comment, which is what starts the conversation.",
+    ctaShare: 0.22,
+    pace: 1,
+  },
+  {
+    key: "graphic",
+    label: "Graphic reel",
+    what: "Text on screen, no talking head.",
+    shape:
+      "Written as numbered on-screen cards, one short line each — the words ARE the visual, so nothing that needs saying out loud to make sense. Six to ten cards.",
+    ask: "save",
+    askWhy: "A card somebody wants to read twice is a card they save.",
+    ctaShare: 0.15,
+    pace: 0.6,
+  },
+  {
+    key: "rating",
+    label: "Rating / ranking",
+    what: "Scoring or ranking things, and the viewer disagreeing.",
+    shape:
+      "Item, score, one line of verdict, next. Move fast. Leave one score deliberately arguable — that is the video's engine.",
+    ask: "comment",
+    askWhy: "The argument is the point: somebody who disagrees with a score will say so without being persuaded.",
+    ctaShare: 0.15,
+    pace: 1,
+    trending: true,
+  },
+  {
+    key: "clone",
+    label: "Trend clone",
+    what: "A format that is working right now, with this client's subject inside it.",
+    shape:
+      "Keep the trend's beats exactly as people know them and swap only the subject. Name the format in the hook so it is recognised in the first second.",
+    ask: "share",
+    askWhy: "A recognised format gets sent on because sending it is part of the joke.",
+    ctaShare: 0.12,
+    pace: 1,
+    trending: true,
+  },
+  {
+    key: "funny",
+    label: "Funny / relatable",
+    what: "A joke or a moment people recognise. No lesson.",
+    shape:
+      "Setup, turn, punchline. Nothing is explained after the punchline — the explanation is what kills it.",
+    ask: "share",
+    askWhy: "Nobody saves a joke. They send it to the one person it is about.",
+    ctaShare: 0.1,
+    pace: 1,
+    trending: true,
+  },
+  {
+    key: "rapid_fire",
+    label: "Rapid fire",
+    what: "Many short questions answered fast.",
+    shape:
+      "Question, answer, next. Eight to twelve of them, no linking sentences, no wind-up. Answers of one line each.",
+    ask: "follow",
+    askWhy: "They stayed through the whole list, so the follow is earned here — offer them the next round.",
+    ctaShare: 0.12,
+    pace: 1,
+    trending: true,
+  },
+  {
+    key: "myths",
+    label: "Myths vs facts",
+    what: "Common beliefs, corrected one at a time.",
+    shape:
+      "The myth stated the way people actually say it, then the fact, then why the myth spread. Three or four pairs, no more.",
+    ask: "share",
+    askWhy: "Everybody watching knows somebody who believes one of these, and correcting them is the reason to send it.",
+    ctaShare: 0.15,
+    pace: 1,
+    trending: true,
+  },
+];
+
+/** The chosen format, or the default. Never throws on an unknown key. */
+export const contentType = (key?: string | null): ContentType =>
+  CONTENT_TYPES.find((t) => t.key === key) ?? CONTENT_TYPES[0];
 
 export type ThumbnailConcept = {
   title: string;
@@ -139,7 +303,8 @@ export const WORDS_PER_SECOND = 2.5;
  * Pure and exported so the test can check the arithmetic and the panel can
  * show the clock without asking the server.
  */
-export function scriptPlan(seconds: number): Omit<ScriptSegment, "words">[] {
+export function scriptPlan(seconds: number, type?: string | null): Omit<ScriptSegment, "words">[] {
+  const t = contentType(type);
   const total = Math.min(180, Math.max(10, Math.round(seconds)));
 
   /*
@@ -153,7 +318,9 @@ export function scriptPlan(seconds: number): Omit<ScriptSegment, "words">[] {
    * the only part somebody stays for.
    */
   const hook = Math.max(3, Math.round(total * 0.1));
-  const cta = Math.max(4, Math.round(total * 0.18));
+  // How long the ending gets is the format's decision: an ad closes and needs
+  // the room to, a joke ends on the punchline and a tacked-on ask ruins it.
+  const cta = Math.max(4, Math.round(total * t.ctaShare));
   const body = Math.max(3, total - hook - cta);
 
   const spans: { key: ScriptSection; label: string; span: number }[] = [
@@ -173,7 +340,7 @@ export function scriptPlan(seconds: number): Omit<ScriptSegment, "words">[] {
       label: s.label,
       from: at,
       to,
-      targetWords: Math.max(4, Math.round((to - at) * WORDS_PER_SECOND)),
+      targetWords: Math.max(4, Math.round((to - at) * WORDS_PER_SECOND * t.pace)),
     });
     at = to;
   });
@@ -191,5 +358,5 @@ export const countWords = (s: string): number =>
  * as 40 seconds of speech is the complaint this exists to answer — over is
  * fine, an editor can trim, and under means reshooting or padding on the day.
  */
-export const wordFloor = (seconds: number): number =>
-  Math.round(seconds * WORDS_PER_SECOND * 0.85);
+export const wordFloor = (seconds: number, type?: string | null): number =>
+  Math.round(seconds * WORDS_PER_SECOND * contentType(type).pace * 0.85);

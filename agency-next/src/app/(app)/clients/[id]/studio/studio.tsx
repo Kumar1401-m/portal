@@ -25,6 +25,9 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
   SCRIPT_LANGUAGES,
+  CONTENT_TYPES,
+  contentType,
+  type ContentTypeKey,
   type Idea,
   type Script,
   type ScriptSection,
@@ -412,6 +415,7 @@ function IdeasPanel({ clientId }: { clientId: number }) {
 
 function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: string }) {
   const [topic, setTopic] = useState("");
+  const [type, setType] = useState<ContentTypeKey>("education");
   const [seconds, setSeconds] = useState(40);
   const [language, setLanguage] = useState<string>("English");
   const [platform, setPlatform] = useState("Instagram Reel");
@@ -419,7 +423,10 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
   const [busySection, setBusySection] = useState<ScriptSection | null>(null);
   const { pending, run, toast } = useRunner();
 
-  const input = { topic, seconds, language: language as never, platform };
+  const input = { topic, seconds, language: language as never, platform, type };
+  // The format decides the shape, the clock and the one thing the ending asks
+  // for — so it is shown on screen rather than left to the prompt.
+  const kind = contentType(type);
 
   // Straight off the script: which seconds each part owns and how long it
   // actually came back. A section list that ignored the clock is what let a
@@ -438,6 +445,38 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
               onChange={(e) => setTopic(e.target.value)}
               placeholder="Why knee pain gets worse in winter"
             />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="s-type">Kind of content</Label>
+            <Select
+              id="s-type"
+              value={type}
+              onChange={(e) => setType(e.target.value as ContentTypeKey)}
+            >
+              {/* Two groups, because the trending formats are borrowed from the
+                  feed and go out of date — the first four do not. */}
+              <optgroup label="The work">
+                {CONTENT_TYPES.filter((t) => !t.trending).map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Trending formats">
+                {CONTENT_TYPES.filter((t) => t.trending).map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </optgroup>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {kind.what}{" "}
+              <span className="text-foreground/70">
+                Ends by asking for{" "}
+                {kind.ask === "direct" ? "the enquiry itself" : `one thing — a ${kind.ask}`}.
+              </span>
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="s-len">Length</Label>
@@ -487,7 +526,7 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
           <CardContent className="space-y-3 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
               <p className="text-sm font-medium">
-                {seconds}s script · <span className="tabular-nums">{script.totalWords}</span> words
+                {kind.label} · {seconds}s · <span className="tabular-nums">{script.totalWords}</span> words
               </p>
               {script.short ? (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -585,7 +624,12 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
                     [script.hook, script.body, script.cta]
                       .filter(Boolean)
                       .join("\n\n");
-                  saveScriptAction(clientId, topic || `${clientName} script`, body, platform).then((res) =>
+                  saveScriptAction(
+                    clientId,
+                    `${kind.label} — ${topic || clientName}`,
+                    body,
+                    platform
+                  ).then((res) =>
                     toast(
                       res.ok
                         ? { title: "Saved to the script library" }
@@ -604,8 +648,9 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
 
       {!script && !pending ? (
         <Empty>
-          Hook, intro, body, example and call to action — in English, Telugu or Tenglish. Any one
-          section can be rewritten without touching the rest.
+          Pick the kind of content first — an ad, a lesson and a myths reel are built differently and
+          end by asking for different things. Hook, body and call to action, in English, Telugu or
+          Tenglish. Any one section can be rewritten without touching the rest.
         </Empty>
       ) : null}
     </div>
