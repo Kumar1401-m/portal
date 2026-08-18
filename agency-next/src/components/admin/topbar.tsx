@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, LogOut, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { Menu, LogOut, ChevronDown, UserCircle } from "lucide-react";
 import type { SessionUser } from "@/lib/auth";
 import type { NotificationRow } from "@/lib/notifications";
 import { logout } from "@/lib/actions";
@@ -25,11 +26,14 @@ export function Topbar({
   onMenu,
   notifications,
   unread,
+  avatarUrl = null,
 }: {
   user: SessionUser;
   onMenu: () => void;
   notifications: NotificationRow[];
   unread: number;
+  /** Their profile picture, resolved to a URL. Initials when there is none. */
+  avatarUrl?: string | null;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -55,8 +59,16 @@ export function Topbar({
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-muted"
         >
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-xs font-semibold text-white">
-            {initials(user.name)}
+          {/* The picture is the point of the chip; initials are what you get
+              until there is one. Same circle either way, so the bar does not
+              reflow the moment somebody uploads a photo. */}
+          <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-xs font-semibold text-white">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initials(user.name)
+            )}
           </span>
           <span className="hidden text-left sm:block">
             <span className="block text-sm font-medium leading-tight">{user.name}</span>
@@ -75,6 +87,14 @@ export function Topbar({
                 <p className="truncate text-sm font-medium">{user.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{user.email}</p>
               </div>
+              <div className="my-1 h-px bg-border" />
+              <Link
+                href="/profile"
+                onClick={() => setOpen(false)}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+              >
+                <UserCircle className="h-4 w-4" /> Your profile
+              </Link>
               <div className="my-1 h-px bg-border" />
               <form action={logout}>
                 <button

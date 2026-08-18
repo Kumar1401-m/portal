@@ -11,11 +11,13 @@ import { cn } from "@/lib/utils";
 
 export function AppShell({
   user,
+  avatarUrl = null,
   notifications,
   unread,
   children,
 }: {
   user: SessionUser;
+  avatarUrl?: string | null;
   notifications: NotificationRow[];
   unread: number;
   children: React.ReactNode;
@@ -65,6 +67,7 @@ export function AppShell({
       <div className="lg:pl-64">
         <Topbar
           user={user}
+          avatarUrl={avatarUrl}
           onMenu={() => setMobileOpen(true)}
           notifications={notifications}
           unread={unread}

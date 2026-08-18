@@ -124,6 +124,21 @@ export function buildAvatarKey(clientId: number, filename: string): string {
 }
 
 /**
+ * Object key for a staff member's profile picture.
+ *
+ * Under `avatars/staff/` rather than `avatars/{id}/`, and that separation is
+ * load-bearing rather than tidy: the client save action accepts only keys
+ * matching `^avatars/{their own clientId}/…`, so without the prefix a staff
+ * user id of 7 and a client id of 7 would produce keys each could claim as
+ * their own.
+ */
+export function buildStaffAvatarKey(userId: number, filename: string): string {
+  const raw = (filename.match(/.([A-Za-z0-9]{1,5})$/)?.[1] || "jpg").toLowerCase();
+  const ext = IMAGE_EXT.includes(raw) ? raw : "jpg";
+  return `avatars/staff/${Math.trunc(userId)}/${Date.now()}.${ext}`;
+}
+
+/**
  * `clients.company_logo_url` holds either an external URL (pasted by an admin)
  * or an R2 object key (uploaded through the portal). Reusing the one column
  * avoids a migration; this is the single place that tells the two apart.

@@ -124,6 +124,16 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "users",
+    column: "avatar_url",
+    // Matches database/schema.sql exactly. It is in the base schema already,
+    // so this entry only ever fires for a database that predates it — but a
+    // second definition that disagreed on the width would be worse than none.
+    definition: "avatar_url VARCHAR(500) DEFAULT NULL",
+    purpose:
+      "A staff member's own profile picture — an uploaded object key, or a pasted URL. Clients already had one; everybody else was two letters in a circle.",
+  },
+  {
+    table: "users",
     column: "daily_target",
     definition: "daily_target INT UNSIGNED NOT NULL DEFAULT 0",
     purpose:
