@@ -10,6 +10,7 @@ import {
   Building2,
   IndianRupee,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
@@ -127,6 +128,11 @@ export default async function ClientDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
+          {/* First, and not an "Edit"-styled afterthought: this is where the
+              month's work actually gets planned. */}
+          <Link href={`/clients/${c.id}/studio`} className={buttonClasses({ size: "sm" })}>
+            <Sparkles className="h-4 w-4" /> Content studio
+          </Link>
           {user.role !== "crm" ? (
             <Link href={`/clients/${c.id}/edit`} className={buttonClasses({ variant: "outline", size: "sm" })}>
               <Pencil className="h-4 w-4" /> Edit
