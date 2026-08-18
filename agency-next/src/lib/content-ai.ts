@@ -49,6 +49,9 @@ import {
   type ScriptSection,
   type ThumbnailConcept,
   type SeoPack,
+  scriptPlan,
+  wordFloor,
+  countWords,
 } from "./content-kinds";
 export * from "./content-kinds";
 
@@ -337,15 +340,37 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
   const seconds = Math.min(180, Math.max(10, input.seconds ?? 40));
   const language = (input.language ?? "English") as ScriptLanguage;
 
-  const data = await generate(
-    b,
-    [
-      "You write short-video scripts for a digital-marketing agency's client.",
-      "The script is spoken aloud by the business owner or their presenter — write words a person can say, not prose.",
-      LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
-      "The hook is the first 3 seconds and decides whether anything else is watched.",
-      "Reply with JSON only.",
-    ].join(" "),
+  const plan = scriptPlan(seconds);
+  const target = plan.reduce((t, s) => t + s.targetWords, 0);
+  const floor = wordFloor(seconds);
+
+  /*
+   * A per-section budget, in seconds and in words.
+   *
+   * The old prompt said "about N words in total, stay near it" and a 60-second
+   * ask reliably came back as 30 seconds of speech. One total is easy for a
+   * model to under-shoot and impossible for it to check itself against; five
+   * numbered slots with their own clocks are not, and the length rule below is
+   * repeated as a hard floor rather than a preference.
+   */
+  const budget = plan
+    .map(
+      (s) =>
+        `- ${s.label}: seconds ${s.from}–${s.to} (${s.to - s.from}s), at least ${s.targetWords} words`
+    )
+    .join("\n");
+
+  const system = [
+    "You write short-video scripts for a digital-marketing agency's client.",
+    "The script is spoken aloud by the business owner or their presenter — write words a person can say, not prose.",
+    LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
+    "The hook is the first three seconds and decides whether anything else is watched.",
+    "LENGTH IS A REQUIREMENT, NOT A GUIDE. Every section must reach at least the words given for it.",
+    "Going over is fine — an editor can trim. Coming in under is a failure: it leaves the video short on the day of the shoot.",
+    "Reply with JSON only.",
+  ].join(" ");
+
+  const ask = (extra?: string) =>
     [
       `Write a ${seconds}-second ${input.platform || "Instagram Reel"} script for ${b.client}.`,
       `Topic: ${input.topic}`,
@@ -353,41 +378,93 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
       input.tone ? `Tone: ${input.tone}` : "",
       input.objective ? `What it should achieve: ${input.objective}` : "",
       "",
-      `At roughly 2.5 words per second, ${seconds} seconds is about ${Math.round(seconds * 2.5)} words in total. Stay near it.`,
+      `THE CLOCK — ${seconds} seconds, at least ${target} words in total:`,
+      budget,
+      "",
+      "Fill the body with actual substance — the steps, the reasons, the detail somebody",
+      "would stay to hear. Do not pad the hook or repeat the call to action to reach the count.",
+      extra ?? "",
       "",
       "Reply as JSON:",
       "{",
-      '  "hook": "the first line, 3 seconds",',
-      '  "intro": "one or two lines setting it up",',
-      '  "body": "the main content",',
-      '  "examples": "a concrete example, or empty if none fits",',
+      '  "hook": "the opening line",',
+      '  "intro": "what this is about",',
+      '  "body": "the main content — this is the longest section by far",',
+      '  "examples": "a concrete example, named and specific",',
       '  "cta": "the closing call to action",',
       '  "full": "the whole script as it would be read aloud, in order",',
       '  "alt_hooks": ["two or three other openings"]',
       "}",
     ]
       .filter(Boolean)
-      .join("\n")
-  );
-  if (!data) return null;
+      .join("\n");
 
-  const script: Script = {
-    hook: asStr(data.hook),
-    intro: asStr(data.intro),
-    body: asStr(data.body),
-    examples: asStr(data.examples),
-    cta: asStr(data.cta),
-    full: asStr(data.full),
-    altHooks: asList(data.alt_hooks),
+  const build = (data: Record<string, unknown>): Script => {
+    const s: Script = {
+      hook: asStr(data.hook),
+      intro: asStr(data.intro),
+      body: asStr(data.body),
+      examples: asStr(data.examples),
+      cta: asStr(data.cta),
+      full: asStr(data.full),
+      altHooks: asList(data.alt_hooks),
+      segments: [],
+      totalWords: 0,
+      targetWords: target,
+      short: false,
+    };
+    // A model that fills the sections but forgets the whole is common enough
+    // to handle here rather than showing an empty script beside five full
+    // parts. Rebuilt from the sections either way, so `full` always agrees
+    // with what is displayed above it.
+    s.full = [s.hook, s.intro, s.body, s.examples, s.cta].filter(Boolean).join("\n\n");
+    return measure(s, plan, floor);
   };
-  // A model that fills the sections but forgets the whole is common enough to
-  // handle here rather than showing an empty script beside five full parts.
-  if (!script.full) {
-    script.full = [script.hook, script.intro, script.body, script.examples, script.cta]
-      .filter(Boolean)
-      .join("\n\n");
+
+  const first = await generate(b, system, ask());
+  if (!first) return null;
+  let script = build(first);
+
+  /*
+   * Measured, then asked again if it came up short.
+   *
+   * This is the part that was missing. Telling a model a word count and never
+   * checking it is how a 60-second reel arrives as 30 seconds — one retry
+   * naming the shortfall and the sections to grow costs a second call on the
+   * drafts that need it and nothing on the ones that don't.
+   */
+  if (script.short) {
+    const thin = script.segments
+      .filter((s) => s.words < s.targetWords)
+      .map((s) => `${s.label} (${s.words} words, needs ${s.targetWords})`)
+      .join("; ");
+
+    const second = await generate(
+      b,
+      system,
+      ask(
+        `\nYour previous draft was ${script.totalWords} words and needs at least ${floor}. ` +
+          `Short sections: ${thin}. Rewrite the whole script longer — add real content to the body ` +
+          `and the example. Do not pad, do not repeat, do not stretch the hook.`
+      )
+    );
+    if (second) {
+      const grown = build(second);
+      // Keep whichever is closer to the length asked for. A retry that comes
+      // back shorter than the first draft must not replace it.
+      if (grown.totalWords > script.totalWords) script = grown;
+    }
   }
+
   return script;
+}
+
+/** Fill in each section's word count, and say whether the whole thing is short. */
+function measure(s: Script, plan: ReturnType<typeof scriptPlan>, floor: number): Script {
+  s.segments = plan.map((p) => ({ ...p, words: countWords(s[p.key]) }));
+  s.totalWords = s.segments.reduce((t, x) => t + x.words, 0);
+  s.short = s.totalWords < floor;
+  return s;
 }
 
 /**
@@ -407,12 +484,14 @@ export async function regenerateSection(
   if (!b) return null;
 
   const language = (input.language ?? "English") as ScriptLanguage;
+  const slot = scriptPlan(input.seconds ?? 40).find((p) => p.key === section);
   const data = await generate(
     b,
     [
       "You are rewriting one section of a short-video script that is otherwise finished.",
       LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
       "Return only the replacement for that section. It must fit what comes before and after it.",
+      "Length is a requirement: reach the words asked for. Over is fine, under is not.",
       "Reply with JSON only.",
     ].join(" "),
     [
@@ -426,6 +505,11 @@ export async function regenerateSection(
       `CTA: ${current.cta}`,
       "",
       `Rewrite only the ${section.toUpperCase()}. Different from the current one, same job.`,
+      // The rewritten part has to fill the same slot on the clock, or fixing an
+      // opening quietly shortens the video.
+      slot
+        ? `It owns seconds ${slot.from}–${slot.to} of a ${input.seconds ?? 40}-second script, so write at least ${slot.targetWords} words. Longer is fine; shorter is not.`
+        : "",
       "",
       'Reply as JSON: {"text": "the replacement"}',
     ].join("\n")

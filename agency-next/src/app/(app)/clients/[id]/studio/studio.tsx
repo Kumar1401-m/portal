@@ -31,6 +31,7 @@ import {
   type Strategy,
   type ThumbnailConcept,
   type SeoPack,
+  countWords,
 } from "@/lib/content-kinds";
 import {
   strategyAction,
@@ -172,6 +173,27 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
       {done ? "Copied" : label}
     </button>
   );
+}
+
+/**
+ * Recount a script after a section has been edited or swapped.
+ *
+ * The clock is the whole point of the panel, so it cannot go stale the moment
+ * somebody rewrites the hook — the counts under each heading have to be the
+ * counts of what is on screen, not of the draft that first arrived.
+ */
+function remeasure(s: Script): Script {
+  const segments = s.segments.map((seg) => ({ ...seg, words: countWords(s[seg.key]) }));
+  const totalWords = segments.reduce((t, x) => t + x.words, 0);
+  return {
+    ...s,
+    segments,
+    totalWords,
+    // Same floor the server used, so the warning does not flicker on and off
+    // between a fresh draft and an edited one.
+    short: totalWords < Math.round(s.targetWords * 0.85),
+    full: [s.hook, s.intro, s.body, s.examples, s.cta].filter(Boolean).join("\n\n"),
+  };
 }
 
 /** One place that turns a failed action into a toast, so every panel behaves alike. */
@@ -399,13 +421,10 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
 
   const input = { topic, seconds, language: language as never, platform };
 
-  const sections: { key: ScriptSection; label: string }[] = [
-    { key: "hook", label: "Hook" },
-    { key: "intro", label: "Intro" },
-    { key: "body", label: "Body" },
-    { key: "examples", label: "Example" },
-    { key: "cta", label: "Call to action" },
-  ];
+  // Straight off the script: which seconds each part owns and how long it
+  // actually came back. A section list that ignored the clock is what let a
+  // 60-second ask come back as 30 seconds without anything on screen saying so.
+  const sections = script?.segments ?? [];
 
   return (
     <div className="space-y-3">
@@ -466,11 +485,37 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
       {script ? (
         <Card>
           <CardContent className="space-y-3 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <p className="text-sm font-medium">
+                {seconds}s script · <span className="tabular-nums">{script.totalWords}</span> words
+              </p>
+              {script.short ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Short of {script.targetWords} — write it again, or lengthen the body below.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Enough to fill {seconds} seconds.</p>
+              )}
+            </div>
             {sections.map((s) => (
               <div key={s.key} className="rounded-lg border border-border p-3">
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {s.label}
+                    {/* The clock, on every section. A script is a timeline
+                        before it is five paragraphs, and the seconds are what
+                        the person holding the camera actually works to. */}
+                    <span className="font-normal tabular-nums normal-case">
+                      {s.from}–{s.to}s
+                    </span>
+                    <span
+                      className={`font-normal tabular-nums normal-case ${
+                        s.words < s.targetWords ? "text-amber-600 dark:text-amber-400" : ""
+                      }`}
+                      title={`${s.words} words, needs at least ${s.targetWords} for ${s.to - s.from} seconds`}
+                    >
+                      {s.words}/{s.targetWords} words
+                    </span>
                   </p>
                   {/* One section at a time: regenerating the whole script to
                       fix an opening throws away four somebody approved. */}
@@ -481,7 +526,7 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
                       setBusySection(s.key);
                       regenerateSectionAction(clientId, input, script, s.key).then((res) => {
                         setBusySection(null);
-                        if (res.ok) setScript({ ...script, [s.key]: res.data, full: "" });
+                        if (res.ok) setScript(remeasure({ ...script, [s.key]: res.data }));
                         else toast({ title: "Not rewritten", description: res.error, tone: "error" });
                       });
                     }}
@@ -511,7 +556,7 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
                       <span className="italic">&ldquo;{h}&rdquo;</span>
                       <button
                         type="button"
-                        onClick={() => setScript({ ...script, hook: h, full: "" })}
+                        onClick={() => setScript(remeasure({ ...script, hook: h }))}
                         className="shrink-0 text-xs text-primary hover:underline"
                       >
                         Use this

@@ -151,9 +151,15 @@ const post = (mid, published, type, reach, likes) =>
   }
   assert.ok(!/fallback(Script|Idea|Strategy)/i.test(src), "there is no invented fallback anywhere");
 
-  // The one exception, and it is assembly rather than invention: a model that
-  // fills the sections but forgets the whole gets the whole built from them.
-  assert.match(src, /if \(!script\.full\)/, "a missing `full` is assembled from the sections it returned");
+  // The one exception, and it is assembly rather than invention: the whole
+  // script is always rebuilt from the five sections, so what gets copied is
+  // exactly what is displayed above it — a model returning a `full` that
+  // disagrees with its own sections cannot put a third version on the clipboard.
+  assert.match(
+    src,
+    /s\.full = \[s\.hook, s\.intro, s\.body, s\.examples, s\.cta\]\.filter\(Boolean\)\.join/,
+    "`full` is assembled from the sections rather than trusted"
+  );
   ok("a silent model produces an empty panel, never a plausible script");
 }
 
@@ -194,4 +200,67 @@ const post = (mid, published, type, reach, likes) =>
 }
 
 await clean();
+/* ---------------- a 60-second ask is 60 seconds of script ---------------- */
+{
+  const kinds = await load("lib/content-kinds.ts");
+
+  // The complaint this exists to answer: ask for 60 seconds, get 30.
+  for (const secs of [15, 30, 40, 60, 90, 180]) {
+    const plan = kinds.scriptPlan(secs);
+    assert.equal(plan[0].from, 0, `${secs}s starts at zero`);
+    assert.equal(plan[plan.length - 1].to, secs, `${secs}s ends exactly at ${secs}`);
+
+    // No gaps and no overlaps — the sections are a timeline, not five boxes.
+    for (let i = 1; i < plan.length; i++) {
+      assert.equal(plan[i].from, plan[i - 1].to, `${secs}s: section ${i} starts where the last ended`);
+    }
+
+    // The hook never falls below three seconds. Under that there is no hook,
+    // there is a first word.
+    assert.ok(plan[0].to - plan[0].from >= 3, `${secs}s hook is at least 3 seconds`);
+
+    // The body is the longest part, because it is what a viewer stays for.
+    const body = plan.find((p) => p.key === "body");
+    assert.ok(
+      plan.every((p) => p.key === "body" || p.to - p.from <= body.to - body.from),
+      `${secs}s: the body is the longest section`
+    );
+
+    // And the words asked for actually fill the time.
+    const words = plan.reduce((t, p) => t + p.targetWords, 0);
+    assert.ok(
+      words >= secs * kinds.WORDS_PER_SECOND * 0.9,
+      `${secs}s asks for ${words} words, enough to fill it`
+    );
+  }
+
+  // Twice the seconds is roughly twice the words — the bug was that a 60s ask
+  // produced a 30s script, so the two lengths must not come out the same.
+  const w = (n) => kinds.scriptPlan(n).reduce((t, p) => t + p.targetWords, 0);
+  assert.ok(w(60) > w(30) * 1.8, `60s asks for far more than 30s (${w(60)} vs ${w(30)})`);
+  ok("the clock adds up: no gaps, a real hook, and twice the seconds is twice the words");
+}
+
+/* ---------------- the floor is checked, not merely requested ---------------- */
+{
+  const kinds = await load("lib/content-kinds.ts");
+  assert.equal(kinds.countWords("one two three"), 3);
+  assert.equal(kinds.countWords("  spaced   out \n lines "), 3, "whitespace of any kind");
+  assert.equal(kinds.countWords(""), 0);
+  assert.equal(kinds.countWords(null), 0);
+
+  // 60 seconds at 2.5 words a second is 150; the floor allows a little under.
+  assert.equal(kinds.wordFloor(60), 128);
+  assert.ok(kinds.wordFloor(60) > kinds.wordFloor(30), "and scales with the ask");
+
+  const src = read("lib/content-ai.ts");
+  // The old prompt asked for a length and never looked. This is the fix.
+  assert.match(src, /LENGTH IS A REQUIREMENT, NOT A GUIDE/);
+  assert.match(src, /if \(script\.short\)/, "a short draft is measured and asked again");
+  assert.match(src, /Your previous draft was \$\{script\.totalWords\} words/, "naming the shortfall");
+  // And a retry that comes back worse must not replace the first draft.
+  assert.match(src, /if \(grown\.totalWords > script\.totalWords\) script = grown;/);
+  ok("a short script is detected and rewritten, not shipped short");
+}
+
 await finish(pass);
