@@ -12,6 +12,8 @@ import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
 import { monthKey } from "@/lib/utils";
+import { buildMonthlyReport, renderReportText } from "@/lib/monthly-report";
+import { MonthlyReportCard } from "./report-card";
 
 export const dynamic = "force-dynamic";
 
@@ -100,10 +102,13 @@ export default async function ClientReportPage({
   // The same rows the task list uses, so the pencil can open the very same
   // editor rather than a read-only lookalike.
   const scopeIds = await crmClientIds(user);
-  const [tasks, assignees, categoryMap] = await Promise.all([
+  const [tasks, assignees, categoryMap, report] = await Promise.all([
     getDeliverables({ clientId: client.id, month, service, crmClientIds: scopeIds }),
     getAssignees(),
     getCategoryMap(),
+    // The client-facing write-up of the same month. Never fatal: a report that
+    // cannot be built must not take down the task list beside it.
+    buildMonthlyReport(client.id, month).catch(() => null),
   ]);
 
   // Counts per category, in the order they first appear.
@@ -115,6 +120,15 @@ export default async function ClientReportPage({
 
   return (
     <div className="space-y-4">
+      {report ? (
+        <MonthlyReportCard
+          clientId={client.id}
+          month={month}
+          monthLabel={report.monthLabel}
+          text={renderReportText(report)}
+        />
+      ) : null}
+
       <Card className="overflow-hidden p-0">
         <div className="flex items-center gap-3 bg-indigo-700 px-4 py-3">
           <Link
