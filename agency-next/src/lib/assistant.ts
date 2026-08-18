@@ -15,6 +15,19 @@ import { query, queryOne, hasColumn } from "./db";
 import { env } from "./env";
 import type { SessionUser } from "./auth";
 import { crmClientIds } from "./crm";
+import {
+  getPosts,
+  followerBoard,
+  sum,
+  slots,
+  rank,
+  engagementRate,
+  interactions,
+  formatLabel,
+  WEEKDAYS,
+  type PostRow,
+} from "./analytics";
+import { leadSummary } from "./leads";
 
 /* ----------------------------- Snapshot ----------------------------- */
 
@@ -46,6 +59,29 @@ export type Snapshot = {
   money?: { received_this_month: number; pending: number };
   by_client?: { client: string; planned: number; approved: number }[];
   today_list?: { title: string; client: string; status: string; due: string | null }[];
+  /**
+   * How the month's published work actually did.
+   *
+   * The assistant could describe everything the agency made and nothing about
+   * whether any of it worked, which is the half a client asks about. Absent
+   * rather than zeroed when the analytics table has not been applied — a
+   * confident "0 reach" is worse than "I don't have that".
+   */
+  performance?: {
+    posts: number;
+    reach: number;
+    interactions: number;
+    /** Engagement as a share of reach, across the month. */
+    rate: number | null;
+    followers: number | null;
+    follower_growth: number | null;
+    best_day: string | null;
+    best_format: string | null;
+    /** First lines of the month's best posts — what to make more of. */
+    top: { caption: string; format: string; reach: number; rate: number | null }[];
+  };
+  /** The pipeline before a client exists. Admins and crm only. */
+  leads?: { open: number; overdue: number; won_this_month: number; won_value: number };
 };
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -71,6 +107,58 @@ async function scopeFor(user: SessionUser) {
     return { label: "your assigned clients", where: `d.client_id IN (${list})` };
   }
   return { label: "the whole agency", where: "1=1" };
+}
+
+/**
+ * This month's published work, as figures.
+ *
+ * Reads the stored insights rather than Instagram — the assistant answers in
+ * a second or it does not get asked twice, and these numbers were pulled
+ * overnight anyway. Returns null when nothing has been published or the table
+ * has not been applied, so the snapshot simply has no performance section
+ * rather than one full of zeroes.
+ */
+async function monthPerformance(clientIds: number[] | null): Promise<Snapshot["performance"] | null> {
+  const month = new Date().toISOString().slice(0, 7);
+  const posts = await getPosts(`${month}-01`, new Date().toISOString().slice(0, 10), {
+    clientIds,
+  });
+  if (!posts.length) return null;
+
+  const totals = sum(posts);
+  const days = slots(posts, "weekday");
+  const formats = new Map<string, PostRow[]>();
+  for (const p of posts) {
+    const key = formatLabel(p.media_type);
+    formats.set(key, [...(formats.get(key) ?? []), p]);
+  }
+  const bestFormat = [...formats.entries()]
+    .map(([label, group]) => ({ label, avg: sum(group).reach / group.length }))
+    .sort((a, b) => b.avg - a.avg)[0];
+
+  const followers = await followerBoard().catch(() => new Map());
+  const mine = [...followers.entries()].filter(
+    ([id]) => !clientIds || clientIds.includes(id as number)
+  );
+
+  return {
+    posts: totals.posts,
+    reach: totals.reach,
+    interactions: interactions(totals),
+    rate: engagementRate(totals),
+    followers: mine.length ? mine.reduce((t, [, v]) => t + v.followers, 0) : null,
+    follower_growth: mine.some(([, v]) => v.growth !== null)
+      ? mine.reduce((t, [, v]) => t + (v.growth ?? 0), 0)
+      : null,
+    best_day: days[0] ? WEEKDAYS[Number(days[0].key)] : null,
+    best_format: bestFormat?.label ?? null,
+    top: rank(posts, 3).map((p) => ({
+      caption: (p.caption?.split("\n")[0] ?? "").slice(0, 80) || "No caption",
+      format: formatLabel(p.media_type),
+      reach: p.reach,
+      rate: engagementRate(p),
+    })),
+  };
 }
 
 export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
@@ -201,6 +289,32 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
     snap.clients = { total: n(clients?.total), active: n(clients?.active) };
   }
 
+  /*
+   * Performance, and the pipeline — for everyone who isn't scoped to their own
+   * worklist.
+   *
+   * A designer's assistant answers about their tasks; reach across the agency
+   * is not theirs to be told, and the leads board is not on their nav at all.
+   * Both are scoped by the same crm client list the rest of the snapshot uses,
+   * so a crm sees their own accounts' numbers and nobody else's.
+   */
+  if (!PERSONAL_SCOPE.includes(user.role)) {
+    const ids = user.role === "crm" ? await crmClientIds(user) : null;
+    const [perf, pipeline] = await Promise.all([
+      monthPerformance(ids).catch(() => null),
+      isAdmin || user.role === "crm" ? leadSummary().catch(() => null) : Promise.resolve(null),
+    ]);
+    if (perf) snap.performance = perf;
+    if (pipeline) {
+      snap.leads = {
+        open: pipeline.open,
+        overdue: pipeline.overdue,
+        won_this_month: pipeline.wonThisMonth,
+        won_value: pipeline.wonValueThisMonth,
+      };
+    }
+  }
+
   // Money is admin-only, and simply absent otherwise — not hidden in the prompt.
   if (isAdmin) {
     const pay = await queryOne<Record<string, unknown>>(
@@ -221,6 +335,8 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
 
 const money = (v: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(v);
+
+const count = (v: number) => new Intl.NumberFormat("en-IN").format(v);
 
 /**
  * Deterministic answers for the quick questions. These never call the model —
@@ -257,6 +373,60 @@ function fastAnswer(q: string, s: Snapshot): string | null {
       ? `**${money(s.money.received_this_month)}** received this month, **${money(s.money.pending)}** still pending.`
       : `Revenue isn't part of your access — your assistant only covers content and workload.`;
   }
+
+  /*
+   * Performance. Kept below the workload questions on purpose: "how many
+   * posts" is about the plan and is answered above, and only a question that
+   * names reach, engagement or growth is asking about results.
+   */
+  if (/reach|engagement|perform|how did|results|views|follower|growth|grew/.test(t)) {
+    const p = s.performance;
+    if (!p) {
+      return `I don't have performance figures yet — nothing has been read back from Instagram for ${s.month}. Analytics can pull them in.`;
+    }
+    const lines = [
+      `**${count(p.reach)}** accounts reached across **${p.posts}** post${p.posts === 1 ? "" : "s"} this month, ` +
+        `with **${count(p.interactions)}** interactions${p.rate === null ? "" : ` — a **${p.rate.toFixed(1)}%** engagement rate`}.`,
+    ];
+    if (p.followers !== null) {
+      lines.push(
+        `Followers: **${count(p.followers)}**${
+          p.follower_growth === null
+            ? ""
+            : ` (${p.follower_growth >= 0 ? "+" : ""}${count(p.follower_growth)} this month)`
+        }.`
+      );
+    }
+    if (p.best_format || p.best_day) {
+      lines.push(
+        `Best so far: ${[p.best_format ? `**${p.best_format}s**` : null, p.best_day ? `posted on **${p.best_day}**` : null]
+          .filter(Boolean)
+          .join(", ")}.`
+      );
+    }
+    return lines.join("\n\n");
+  }
+
+  // What to make next — answered from what already worked, not invented.
+  if (/what should we post|content idea|idea|next post|suggest/.test(t) && s.performance?.top.length) {
+    const p = s.performance;
+    return [
+      `Going on this month's numbers${p.best_format ? `, **${p.best_format}s** are reaching furthest` : ""}${p.best_day ? ` and **${p.best_day}** is the strongest day` : ""}.`,
+      "Your three best posts this month were:",
+      ...p.top.map(
+        (x) => `- ${x.caption} — ${x.format}, ${count(x.reach)} reached${x.rate === null ? "" : `, ${x.rate.toFixed(1)}% engaged`}`
+      ),
+      "More of that shape is the safest bet.",
+    ].join("\n");
+  }
+
+  if (/lead|enquir|inquir|pipeline|prospect/.test(t)) {
+    if (!s.leads) return `The leads pipeline isn't part of your access.`;
+    return (
+      `**${s.leads.open}** leads open${s.leads.overdue ? `, **${s.leads.overdue}** overdue a follow-up` : " and none overdue"}. ` +
+      `**${s.leads.won_this_month}** won this month, worth ${money(s.leads.won_value)} a month.`
+    );
+  }
   return null;
 }
 
@@ -281,6 +451,27 @@ function snapshotAsText(s: Snapshot): string {
   if (s.today_list?.length)
     lines.push(
       `Due or overdue now: ${s.today_list.map((r) => `"${r.title}" (${r.client}, ${r.status})`).join("; ")}.`
+    );
+  if (s.performance) {
+    const p = s.performance;
+    lines.push(
+      `Published performance this month: ${p.posts} posts, ${p.reach} accounts reached, ` +
+        `${p.interactions} interactions${p.rate === null ? "" : `, ${p.rate.toFixed(1)}% engagement rate`}.` +
+        (p.followers === null ? "" : ` Followers ${p.followers}${p.follower_growth === null ? "" : `, ${p.follower_growth} gained this month`}.`) +
+        (p.best_format ? ` Best format by average reach: ${p.best_format}.` : "") +
+        (p.best_day ? ` Best day: ${p.best_day}.` : "")
+    );
+    if (p.top.length)
+      lines.push(
+        `Best posts this month: ${p.top
+          .map((t) => `"${t.caption}" (${t.format}, ${t.reach} reach${t.rate === null ? "" : `, ${t.rate.toFixed(1)}%`})`)
+          .join("; ")}.`
+      );
+  }
+  if (s.leads)
+    lines.push(
+      `Leads pipeline: ${s.leads.open} open, ${s.leads.overdue} overdue a follow-up, ` +
+        `${s.leads.won_this_month} won this month worth ${s.leads.won_value} per month. (INR)`
     );
   return lines.join("\n");
 }
@@ -351,15 +542,18 @@ export function suggestionsFor(role: SessionUser["role"]): string[] {
       "No. of videos planned this month",
       "What's due today?",
       "Pending approvals",
-      "Revisions received",
+      "How did this month perform?",
+      "Any leads overdue?",
     ];
   }
   return [
     "No. of videos planned this month",
     "What's due today?",
     "Pending approvals",
+    "How did this month perform?",
+    "What should we post next?",
     "Revenue this month",
-    "Anything not posted?",
+    "Any leads overdue?",
   ];
 }
 
@@ -400,9 +594,30 @@ export function clientChart(s: Snapshot): AssistantChart | null {
   };
 }
 
+/** The month's best posts by reach — only drawn when the question is about results. */
+export function performanceChart(s: Snapshot): AssistantChart | null {
+  if (!s.performance?.top.length) return null;
+  return {
+    kind: "bar",
+    title: "Reach, this month's best posts",
+    slices: s.performance.top.map((t) => ({
+      label: `${t.caption.slice(0, 40)} (${t.format})`,
+      value: t.reach,
+    })),
+  };
+}
+
 export function chartsFor(question: string, s: Snapshot): AssistantChart[] {
   const t = question.toLowerCase();
   if (!/chart|graph|pie|breakdown|split|visual|progress/.test(t)) return [];
+
+  // A question about results gets the results chart and stops there — the
+  // pipeline pie is a true answer to a question nobody asked.
+  if (/reach|engagement|perform|result|post/.test(t)) {
+    const perf = performanceChart(s);
+    if (perf) return [perf];
+  }
+
   const out: AssistantChart[] = [];
   const pipe = pipelineChart(s);
   if (pipe.slices.length) out.push(pipe);
