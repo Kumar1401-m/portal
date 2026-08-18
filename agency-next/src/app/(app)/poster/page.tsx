@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { Image as ImageIcon, ExternalLink, MessageSquareWarning, ArrowRight } from "lucide-react";
 import { requireUser, POSTER_ROLES } from "@/lib/auth";
-import { getPosters, posterDone, posterInReview } from "@/lib/posters";
+import { getPosters, posterDone, posterInReview,
+  posterAwaitingContent,
+} from "@/lib/posters";
 import { quickStatus } from "../deliverables/actions";
 import { PosterSubmitForm } from "./poster-submit";
+import { PosterContentPanel } from "./poster-content";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -124,6 +127,30 @@ export default async function PosterPage() {
                         <span className="font-medium text-destructive">Requested change: </span>
                         <span className="whitespace-pre-wrap">{p.reject_reason}</span>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {/*
+                    The gate that was missing.
+
+                    A poster is created at `pending` and nothing moved it on
+                    once the content desk came out — so it never reached a
+                    designer and no submit box ever appeared for them. This is
+                    where the copy gets written and handed over.
+                  */}
+                  {!isDesigner && posterAwaitingContent(p.status) ? (
+                    <PosterContentPanel
+                      deliverableId={p.id}
+                      title={p.title}
+                      initialBrief={p.description ?? ""}
+                    />
+                  ) : null}
+
+                  {/* What the designer is working from, once it has been sent. */}
+                  {!posterAwaitingContent(p.status) && p.description ? (
+                    <div className="rounded-md bg-muted/50 p-3">
+                      <p className="text-xs font-medium text-muted-foreground">On the poster</p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm">{p.description}</p>
                     </div>
                   ) : null}
 

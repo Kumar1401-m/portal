@@ -90,6 +90,16 @@ export async function PosterQueue({ user }: { user: SessionUser }) {
                 ) : null}
               </div>
 
+              {/* What actually goes on the poster, written by the super admin
+                  before it was sent over. Without it a designer is designing
+                  from a title, which is how a poster gets made twice. */}
+              {p.description ? (
+                <div className="mt-3 rounded-md bg-muted/50 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">On the poster</p>
+                  <p className="mt-0.5 whitespace-pre-wrap text-sm">{p.description}</p>
+                </div>
+              ) : null}
+
               {/* What they asked to be changed, in their words. The one thing
                   on this card that has to be read before anything is redone. */}
               {p.reject_reason ? (

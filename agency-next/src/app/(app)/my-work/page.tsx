@@ -53,6 +53,7 @@ export default async function MyWorkPage({
   ]);
   const s = work.stats;
 
+  const isMaker = user.role === "poster_designer" || user.role === "video_editor";
   const isDesigner = user.role === "poster_designer";
   const nothingAssigned = s.assigned === 0;
 
@@ -62,7 +63,11 @@ export default async function MyWorkPage({
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Briefcase className="h-6 w-6 text-primary" />
-            My work
+            {/* For a designer or an editor this is their dashboard, and the nav
+                calls it that — the heading has to agree or the page they
+                clicked looks like a different one. An admin has a real
+                dashboard elsewhere, so for them it keeps its own name. */}
+            {isMaker ? "Dashboard" : "My work"}
           </h1>
           <p className="text-sm text-muted-foreground">
             Everything assigned to you{isDesigner ? " to design" : " to edit"}, and where it has

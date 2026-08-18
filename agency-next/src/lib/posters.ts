@@ -11,6 +11,8 @@ export type PosterRow = {
   status: string;
   edited_link: string | null;
   reject_reason: string | null;
+  /** What goes on the poster, written by the super admin before it was shared. */
+  description: string | null;
   due_date: string | null;
   assigned_to: number | null;
   service: string | null;
@@ -38,7 +40,7 @@ export async function getPosters(user: SessionUser): Promise<PosterRow[]> {
   }
   return query<PosterRow>(
     `SELECT d.id, d.title, d.status, d.edited_link, d.reject_reason, d.due_date,
-            d.assigned_to, d.service, d.video_type, d.content_category,
+            d.assigned_to, d.service, d.video_type, d.content_category, d.description,
             c.company_name, u.name AS designer_name
      FROM deliverables d
      JOIN clients c ON c.id = d.client_id

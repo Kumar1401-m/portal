@@ -632,3 +632,87 @@ export async function cityOf(clientId: number): Promise<string | null> {
   const city = obj.location ?? obj.city;
   return city ? String(city).trim() || null : null;
 }
+
+/* ------------------------- 6. Poster content ------------------------- */
+
+export type PosterContent = {
+  /** The big line on the poster. Short — it is read at arm's length. */
+  headline: string;
+  /** One or two supporting lines. */
+  subtext: string;
+  /** Which of the client's own calls to action goes on it. */
+  cta: string;
+  /** What the designer should actually draw. */
+  visual: string;
+  /** Anything else that must appear — logo, phone, offer. */
+  elements: string[];
+};
+
+/**
+ * The words that go on a poster, for the designer to lay out.
+ *
+ * The gap this closes is small and expensive: a poster task used to reach a
+ * designer as a title and a due date, so either they invented the copy or the
+ * task sat until somebody wrote it. Neither is design work.
+ *
+ * Short by construction. A poster is read across a room, and a model asked
+ * for "poster copy" will happily return a paragraph — so the length limits
+ * are in the instruction and the brand rules are in the prompt, which is what
+ * keeps a headline from claiming something the client will not say.
+ */
+export async function posterContent(
+  clientId: number,
+  input: { topic: string; occasion?: string | null }
+): Promise<PosterContent | null> {
+  const b = await buildBrief(clientId);
+  if (!b) return null;
+
+  const data = await generate(
+    b,
+    [
+      "You write the copy that goes on a printed or social poster for a business.",
+      "A poster is read at a glance: the headline is at most 8 words, the supporting text at most 20.",
+      "Write in the language and tone the brief describes.",
+      "The call to action must be one the client already uses.",
+      "Reply with JSON only.",
+    ].join(" "),
+    [
+      `Poster for ${b.client}. Subject: ${input.topic}`,
+      input.occasion ? `Occasion: ${input.occasion}` : "",
+      "",
+      "Reply as JSON:",
+      "{",
+      '  "headline": "the big line, max 8 words",',
+      '  "subtext": "one or two supporting lines, max 20 words",',
+      '  "cta": "the call to action",',
+      '  "visual": "what the designer should draw or photograph",',
+      '  "elements": ["anything else that must appear on it"]',
+      "}",
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+  if (!data) return null;
+
+  const out: PosterContent = {
+    headline: asStr(data.headline),
+    subtext: asStr(data.subtext),
+    cta: asStr(data.cta),
+    visual: asStr(data.visual),
+    elements: asList(data.elements),
+  };
+  return out.headline || out.subtext ? out : null;
+}
+
+/** The poster content as the brief a designer reads on their card. */
+export function renderPosterBrief(p: PosterContent): string {
+  return [
+    `HEADLINE: ${p.headline}`,
+    p.subtext ? `TEXT: ${p.subtext}` : null,
+    p.cta ? `CALL TO ACTION: ${p.cta}` : null,
+    p.visual ? `VISUAL: ${p.visual}` : null,
+    p.elements.length ? `ALSO ON IT: ${p.elements.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}

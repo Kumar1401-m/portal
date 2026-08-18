@@ -114,14 +114,25 @@ const post = (mid, published, type, reach, likes) =>
   // output contract are the ones actually obeyed.
   assert.match(src, /re-read the client's rules above\. They are not optional/i);
 
-  for (const fn of ["contentStrategy", "contentIdeas", "generateScript", "thumbnailConcepts", "seoPack"]) {
+  for (const fn of ["contentStrategy", "contentIdeas", "generateScript", "thumbnailConcepts", "seoPack", "posterContent"]) {
     assert.match(src, new RegExp(`export async function ${fn}`), `${fn} exists`);
   }
-  // Every one of them goes through `generate`, which is what attaches the brief.
-  assert.equal(
-    (src.match(/await generate\(/g) || []).length,
-    6,
-    "all five tools plus the section rewrite go through the one gate"
+
+  /*
+   * The invariant, not a count: every tool reaches the model through
+   * `generate`, which is what attaches the brief and the rules. A tool added
+   * later that calls `callJSON` itself would silently write for a client it
+   * knows nothing about — so what is asserted is that nothing bypasses the
+   * gate, and the number of tools is free to grow.
+   */
+  const gateCalls = (src.match(/await generate\(/g) || []).length;
+  const directCalls = (src.match(/callJSON\(/g) || []).length;
+  assert.ok(gateCalls >= 6, `every tool goes through the gate (${gateCalls} calls)`);
+  assert.equal(directCalls, 1, "and callJSON is reached from exactly one place — inside `generate`");
+  assert.match(
+    src.slice(src.indexOf("async function generate("), src.indexOf("const asStr")),
+    /callJSON\(system, user\)/,
+    "which is that one place"
   );
   ok("no tool can be added that forgets the brief or the rules");
 }

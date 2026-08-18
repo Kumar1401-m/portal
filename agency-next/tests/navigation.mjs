@@ -144,4 +144,47 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   ok("the drawer holding the current page opens by itself, even from a pasted link");
 }
 
+/* ---------------- "My work" is a maker's dashboard, unless they have one ---------------- */
+{
+  const nav = await import(
+    (await import("node:url")).pathToFileURL(`${SRC}/components/admin/nav-config.ts`).href
+  );
+
+  const labelOf = (role, href) => {
+    for (const s of nav.navSectionsForRole(role)) {
+      if (s.kind === "item" && s.item.href === href) return s.item.label;
+      if (s.kind === "group") {
+        const hit = s.items.find((i) => i.href === href);
+        if (hit) return hit.label;
+      }
+    }
+    return null;
+  };
+
+  // For a designer or an editor this IS their dashboard — where they land,
+  // their counts, and the box they submit from.
+  assert.equal(labelOf("poster_designer", "/my-work"), "Dashboard");
+  assert.equal(labelOf("video_editor", "/my-work"), "Dashboard");
+  assert.equal(labelOf("poster_designer", "/dashboard"), null, "and they have no other one");
+
+  // An admin has both, so it keeps its own name — two links called
+  // "Dashboard" in one nav would be worse than the name it started with.
+  assert.equal(labelOf("admin", "/dashboard"), "Dashboard");
+  assert.equal(labelOf("admin", "/my-work"), "My work");
+  ok("a maker's landing page is called Dashboard, without colliding on an admin's nav");
+}
+
+/* ---------------- the studio is production work ---------------- */
+{
+  const nav = await import(
+    (await import("node:url")).pathToFileURL(`${SRC}/components/admin/nav-config.ts`).href
+  );
+  assert.equal(nav.groupForPath("super_admin", "/studio"), "production",
+    "writing the month's content sits with the rest of production");
+  // Reachable from the nav as well as from a client's own page.
+  assert.ok(nav.navForRole("crm").some((n) => n.href === "/studio"), "a crm can open it too");
+  assert.ok(!nav.navForRole("video_editor").some((n) => n.href === "/studio"), "an editor cannot");
+  ok("the content studio is in Production and reachable without going through a client");
+}
+
 await finish(pass);

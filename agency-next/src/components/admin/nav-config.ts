@@ -92,10 +92,18 @@ const POSTER_BOARD: Role[] = ["super_admin", "admin"];
 export const NAV: NavItem[] = [
   // Outside the drawers: where people land, and where they go to fix things.
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ADMIN_OR_CRM, ready: true },
+  /*
+   * Called "Dashboard" for the people who have no other one — see
+   * `navSectionsForRole`. An admin has both this and /dashboard, so for them
+   * it keeps its own name rather than putting two "Dashboard" links in one nav.
+   */
   { label: "My work", href: "/my-work", icon: Briefcase, roles: MAKERS, ready: true },
 
   /* Making the work, and the people who make it. */
   { label: "Today's Tasks", href: "/today", icon: CalendarCheck, roles: DAY_BOARD, ready: true, group: "production" },
+  // Writing the month's content is production work, so it sits with the rest
+  // of it rather than being reachable only through a client's own page.
+  { label: "Content studio", href: "/studio", icon: Sparkles, roles: ADMIN_OR_CRM, ready: true, group: "production" },
   { label: "Tasks", href: "/deliverables", icon: ClipboardList, roles: ADMIN_OR_CRM, ready: true, group: "production" },
   { label: "Posters", href: "/poster", icon: ImageIcon, roles: POSTER_BOARD, ready: true, group: "production" },
   // Approvals is the gate every task passes through on its way out, so it
@@ -142,7 +150,22 @@ export type NavSection =
  * thing under it, which is a worse nav than the flat one it replaced.
  */
 export function navSectionsForRole(role: Role): NavSection[] {
-  const mine = navForRole(role);
+  const raw = navForRole(role);
+
+  /*
+   * For a designer or an editor, My work *is* their dashboard.
+   *
+   * It is where they land, it carries their counts, and it holds the box they
+   * submit from — calling it something else made it read like a sub-page of a
+   * home screen they do not have. An admin has a real /dashboard as well, so
+   * for them it keeps its own name: two links both called "Dashboard" would be
+   * worse than the name it started with.
+   */
+  const hasOwnDashboard = raw.some((n) => n.href === "/dashboard");
+  const mine = raw.map((n) =>
+    n.href === "/my-work" && !hasOwnDashboard ? { ...n, label: "Dashboard" } : n
+  );
+
   const out: NavSection[] = [];
 
   for (const item of mine.filter((n) => !n.group)) {

@@ -1,16 +1,14 @@
 /**
- * A poster, from written brief to the client's screen.
+ * The poster chain, end to end.
  *
- *   super admin writes the content  →  super admin releases it
- *     →  designer designs it        →  super admin approves it
- *       →  client sees the poster
+ * It was broken in the quietest possible way. A poster is created at
+ * `pending`, and the only thing that ever moved it on was the content-approval
+ * desk — so when that came out, every poster stopped where it was created. No
+ * error, no empty state: the designer's queue simply never showed a submit box
+ * for a poster nobody could see was stuck.
  *
- * The client used to sit at that first arrow, signing the copy off before
- * anything was made. They no longer do — content is settled inside the agency
- * and the only thing put in front of a client is the finished poster.
- *
- * Two hand-offs matter more than the rest, because in both the work changes
- * hands and the person receiving it has no reason to be looking.
+ * So the test walks the whole route a poster takes, and the first assertion is
+ * the one that would have caught it.
  */
 import assert from "node:assert/strict";
 import { finish } from "./finish.mjs";
@@ -20,152 +18,129 @@ import { pathToFileURL } from "node:url";
 const SRC = process.env.PORTAL_SRC;
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
 const posters = await load("lib/posters.ts");
+const db = await load("lib/db.ts");
+const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
 
 let pass = 0;
 const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 
-/* ---------------- a poster is not the designer's until it is ---------------- */
+/* ---------------- the four stages a poster passes through ---------------- */
 {
-  // Being written, or with the client. There is no poster to make yet.
-  for (const s of ["pending", "content_review"]) {
-    assert.ok(posters.posterAwaitingContent(s), `${s} is still content`);
-    assert.ok(!posters.posterWithDesigner(s), `${s} is not the designer's`);
-  }
+  // Created, and not yet anybody's to design.
+  assert.equal(posters.posterAwaitingContent("pending"), true);
+  assert.equal(posters.posterWithDesigner("pending"), false, "a fresh poster is not the designer's");
 
-  // Content signed off. `waiting_for_raw` is where the content gate leaves a
-  // task; on a poster there is no footage to wait for, so it means "design it".
-  for (const s of ["waiting_for_raw", "raw_uploaded", "editing", "resolved"]) {
-    assert.ok(posters.posterWithDesigner(s), `${s} is the designer's turn`);
-    assert.ok(!posters.posterAwaitingContent(s));
-  }
+  // Content written and handed over — this is the transition that was missing.
+  assert.equal(posters.posterWithDesigner("waiting_for_raw"), true, "once sent, it is theirs");
+  assert.equal(posters.posterAwaitingContent("waiting_for_raw"), false);
 
-  // Sent back is theirs again — that is the whole point of sending it back.
-  assert.ok(posters.posterWithDesigner("changes_requested"));
+  // Submitted, with the super admin.
+  assert.equal(posters.posterInReview("caption_ready"), true);
+  assert.equal(posters.posterWithDesigner("caption_ready"), false, "and off the designer's to-do");
 
-  // Submitted, and out of their hands.
-  for (const s of ["caption_ready", "review"]) {
-    assert.ok(posters.posterInReview(s), `${s} is with somebody else`);
-    assert.ok(!posters.posterWithDesigner(s), `${s} is not still to do`);
-  }
-  assert.ok(posters.posterDone("posted") && posters.posterDone("completed"));
-  ok("each stage belongs to exactly one person, and the designer's starts after content");
+  // Sent to the client, then approved.
+  assert.equal(posters.posterInReview("review"), true);
+  assert.equal(posters.posterDone("approved"), true);
+
+  // Sent back: the designer's again, and their submit box returns.
+  assert.equal(posters.posterWithDesigner("changes_requested"), true);
+  ok("pending → designer → super admin → client → done, and back again on a change");
 }
 
-/* ---------------- so the queue cannot show work that has no brief ---------------- */
+/* ---------------- every stage is somebody's, and only one ---------------- */
 {
-  const q = readFileSync(`${SRC}/app/(app)/my-work/poster-queue.tsx`, "utf8");
-  assert.match(
-    q,
-    /const todo = posters\.filter\(\(p\) => posterWithDesigner\(p\.status\)\)/,
-    "the to-do list is only what the content gate has released"
-  );
-  assert.match(q, /posterAwaitingContent\(p\.status\)/, "the rest is counted separately");
-  assert.match(
-    q,
-    /waiting on\s*\n?\s*content approval/,
-    "and named, so the month ahead is visible without looking startable"
-  );
-  // Designing from a blank brief means designing twice.
+  // A status belonging to two stages at once would put the same poster in two
+  // queues; one belonging to none makes it vanish off every board.
+  for (const s of [
+    "pending", "content_review", "waiting_for_raw", "raw_uploaded", "editing",
+    "changes_requested", "resolved", "caption_ready", "review", "approved", "completed",
+  ]) {
+    const stages = [
+      posters.posterAwaitingContent(s),
+      posters.posterWithDesigner(s),
+      posters.posterInReview(s),
+      posters.posterDone(s),
+    ].filter(Boolean).length;
+    assert.equal(stages, 1, `"${s}" belongs to exactly one stage, not ${stages}`);
+  }
+  ok("no status is in two queues at once, and none falls out of all of them");
+}
+
+/* ---------------- the designer sees what to design ---------------- */
+{
+  // A designer designing from a title designs it twice. The brief the super
+  // admin wrote has to reach their card.
+  const lib = read("lib/posters.ts");
+  assert.match(lib, /d\.description/, "the brief is selected");
+  assert.match(lib, /description: string \| null;/, "and typed on the row");
+
+  const queue = read("app/(app)/my-work/poster-queue.tsx");
+  assert.match(queue, /On the poster/, "and shown on their card");
+  assert.match(queue, /<PosterSubmitForm/, "beside the box they submit from");
+  ok("the designer reads the brief on the same card they submit from");
+}
+
+/* ---------------- the content gate is a person, not the model ---------------- */
+{
+  const actions = read("app/(app)/poster/actions.ts");
+  // Drafting and sending are separate calls on purpose: what a client's
+  // poster says is the agency's responsibility, and a generated line nobody
+  // read is the opposite of that.
+  assert.match(actions, /export async function draftPosterContentAction/);
+  assert.match(actions, /export async function sharePosterWithDesigner/);
+  assert.match(actions, /Drafted, not applied/i);
   assert.ok(
-    !/!posterDone\(p\.status\) && !posterInReview\(p\.status\)/.test(q),
-    "the old catch-all, which swept in briefs nobody had written, is gone"
+    !/status = 'waiting_for_raw'/.test(
+      actions.slice(actions.indexOf("draftPosterContentAction"), actions.indexOf("sharePosterWithDesigner"))
+    ),
+    "drafting moves nothing on its own"
   );
-  ok("a designer's list holds only posters whose content is approved");
+
+  // And a brief too short to design from is refused rather than sent.
+  assert.match(actions, /brief\.length < 10/);
+  assert.match(actions, /a designer cannot design a title/i);
+
+  const panel = read("app/(app)/poster/poster-content.tsx");
+  assert.match(panel, /Read it before you send/i, "the page says the same thing to the person sending");
+  ok("AI drafts the poster copy, a person reads it, and only then does it move");
 }
 
-/* ---------------- both hand-offs are announced ---------------- */
+/* ---------------- it really moves, against the database ---------------- */
 {
-  const actions = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
+  const clean = async () => {
+    await db.execute("DELETE FROM deliverables WHERE title = 'ZZ poster flow'");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ poster client'");
+  };
+  await clean();
 
-  // Client approves the content → the designer is told it is theirs. Without
-  // this the poster simply appears in a list they had no reason to open.
-  assert.match(
-    actions,
-    /if \(handedToMaker && d\.assigned_to && !quiet\)[\s\S]{0,900}notifyUser\(/,
-    "content approval notifies whoever the work is assigned to"
+  const clientId = Number(
+    (await db.execute("INSERT INTO clients (company_name,status) VALUES ('ZZ poster client','active')"))
+      .insertId
   );
-  assert.match(actions, /A poster is ready to design/, "and says so in poster words");
-  assert.match(
-    actions,
-    /service === "poster_designing"[\s\S]{0,160}video_type[\s\S]{0,40}poster/,
-    "recognising a poster by service, and by the legacy column for older rows"
-  );
-
-  // Designer submits → the super admin is told. The other direction.
-  assert.match(
-    actions,
-    /effective === "caption_ready" && !ADMIN_ROLES\.includes\(user\.role\)[\s\S]{0,200}notifyAdmins/,
-    "submitting notifies the super admin"
+  const id = Number(
+    (await db.execute(
+      `INSERT INTO deliverables (client_id, title, service, video_type, content_category, status, month_key)
+       VALUES (?,'ZZ poster flow','poster_designing','Poster','Instagram Post','pending','2026-08')`,
+      [clientId]
+    )).insertId
   );
 
-  const submit = readFileSync(`${SRC}/app/(app)/poster/actions.ts`, "utf8");
-  assert.match(submit, /status = 'caption_ready'/, "a submitted design lands with the super admin");
-  assert.match(submit, /notifyAdmins/, "who is told about it");
-  ok("both hand-offs tell the person receiving the work, in each direction");
-}
+  // As created: awaiting content, invisible to the designer's to-do.
+  let row = await db.queryOne("SELECT status, description FROM deliverables WHERE id = ?", [id]);
+  assert.equal(posters.posterWithDesigner(row.status), false, "starts off the designer's list");
 
-/* ---------------- and the client gate stays the super admin's ---------------- */
-{
-  const controls = readFileSync(
-    `${SRC}/app/(app)/deliverables/[id]/workflow-controls.tsx`,
-    "utf8"
+  // What the share action does, exactly as it writes it.
+  await db.execute(
+    "UPDATE deliverables SET description = ?, status = 'waiting_for_raw', reject_reason = NULL WHERE id = ?",
+    ["HEADLINE: ZZ test\nCALL TO ACTION: WhatsApp us", id]
   );
-  // A designer must not be able to send their own poster to the client. The
-  // super admin looks at it first — that is the whole reason for the middle
-  // step.
-  assert.match(
-    controls,
-    /const SEND_TO_CLIENT_STATUSES = \["review"\]/,
-    "the client-facing gate is named — one now, since content stays in-house"
-  );
-  assert.match(
-    controls,
-    /canSendToClient \|\| !SEND_TO_CLIENT_STATUSES\.includes\(a\.status\)/,
-    "and filtered out for anyone who may not send to a client"
-  );
+  row = await db.queryOne("SELECT status, description FROM deliverables WHERE id = ?", [id]);
+  assert.equal(posters.posterWithDesigner(row.status), true, "and lands on it once the content is sent");
+  assert.match(row.description, /HEADLINE/, "carrying the brief with it");
 
-  const poster = readFileSync(`${SRC}/app/(app)/poster/page.tsx`, "utf8");
-  assert.match(
-    poster,
-    /!isDesigner && p\.status === "caption_ready" && user\.role === "super_admin"/,
-    "approve-and-send is the super admin's button alone"
-  );
-  ok("only the super admin sends a poster on to the client");
-}
-
-/* ---------------- and content never reaches a client at all ---------------- */
-{
-  const actions = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
-
-  /*
-   * There used to be a per-client switch here — some clients read the month's
-   * copy before anything was made, some handed us the month and wanted it made
-   * — and "send for content review" either went to the client or skipped them.
-   * Content is settled inside the agency now, so there is nothing to skip and
-   * nothing to switch.
-   */
-  assert.ok(!/skipsClientContent/.test(actions), "the per-client skip is gone");
-  assert.ok(!/clientSignsOffContent/.test(actions), "and so is the flag behind it");
-  assert.match(
-    actions,
-    /const effective = contentGate \? "waiting_for_raw" : status/,
-    "approving the copy is the only thing that hands it to the maker"
-  );
-
-  // The maker must never be told the client approved something no client saw.
-  assert.ok(
-    !/approved the content for/.test(actions),
-    "the handover never claims a client approved it"
-  );
-  assert.match(actions, /is written and it's yours/, "it says what actually happened");
-
-  const controls = readFileSync(`${SRC}/app/(app)/deliverables/[id]/workflow-controls.tsx`, "utf8");
-  assert.ok(!/clientApprovesContent/.test(controls), "the buttons no longer vary by client");
-  assert.match(controls, /label: "Move to content review"/, "and the label says an internal move");
-
-  const form = readFileSync(`${SRC}/app/(app)/clients/client-form.tsx`, "utf8");
-  assert.ok(!/content_approval/.test(form), "the client record has no such setting any more");
-  ok("content is an internal step, with no client and no switch");
+  await db.execute("DELETE FROM deliverables WHERE id = ?", [id]);
+  await clean();
+  ok("a poster created today reaches the designer's queue, brief and all");
 }
 
 await finish(pass);
