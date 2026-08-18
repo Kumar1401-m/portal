@@ -19,6 +19,35 @@ export type RangeKey = (typeof RANGES)[number]["key"];
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
+/** A named month, "2026-08" — the shape a client asks their questions in. */
+const MONTH_KEY = /^(\d{4})-(\d{2})$/;
+
+/** "2026-08" → "Aug 2026". */
+export function monthRangeLabel(key: string): string {
+  const m = MONTH_KEY.exec(key);
+  if (!m) return key;
+  return new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/**
+ * The last `count` months, newest first, as range keys.
+ *
+ * Built from today rather than from what the data happens to hold: a month
+ * with no spend is a real answer ("we ran nothing in June"), and a picker
+ * that hides it makes that answer unaskable.
+ */
+export function recentMonths(count = 12, from = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(from.getFullYear(), from.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+
 /**
  * A range key, or an explicit from/to, into two dates.
  *
@@ -42,6 +71,27 @@ export function resolveRange(
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const today = iso(now);
+
+  /*
+   * A named month — "2026-08" — which is how a client asks: what did July
+   * cost, what did June bring in. The relative ranges below answer "lately",
+   * which is a different question and a worse one to reconcile against an
+   * invoice.
+   *
+   * A month still running stops at today rather than at the 31st. Dividing
+   * this month's spend by its whole length would report a cost per day that
+   * has not happened yet.
+   */
+  const named = MONTH_KEY.exec(key ?? "");
+  if (named) {
+    const yy = Number(named[1]);
+    const mm = Number(named[2]) - 1;
+    if (mm >= 0 && mm <= 11) {
+      const first = iso(new Date(Date.UTC(yy, mm, 1)));
+      const last = iso(new Date(Date.UTC(yy, mm + 1, 0)));
+      return { from: first, to: last > today ? today : last, key: key as string };
+    }
+  }
 
   switch (key) {
     case "last_7":

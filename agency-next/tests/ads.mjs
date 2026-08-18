@@ -453,5 +453,44 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   ok("the ads board can be narrowed to one client, and back again");
 }
 
+/* ---------------- and the period is a month, by name ---------------- */
+{
+  const r = await load("lib/date-range.ts");
+  const today = new Date().toISOString().slice(0, 10);
+
+  /*
+   * A month is how a client asks: what did July cost. The rolling ranges
+   * answer "lately", which is a different question and a much harder one to
+   * put beside an invoice.
+   */
+  const july = r.resolveRange("2026-07");
+  assert.equal(july.from, "2026-07-01", "a named month starts on the 1st");
+  assert.equal(july.to, "2026-07-31", "and ends on its own last day");
+  assert.equal(july.key, "2026-07", "and keeps its key, so the picker stays on it");
+
+  // Month length is not assumed. 2026 is not a leap year.
+  assert.equal(r.resolveRange("2026-02").to, "2026-02-28", "February knows how long it is");
+  assert.equal(r.resolveRange("2025-12").to, "2025-12-31", "and December does not roll the year");
+
+  /*
+   * A month still running stops at today. Running it to the 31st would divide
+   * this month's spend by days that have not happened, and report a cost per
+   * day nobody has spent.
+   */
+  const thisMonth = r.resolveRange(today.slice(0, 7));
+  assert.equal(thisMonth.to, today, "the current month stops at today, not at its last day");
+
+  // Nonsense falls back rather than producing an empty board that reads as a
+  // month with no spend in it.
+  for (const bad of ["2026-13", "2026-00", "garbage", ""]) {
+    assert.equal(r.resolveRange(bad).key, "this_month", `${JSON.stringify(bad)} falls back`);
+  }
+
+  assert.equal(r.monthRangeLabel("2026-07"), "Jul 2026", "and it is named the way people say it");
+  const months = r.recentMonths(3, new Date(2026, 0, 15));
+  assert.deepEqual(months, ["2026-01", "2025-12", "2025-11"], "the list walks back across a year end");
+  ok("the ads board reports by named month, and knows how long each one is");
+}
+
 await clean();
 await finish(pass);
