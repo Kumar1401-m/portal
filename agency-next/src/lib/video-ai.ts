@@ -24,6 +24,7 @@ import {
   getClientContext,
   renderContext,
   renderTemplateRule,
+  renderKnowledgeRules,
   groundingAvailable,
   allowedPhones,
   correctPhones,
@@ -114,6 +115,8 @@ function buildPrompt(brief: {
   cta: string | null;
   /** The client's fixed caption shape, when they have one. */
   templateRule: string | null;
+  /** Their brand rules — banned words, restrictions, their own CTAs. */
+  knowledgeRules: string | null;
 }): string {
   const context = [
     brief.clientContext,
@@ -127,15 +130,21 @@ function buildPrompt(brief: {
     .join("\n");
 
   /*
-   * The template goes last, immediately before the JSON contract.
+   * The client's rules and their template go last, immediately before the
+   * JSON contract.
    *
    * Position is doing real work here. Instructions buried in the middle of a
    * long prompt get treated as background; the ones nearest the output format
-   * are the ones actually followed. This is the constraint the agency is most
-   * likely to be held to by a client, so it sits where it will be obeyed —
-   * and it is repeated in the caption rules below for the same reason.
+   * are the ones actually followed. These two are the constraints the agency
+   * is most likely to be held to by a client — the shape their captions take,
+   * and the things they will not say — so they sit where they will be obeyed,
+   * and the template is repeated in the caption rules below for the same
+   * reason. Rules first: a banned word outranks a section heading.
    */
-  const template = brief.templateRule ? `\n${brief.templateRule}\n` : "";
+  const template =
+    [brief.knowledgeRules, brief.templateRule].filter(Boolean).length
+      ? `\n${[brief.knowledgeRules, brief.templateRule].filter(Boolean).join("\n\n")}\n`
+      : "";
   const templateRule = brief.templateRule
     ? "- FOLLOW THE TEMPLATE ABOVE EXACTLY. Its structure is the client's, not\n" +
       "  a suggestion — same sections, same order, same line breaks. Only the\n" +
@@ -631,6 +640,10 @@ async function generate(
     // Stored on the client and, until now, read by nothing in this portal —
     // the template someone wrote for a client was quietly having no effect.
     templateRule: ctx ? renderTemplateRule(ctx) : null,
+    // The brand rules somebody wrote down on the client's page. Read through
+    // the context rather than fetched again, so a caption, a script and a
+    // thumbnail all obey the same list without each remembering to ask.
+    knowledgeRules: ctx ? renderKnowledgeRules(ctx) : null,
   });
 
   /*

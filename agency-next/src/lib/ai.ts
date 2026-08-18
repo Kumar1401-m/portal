@@ -271,6 +271,12 @@ function v3Brief(d: CaptionSource, opts: CaptionOptions = {}, seen?: WatchedVide
     /** Informational: the caption language is the operator's choice, not this. */
     spoken_language: s(seen?.spokenLanguage),
     watched_the_video: Boolean(watched),
+    /**
+     * The facts half of the brand knowledge — audience, tone, their own words.
+     * Filled in by the caller when somebody has written it down; the rules
+     * half goes to the system prompt instead, where it is not optional.
+     */
+    brand_knowledge: null as string | null,
     business_name: name,
     business_type: str(d.business_type),
     owner_name: str(d.contact_person),
@@ -474,9 +480,20 @@ function fallbackCaptionV3(brief: V3Brief): V3Result {
 }
 
 async function generateCaptionV3(
-  brief: V3Brief
+  brief: V3Brief,
+  /**
+   * The client's own rules, appended to the system prompt rather than added
+   * to the brief.
+   *
+   * The brief is material to write from; the system prompt is what the model
+   * must do. A banned word listed among the business details is a detail, and
+   * the whole point of writing "never say cure" down was that it stops being
+   * optional.
+   */
+  rules?: string | null
 ): Promise<{ result: V3Result; provider: "openai" | "gemini" | "heuristic" }> {
-  const { data, provider } = await callJSON(CAPTION_V3_SYSTEM, JSON.stringify(brief, null, 2));
+  const system = rules ? `${CAPTION_V3_SYSTEM}\n\n${rules}` : CAPTION_V3_SYSTEM;
+  const { data, provider } = await callJSON(system, JSON.stringify(brief, null, 2));
   if (data && (data.best_caption || data.recommended_caption || data.alternate_captions)) {
     return { result: normaliseV3(data), provider: provider! };
   }
@@ -548,10 +565,17 @@ function composeCaption(
 export async function generateCaption(
   d: CaptionSource,
   opts: CaptionOptions = {},
-  seen?: WatchedVideo | null
+  seen?: WatchedVideo | null,
+  /**
+   * What the agency wrote down about this brand — the facts go into the
+   * brief, the rules into the system prompt. Optional so the caption studio
+   * still works for a client nobody has filled it in for.
+   */
+  knowledge?: { facts: string | null; rules: string | null } | null
 ): Promise<ComposedCaption> {
   const brief = v3Brief(d, opts, seen);
-  const { result, provider } = await generateCaptionV3(brief);
+  if (knowledge?.facts) brief.brand_knowledge = knowledge.facts;
+  const { result, provider } = await generateCaptionV3(brief, knowledge?.rules);
   const isPoster = str(d.video_type).toLowerCase() === "poster";
   const includeContact = opts.include_contact !== false;
   const { caption, sections_below, hashtags } = composeCaption(brief, result, {

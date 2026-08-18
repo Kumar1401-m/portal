@@ -527,6 +527,30 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "client_knowledge",
+    purpose:
+      "The part of a client's brand that lived in somebody's head — audience, tone, colours, the words they use, the words they never use, and their own calls to action. Every AI feature reads it before writing anything.",
+    ddl: `CREATE TABLE IF NOT EXISTS client_knowledge (
+      client_id      BIGINT UNSIGNED NOT NULL,
+      audience       VARCHAR(500) DEFAULT NULL,
+      tone           VARCHAR(300) DEFAULT NULL,
+      brand_colors   VARCHAR(200) DEFAULT NULL,
+      /* One item per line. Edited in a textarea by somebody thinking about
+         the client, which is the shape a join table would not survive. */
+      approved_terms TEXT DEFAULT NULL,
+      banned_terms   TEXT DEFAULT NULL,
+      restrictions   TEXT DEFAULT NULL,
+      ctas           TEXT DEFAULT NULL,
+      notes          TEXT DEFAULT NULL,
+      updated_by     BIGINT UNSIGNED DEFAULT NULL,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      /* One row per client, so a save is an upsert and there is exactly one
+         answer to "what does this client sound like". */
+      PRIMARY KEY (client_id),
+      CONSTRAINT fk_ck_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "ai_insights",
     purpose:
       "What the Marketing Brain found for each client — one row per client per kind, so a finding that is still true is updated rather than duplicated, and one that has stopped being true is removed.",

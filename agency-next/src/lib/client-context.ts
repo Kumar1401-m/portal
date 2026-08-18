@@ -20,6 +20,14 @@
  */
 import "server-only";
 import { queryOne, query } from "./db";
+import {
+  getKnowledge,
+  emptyKnowledge,
+  isEmpty,
+  renderKnowledge,
+  renderRules,
+  type Knowledge,
+} from "./knowledge";
 import { env } from "./env";
 
 export type ClientContext = {
@@ -50,6 +58,15 @@ export type ClientContext = {
   captionTemplate: string | null;
   /** Values the template's {{placeholders}} are filled from. */
   placeholders: Record<string, string>;
+  /**
+   * What the agency knows about the brand that no API can tell it — audience,
+   * tone, the words they use and the ones they never use.
+   *
+   * Kept whole rather than flattened into the fields above, because half of
+   * it is fact and half of it is rule, and those two are rendered into
+   * different blocks for exactly the reason `captionTemplate` is.
+   */
+  knowledge: Knowledge;
   /** Where each piece came from — shown to whoever audits a caption. */
   sources: string[];
 };
@@ -210,9 +227,21 @@ export async function getClientContext(clientId: number): Promise<ClientContext 
         .map(([k, v]) => [k, v == null || typeof v === "object" ? "" : String(v).trim()])
         .filter(([, v]) => v)
     ),
+    knowledge: emptyKnowledge(c.id),
     sources,
   };
   if (ctx.captionTemplate) sources.push("caption template");
+
+  /*
+   * The brand knowledge, if anybody has written it down.
+   *
+   * Read here rather than by each AI feature separately, so a caption, a
+   * script and a thumbnail concept all obey the same rules without any of
+   * them having to remember to ask. An install without the table simply has
+   * an empty one — no feature breaks for want of it.
+   */
+  ctx.knowledge = await getKnowledge(clientId).catch(() => emptyKnowledge(clientId));
+  if (!isEmpty(ctx.knowledge)) sources.push("brand knowledge");
 
   // Cues an admin has previously confirmed belong to this client — the exact
   // strings its logo and watermark carry.
@@ -381,9 +410,25 @@ export function renderContext(ctx: ClientContext): string {
       ? `Their branding usually shows: ${ctx.knownBrandCues.join(", ")}`
       : null,
     ctx.websiteSummary ? `From their website: ${ctx.websiteSummary}` : null,
+    // Last, and deliberately: everything above was discovered, and this was
+    // written down by somebody at the agency who knows the account. It reads
+    // as the most authoritative line in the block because it is.
+    renderKnowledge(ctx.knowledge),
   ].filter(Boolean);
 
   return lines.join("\n");
+}
+
+/**
+ * The client's hard rules, as instructions the model must obey.
+ *
+ * Separate from `renderContext` for the same reason `renderTemplateRule` is:
+ * a banned word listed among facts is a fact about the client, and a banned
+ * word under a heading that says "not optional" is an instruction. Callers
+ * hand this to the model as its own block.
+ */
+export function renderKnowledgeRules(ctx: ClientContext): string | null {
+  return renderRules(ctx.knowledge);
 }
 
 /**

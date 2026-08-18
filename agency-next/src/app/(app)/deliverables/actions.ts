@@ -16,6 +16,7 @@ import {
   type CaptionSource,
   type WatchedVideo,
 } from "@/lib/ai";
+import { getKnowledge, renderKnowledge, renderRules } from "@/lib/knowledge";
 import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
@@ -215,9 +216,26 @@ export async function generateCaptionAction(
    */
   const seen = await watchedVideoFor(id);
 
+  /*
+   * What the agency wrote down about this brand.
+   *
+   * Best-effort like the analysis above: a client nobody has filled it in for
+   * gets exactly the caption they got before. When it is filled in, the words
+   * they use and the words they never use stop being something somebody
+   * corrects by hand every month.
+   */
+  const knowledge = await getKnowledge(d.client_id).catch(() => null);
+
   let out: ComposedCaption;
   try {
-    out = await generateCaption(d as CaptionSource, opts, seen);
+    out = await generateCaption(
+      d as CaptionSource,
+      opts,
+      seen,
+      knowledge
+        ? { facts: renderKnowledge(knowledge), rules: renderRules(knowledge) }
+        : null
+    );
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Generation failed." };
   }

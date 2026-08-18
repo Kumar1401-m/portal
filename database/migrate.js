@@ -621,6 +621,26 @@ async function main() {
       CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // The part of a client's brand that lived in somebody's head — audience,
+  // tone, colours, the words they use and the ones they never use. Every AI
+  // feature reads it before writing anything for them.
+  await run('client_knowledge table', `
+    CREATE TABLE IF NOT EXISTS client_knowledge (
+      client_id      BIGINT UNSIGNED NOT NULL,
+      audience       VARCHAR(500) DEFAULT NULL,
+      tone           VARCHAR(300) DEFAULT NULL,
+      brand_colors   VARCHAR(200) DEFAULT NULL,
+      approved_terms TEXT DEFAULT NULL,
+      banned_terms   TEXT DEFAULT NULL,
+      restrictions   TEXT DEFAULT NULL,
+      ctas           TEXT DEFAULT NULL,
+      notes          TEXT DEFAULT NULL,
+      updated_by     BIGINT UNSIGNED DEFAULT NULL,
+      updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (client_id),
+      CONSTRAINT fk_ck_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // The enquiries that have not become clients yet. One row per lead with a
   // stage on it — deliberately not a second contacts model: what loses a lead
   // is nobody following it up on the day they said they would, so the fields

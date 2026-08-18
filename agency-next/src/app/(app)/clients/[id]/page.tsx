@@ -16,6 +16,8 @@ import { getClientDetail } from "@/lib/clients";
 import { canAccessClient } from "@/lib/crm";
 import { checkPageConnection } from "@/lib/facebook";
 import { checkYouTubeConnection } from "@/lib/youtube";
+import { getKnowledge, completeness } from "@/lib/knowledge";
+import { KnowledgeCard } from "./knowledge-card";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
 import { MonthlyPlan } from "./monthly-plan";
@@ -55,12 +57,33 @@ export default async function ClientDetailPage({
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
   // Alongside the plan queries, not after them: the Facebook check is a call
   // to Meta, and it is the slowest thing on this page by a distance.
-  const [plan, planTasks, fb, yt] = await Promise.all([
+  const [plan, planTasks, fb, yt, knowledge] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
     checkPageConnection(c.id),
     checkYouTubeConnection(c.id),
+    getKnowledge(c.id),
   ]);
+
+  /*
+   * Handed to the form as the text it was typed as, not as parsed lists.
+   *
+   * The lists are what the AI reads; the textarea is what a person edits, and
+   * coming back to find your line breaks rearranged into a normalised list is
+   * how people stop editing a field.
+   */
+  const knowledgeForm = {
+    clientId: c.id,
+    audience: knowledge.audience ?? "",
+    tone: knowledge.tone ?? "",
+    brandColors: knowledge.brandColors ?? "",
+    approvedTerms: knowledge.approvedTerms.join("\n"),
+    bannedTerms: knowledge.bannedTerms.join("\n"),
+    restrictions: knowledge.restrictions.join("\n"),
+    ctas: knowledge.ctas.join("\n"),
+    notes: knowledge.notes ?? "",
+    completeness: completeness(knowledge),
+  };
 
   const ph = (c.placeholder_values && typeof c.placeholder_values === "object"
     ? c.placeholder_values
@@ -125,6 +148,10 @@ export default async function ClientDetailPage({
           ) : null}
         </div>
       </div>
+
+      {/* Full width and above the columns: everything the AI writes for this
+          client reads it, so it is not a detail in a sidebar. */}
+      <KnowledgeCard initial={knowledgeForm} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left column */}
