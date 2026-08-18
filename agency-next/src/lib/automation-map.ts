@@ -162,6 +162,12 @@ export const JOBS: { key: string; label: string; hint: string; everyMinutes: num
     everyMinutes: 60 * 24,
   },
   {
+    key: "ai_insights",
+    label: "Marketing Brain",
+    hint: "Works out what changed for each client, and why",
+    everyMinutes: 60 * 24,
+  },
+  {
     key: "monthly_reports",
     label: "Monthly reports",
     hint: "Queues each client's month on the 1st",

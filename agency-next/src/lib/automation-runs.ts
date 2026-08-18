@@ -18,6 +18,7 @@ export type JobName =
   | "whatsapp_outbox"
   | "ads_sync"
   | "insights_sync"
+  | "ai_insights"
   | "monthly_reports";
 
 export type JobRun = {

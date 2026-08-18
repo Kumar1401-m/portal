@@ -527,6 +527,29 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "ai_insights",
+    purpose:
+      "What the Marketing Brain found for each client — one row per client per kind, so a finding that is still true is updated rather than duplicated, and one that has stopped being true is removed.",
+    /* Word for word what `database/migrate.js` creates. */
+    ddl: `CREATE TABLE IF NOT EXISTS ai_insights (
+      id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id    BIGINT UNSIGNED NOT NULL,
+      platform     VARCHAR(30) NOT NULL DEFAULT 'instagram',
+      kind         VARCHAR(40) NOT NULL,
+      headline     VARCHAR(255) NOT NULL,
+      detail       TEXT DEFAULT NULL,
+      confidence   DECIMAL(4,2) NOT NULL DEFAULT 0.00,
+      evidence_json JSON DEFAULT NULL,
+      period_start DATE DEFAULT NULL,
+      period_end   DATE DEFAULT NULL,
+      generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_ai_insight (client_id, platform, kind),
+      KEY idx_ai_client (client_id),
+      CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "scheduled_reports",
     purpose:
       "One row per client per month of the automatic report — what was generated and whether it reached them. Its unique key is what stops the job on the 1st sending everybody two copies.",

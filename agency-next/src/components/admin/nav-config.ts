@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Target,
   Workflow,
+  Sparkles,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -82,6 +83,9 @@ export const NAV: NavItem[] = [
   { label: "Leads", href: "/leads", icon: Target, roles: ADMIN_OR_CRM, ready: true },
   { label: "Team", href: "/team", icon: Gauge, roles: SUPER_ADMIN, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
+  // Above Automations: what the machine found is read far more often than how
+  // the machine is wired.
+  { label: "AI", href: "/ai", icon: Sparkles, roles: ADMIN_OR_CRM, ready: true },
   { label: "Automations", href: "/automations", icon: Workflow, roles: ADMIN, ready: true },
   { label: "Settings", href: "/settings", icon: Settings, roles: ADMIN, ready: true },
 ];
