@@ -22,6 +22,7 @@ import {
   isDueToday,
   type Lead,
 } from "@/lib/lead-stages";
+import { BAND_TEXT, type LeadScore } from "@/lib/lead-score";
 import { saveLeadAction, moveLeadAction, snoozeLeadAction, deleteLeadAction } from "./actions";
 
 type Owner = { id: number; name: string };
@@ -38,10 +39,13 @@ export function LeadBoard({
   leads,
   owners,
   today,
+  scores,
   canDelete,
 }: {
   leads: Lead[];
   owners: Owner[];
+  /** Computed on the server, one per lead on this board. */
+  scores: Record<number, LeadScore>;
   /** The database's today, so overdue is judged on its clock and not the browser's. */
   today: string;
   canDelete: boolean;
@@ -73,6 +77,7 @@ export function LeadBoard({
           <Table dense>
             <THead>
               <tr>
+                <th className="w-20">Score</th>
                 <th>Name</th>
                 <th className="hidden w-32 md:table-cell">Contact</th>
                 <th className="hidden w-24 lg:table-cell">Source</th>
@@ -89,6 +94,7 @@ export function LeadBoard({
                   key={l.id}
                   lead={l}
                   today={today}
+                  score={scores[l.id]}
                   canDelete={canDelete}
                   onEdit={() => setEditing(l)}
                 />
@@ -119,11 +125,13 @@ export function LeadBoard({
 function LeadRow({
   lead,
   today,
+  score,
   canDelete,
   onEdit,
 }: {
   lead: Lead;
   today: string;
+  score?: LeadScore;
   canDelete: boolean;
   onEdit: () => void;
 }) {
@@ -145,6 +153,32 @@ function LeadRow({
   return (
     <TR className={late ? "bg-destructive/5" : undefined}>
       <TD>
+        {score ? (
+          <span
+            // The reasons are the score. A number nobody can interrogate is a
+            // number people work around rather than with, so every point is on
+            // the hover.
+            title={
+              score.reasons.length
+                ? score.reasons.map((r) => `${r.delta > 0 ? "+" : ""}${r.delta}  ${r.label}`).join("\n")
+                : score.summary
+            }
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+              score.band === "hot"
+                ? "bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                : score.band === "warm"
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {score.score}
+            <span className="font-normal opacity-80">{BAND_TEXT[score.band]}</span>
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </TD>
+      <TD>
         <span className="font-medium">{lead.name}</span>
         {lead.company ? (
           <span className="block truncate text-xs text-muted-foreground">{lead.company}</span>
@@ -156,6 +190,11 @@ function LeadRow({
             .filter(Boolean)
             .join(" · ")}
         </span>
+        {/* Why this one is where it is — the single most useful thing on the
+            row, so it is not left to a hover a phone cannot do. */}
+        {score?.summary ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">{score.summary}</span>
+        ) : null}
       </TD>
 
       <TD className="hidden md:table-cell">

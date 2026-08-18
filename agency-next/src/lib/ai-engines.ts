@@ -39,6 +39,7 @@ export type EngineKey =
   | "reports"
   | "approval_assistant"
   | "task_assignment"
+  | "deadline"
   | "thumbnails"
   | "seo"
   | "sentiment"
@@ -165,9 +166,38 @@ export const ENGINES: Engine[] = [
     needs: ["post_insights"],
     built: true,
   },
-  { key: "lead_scoring", label: "Lead Scoring", purpose: "Hot, warm or cold, with the reason", module: "—", needs: ["leads"], built: false },
-  { key: "approval_assistant", label: "Approval Assistant", purpose: "Turns a client's feedback into tasks", module: "—", needs: [], built: false },
-  { key: "task_assignment", label: "Task Assignment", purpose: "Who has the capacity and the track record", module: "—", needs: [], built: false },
+  {
+    key: "lead_scoring",
+    label: "Lead Scoring",
+    purpose: "Hot, warm or cold, with every point explained",
+    module: "lib/lead-score.ts",
+    needs: ["leads"],
+    built: true,
+  },
+  {
+    key: "approval_assistant",
+    label: "Approval Assistant",
+    purpose: "Turns a client's feedback into a checklist somebody accepts",
+    module: "lib/revision-tasks.ts",
+    needs: ["feedback_items"],
+    built: true,
+  },
+  {
+    key: "task_assignment",
+    label: "Task Assignment",
+    purpose: "Who has the capacity and the track record",
+    module: "lib/team-ai.ts",
+    needs: [],
+    built: true,
+  },
+  {
+    key: "deadline",
+    label: "Deadline Prediction",
+    purpose: "Which tasks will miss their date, and why",
+    module: "lib/team-ai.ts",
+    needs: [],
+    built: true,
+  },
   {
     key: "thumbnails",
     label: "Thumbnail Assistant",

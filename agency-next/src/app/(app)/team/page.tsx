@@ -5,6 +5,7 @@ import { teamEfficiency } from "@/lib/effectiveness";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
+import { WorkloadPanel } from "./workload-panel";
 import { DateFilter } from "./date-filter";
 import { label, fmtDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -259,6 +260,10 @@ export default async function TeamPage({
           </p>
         </Card>
       )}
+
+      {/* Below the efficiency report on purpose: that one grades the period
+          just gone, this one is about the work still in front of everybody. */}
+      <WorkloadPanel />
 
       <div className="flex justify-end">
         <Link href="/settings" className={buttonClasses({ variant: "outline", size: "sm" })}>

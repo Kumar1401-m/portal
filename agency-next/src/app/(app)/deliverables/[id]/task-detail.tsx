@@ -10,6 +10,8 @@ import { ServiceBadge } from "@/components/ui/service-badge";
 import { buttonClasses } from "@/components/ui/button";
 import { serviceOf } from "@/lib/services";
 import { label, fmtDate } from "@/lib/utils";
+import { getItems } from "@/lib/revision-tasks";
+import { RevisionChecklist } from "./revision-checklist";
 import { CaptionStudio } from "./caption-studio";
 import { WorkflowControls } from "./workflow-controls";
 import { VideoUpload } from "../video-upload";
@@ -48,6 +50,10 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   const user = await requireUser([...ADMIN_OR_CRM_ROLES, "video_editor"]);
   const d = Number.isInteger(id) && id > 0 ? await getDeliverable(id) : null;
   const allowed = d ? await canAccessClient(user, d.client_id) : false;
+  // The checklist for whatever the client last asked to be changed. Empty on
+  // an install that has not applied the table, which costs the checklist and
+  // nothing else on the page.
+  const revisionItems = d?.reject_reason ? await getItems(d.id).catch(() => []) : [];
   if (!d || !allowed) {
     if (!inModal) notFound();
     return (
@@ -250,9 +256,12 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             <Card className="border-[color-mix(in_srgb,var(--destructive)_35%,var(--border))]">
               <CardContent className="flex gap-3 p-5">
                 <MessageSquareWarning className="h-5 w-5 shrink-0 text-destructive" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-destructive">Client&apos;s requested change</p>
+                  {/* Their words, unchanged and above the checklist. When the
+                      two disagree, this is the one that counts. */}
                   <p className="mt-1 text-sm whitespace-pre-wrap">{d.reject_reason}</p>
+                  <RevisionChecklist deliverableId={d.id} initial={revisionItems} />
                 </div>
               </CardContent>
             </Card>

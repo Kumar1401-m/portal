@@ -6,6 +6,7 @@ import { getLeads, leadsReady, funnel, LEAD_STAGES, type StageKey, isStage } fro
 import { Card, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { money } from "@/lib/utils";
+import { scoreLead } from "@/lib/lead-score";
 import { LeadBoard } from "./lead-board";
 
 export const metadata = { title: "Leads · NVK Hub" };
@@ -71,6 +72,15 @@ export default async function LeadsPage({
   const today = todayRow?.today ?? new Date().toISOString().slice(0, 10);
   const f = funnel(all, today);
 
+  /*
+   * Scored on the server, beside the rows themselves.
+   *
+   * Every point is a rule in lib/lead-score.ts rather than anything a model
+   * produced — this decides who gets called back today, so it has to be
+   * defensible line by line to whoever disagrees with it.
+   */
+  const scores = Object.fromEntries(leads.map((l) => [l.id, scoreLead(l, today)]));
+
   return (
     <div className="space-y-5">
       <Header />
@@ -132,6 +142,7 @@ export default async function LeadsPage({
         leads={leads}
         owners={owners}
         today={today}
+        scores={scores}
         canDelete={ADMIN_ROLES.includes(user.role)}
       />
     </div>

@@ -621,6 +621,24 @@ async function main() {
       CONSTRAINT fk_ai_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
+  // A client's requested changes, split into separate jobs somebody can tick
+  // off. One round of revisions per task; what the client actually said stays
+  // on the deliverable and is never rewritten here.
+  await run('feedback_items table', `
+    CREATE TABLE IF NOT EXISTS feedback_items (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED NOT NULL,
+      title          VARCHAR(200) NOT NULL,
+      detail         VARCHAR(1000) DEFAULT NULL,
+      role           VARCHAR(32) DEFAULT NULL,
+      is_done        TINYINT(1) NOT NULL DEFAULT 0,
+      created_by     BIGINT UNSIGNED DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_fi_deliverable (deliverable_id, is_done),
+      CONSTRAINT fk_fi_deliverable FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // The part of a client's brand that lived in somebody's head — audience,
   // tone, colours, the words they use and the ones they never use. Every AI
   // feature reads it before writing anything for them.

@@ -527,6 +527,26 @@ const EXPECTED_TABLES: TableSpec[] = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
+    table: "feedback_items",
+    purpose:
+      "A client's requested changes, split into separate jobs somebody can tick off. One round of revisions per task — what the client actually said stays on the task itself.",
+    ddl: `CREATE TABLE IF NOT EXISTS feedback_items (
+      id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      deliverable_id BIGINT UNSIGNED NOT NULL,
+      title          VARCHAR(200) NOT NULL,
+      detail         VARCHAR(1000) DEFAULT NULL,
+      /* Which kind of person does it. Null when it was not obvious — better
+         unassigned than assigned to the wrong trade. */
+      role           VARCHAR(32) DEFAULT NULL,
+      is_done        TINYINT(1) NOT NULL DEFAULT 0,
+      created_by     BIGINT UNSIGNED DEFAULT NULL,
+      created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_fi_deliverable (deliverable_id, is_done),
+      CONSTRAINT fk_fi_deliverable FOREIGN KEY (deliverable_id) REFERENCES deliverables(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "client_knowledge",
     purpose:
       "The part of a client's brand that lived in somebody's head — audience, tone, colours, the words they use, the words they never use, and their own calls to action. Every AI feature reads it before writing anything.",
