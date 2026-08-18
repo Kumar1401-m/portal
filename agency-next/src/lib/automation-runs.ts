@@ -13,7 +13,12 @@
 import "server-only";
 import { execute, query, hasColumn } from "./db";
 
-export type JobName = "whatsapp_reminders" | "whatsapp_outbox" | "ads_sync";
+export type JobName =
+  | "whatsapp_reminders"
+  | "whatsapp_outbox"
+  | "ads_sync"
+  | "insights_sync"
+  | "monthly_reports";
 
 export type JobRun = {
   job: string;
