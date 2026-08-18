@@ -492,5 +492,41 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   ok("the ads board reports by named month, and knows how long each one is");
 }
 
+/* ---------------- stepped with arrows, from one implementation ---------------- */
+{
+  const step = await load("lib/date-range.ts");
+  const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
+
+  /*
+   * Through Date rather than by adding to the number, so December rolls the
+   * year instead of producing month 13 — which is the whole reason this is
+   * one shared component and not two copies. The ads board and the client's
+   * monthly plan both step months, and a rollover bug fixed in one of two
+   * copies is a rollover bug.
+   */
+  const cases = [
+    ["2026-12", 1, "2027-01"],
+    ["2026-01", -1, "2025-12"],
+    ["2024-02", 1, "2024-03"],
+    ["2026-08", -1, "2026-07"],
+  ];
+  for (const [mk, delta, want] of cases) {
+    assert.equal(step.shiftMonth(mk, delta), want, `${mk} ${delta > 0 ? "+" : ""}${delta}`);
+  }
+  assert.equal(step.monthRangeLabel("2026-09"), "Sept 2026", "and reads as a month, not a key");
+
+  for (const f of ["app/(app)/ads/range-picker.tsx", "app/(app)/clients/[id]/monthly-plan.tsx"]) {
+    assert.match(read(f), /<MonthStepper/, `${f} uses the shared stepper`);
+    assert.ok(!/ChevronLeft/.test(read(f)), `${f} has no arrows of its own left`);
+  }
+
+  // "This year" survives the change: it is the one period a month cannot say,
+  // and it is what the board is opened on for a total.
+  const picker = read("app/(app)/ads/range-picker.tsx");
+  assert.match(picker, /This year/, "the year is still reachable");
+  assert.match(picker, /aria-pressed=\{onYear\}/, "and says when it is the one showing");
+  ok("months are stepped with arrows, from a single implementation");
+}
+
 await clean();
 await finish(pass);

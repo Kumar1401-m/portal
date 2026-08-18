@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useRef } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   CalendarRange,
@@ -11,8 +10,6 @@ import {
   Loader2,
   Plus,
   Minus,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import {
   respaceMonthAction,
@@ -30,14 +27,9 @@ import { Select } from "@/components/ui/select";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
+import { MonthStepper } from "@/components/ui/month-stepper";
+import { monthRangeLabel } from "@/lib/date-range";
 import { label } from "@/lib/utils";
-
-/** "2026-08" → "Aug 2026", for a picker that reads like a month and not a key. */
-function monthLabel(mk: string): string {
-  const [y, m] = mk.split("-").map(Number);
-  if (!y || !m) return mk;
-  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
-}
 
 /**
  * The day generated tasks land on: the first of the month, or today if that
@@ -52,18 +44,6 @@ function startDayLabel(mk: string): string {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const day = first > today ? first : today.getMonth() === m - 1 && today.getFullYear() === y ? today : first;
   return day.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-}
-
-/**
- * One month either way from "2026-08".
- *
- * Through `Date` rather than by adding to the number, so December rolls the
- * year: "2026-12" + 1 is "2027-01", and month 13 is not a month.
- */
-function shiftMonth(mk: string, delta: number): string {
-  const [y, m] = mk.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function Note({ state }: { state: PlanState }) {
@@ -139,7 +119,6 @@ export function MonthlyPlan({
   /** Super admin only — deleting work somebody has started. */
   canForce?: boolean;
 }) {
-  const router = useRouter();
   const [genState, generate, generating] = useActionState<PlanState, FormData>(
     generateMonthAction,
     {}
@@ -184,34 +163,9 @@ export function MonthlyPlan({
         <CardTitle className="flex items-center gap-2 text-base">
           <CalendarRange className="h-4 w-4 text-muted-foreground" /> Monthly plan
         </CardTitle>
-        {/* Stepped, not picked. Reading a plan means walking through the
-            months in order — last month, this one, next — and a dropdown of
-            thirteen made every one of those a two-click hunt through a list
-            where the option you want is the one either side of the one you
-            are on. */}
-        <div className="flex items-center rounded-lg border border-border">
-          <button
-            type="button"
-            aria-label="Previous month"
-            onClick={() => router.push(`?plan=${shiftMonth(plan.month, -1)}`, { scroll: false })}
-            className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          {/* Fixed width, so the row does not jump as the label changes
-              between "May 2026" and "Sept 2026". */}
-          <span className="w-24 text-center text-xs font-medium tabular-nums">
-            {monthLabel(plan.month)}
-          </span>
-          <button
-            type="button"
-            aria-label="Next month"
-            onClick={() => router.push(`?plan=${shiftMonth(plan.month, 1)}`, { scroll: false })}
-            className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        {/* Stepped, not picked — and the same stepper the ads board uses, so
+            the year rolls over correctly in one place rather than two. */}
+        <MonthStepper month={plan.month} href={(m) => `?plan=${m}`} />
       </CardHeader>
 
       <CardContent className="space-y-4 text-sm">
@@ -422,7 +376,7 @@ export function MonthlyPlan({
 
       {tasks.length === 0 ? (
         <p className="p-8 text-center text-sm text-muted-foreground">
-          No tasks in {monthLabel(plan.month)}.
+          No tasks in {monthRangeLabel(plan.month)}.
         </p>
       ) : (
         <Table>

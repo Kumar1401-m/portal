@@ -22,6 +22,11 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 /** A named month, "2026-08" — the shape a client asks their questions in. */
 const MONTH_KEY = /^(\d{4})-(\d{2})$/;
 
+/** The month we are in, as a range key. */
+export function thisMonthKey(from = new Date()): string {
+  return `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}`;
+}
+
 /** "2026-08" → "Aug 2026". */
 export function monthRangeLabel(key: string): string {
   const m = MONTH_KEY.exec(key);
@@ -30,6 +35,21 @@ export function monthRangeLabel(key: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/**
+ * One month either way from "2026-08".
+ *
+ * Through `Date` rather than by adding to the number, so December rolls the
+ * year: "2026-12" + 1 is "2027-01", and month 13 is not a month. It lives
+ * here rather than in the stepper that calls it because two screens step
+ * months, and a rollover bug fixed in one of two copies is still a rollover
+ * bug.
+ */
+export function shiftMonth(mk: string, delta: number): string {
+  const [y, m] = mk.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 /**
