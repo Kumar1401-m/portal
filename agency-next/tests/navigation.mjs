@@ -64,4 +64,84 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   ok("the clicked menu item spins while its page is on the way");
 }
 
+/* ---------------- the drawers, and who gets one ---------------- */
+{
+  const nav = await import(
+    (await import("node:url")).pathToFileURL(`${SRC}/components/admin/nav-config.ts`).href
+  );
+
+  const sections = nav.navSectionsForRole("super_admin");
+  const groups = sections.filter((s) => s.kind === "group");
+  assert.deepEqual(
+    groups.map((g) => g.key),
+    ["production", "clients", "money", "growth"],
+    "four drawers, in the order the work happens"
+  );
+
+  // Every item lands somewhere. A module that appears in no section is a
+  // module nobody can reach, and the nav is the honest list of what exists.
+  const placed = sections.flatMap((s) => (s.kind === "item" ? [s.item.href] : s.items.map((i) => i.href)));
+  const expected = nav.navForRole("super_admin").map((n) => n.href);
+  assert.deepEqual([...placed].sort(), [...expected].sort(), "nothing is lost in the regrouping");
+  assert.equal(new Set(placed).size, placed.length, "and nothing appears twice");
+
+  // Dashboard first, Settings last — the two you reach without thinking.
+  assert.equal(sections[0].item?.href, "/dashboard");
+  assert.equal(sections[sections.length - 1].item?.href, "/settings");
+
+  ok("every module sits in exactly one of four drawers, or beside them");
+}
+
+/* ---------------- a drawer holding one thing is not a drawer ---------------- */
+{
+  const nav = await import(
+    (await import("node:url")).pathToFileURL(`${SRC}/components/admin/nav-config.ts`).href
+  );
+
+  // A poster designer sees Today's Tasks and My work. A "Production" heading
+  // to click before reaching the single item under it would be a worse nav
+  // than the flat one this replaced.
+  for (const role of ["poster_designer", "video_editor", "crm", "admin", "super_admin"]) {
+    for (const s of nav.navSectionsForRole(role)) {
+      if (s.kind === "group") {
+        assert.ok(s.items.length >= 2, `${role}: the ${s.key} drawer holds more than one thing`);
+      }
+    }
+  }
+
+  const designer = nav.navSectionsForRole("poster_designer");
+  assert.ok(
+    designer.every((s) => s.kind === "item"),
+    "a poster designer gets plain links, no drawers at all"
+  );
+  // And an editor, who sees the least of anyone, still reaches their work.
+  assert.ok(nav.navSectionsForRole("video_editor").some((s) => s.item?.href === "/my-work"));
+  ok("roles that see little get plain links rather than drawers with one item in");
+}
+
+/* ---------------- arriving anywhere opens the right drawer ---------------- */
+{
+  const nav = await import(
+    (await import("node:url")).pathToFileURL(`${SRC}/components/admin/nav-config.ts`).href
+  );
+
+  assert.equal(nav.groupForPath("super_admin", "/analytics"), "growth");
+  assert.equal(nav.groupForPath("super_admin", "/payments"), "money");
+  assert.equal(nav.groupForPath("super_admin", "/deliverables"), "production");
+  // A deeper path, which is how most arrivals happen — a pasted task link.
+  assert.equal(nav.groupForPath("super_admin", "/clients/12/studio"), "clients");
+  assert.equal(nav.groupForPath("super_admin", "/deliverables/391"), "production");
+  // Outside every drawer, and a route that is not in the nav at all.
+  assert.equal(nav.groupForPath("super_admin", "/dashboard"), null);
+  assert.equal(nav.groupForPath("super_admin", "/nowhere"), null);
+  // Scoped: a crm has no Automations, so its path opens nothing for them.
+  assert.equal(nav.groupForPath("crm", "/automations"), null);
+
+  const src = read("components/admin/sidebar.tsx");
+  assert.match(src, /useState<Set<GroupKey>>\(\(\) => new Set\(here \? \[here\] : \[\]\)\)/,
+    "the drawer for the current page starts open");
+  assert.match(src, /holdsCurrent && !expanded/, "and a closed drawer still says the page is inside it");
+  ok("the drawer holding the current page opens by itself, even from a pasted link");
+}
+
 await finish(pass);
