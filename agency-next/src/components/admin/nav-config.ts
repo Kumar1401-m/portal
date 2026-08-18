@@ -12,6 +12,9 @@ import {
   CreditCard,
   Wallet,
   BarChart3,
+  TrendingUp,
+  Target,
+  Workflow,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -70,8 +73,16 @@ export const NAV: NavItem[] = [
   // Sits next to Payments on purpose: money in and money out are one question.
   { label: "Expenses", href: "/expenses", icon: Wallet, roles: ADMIN, ready: true },
   { label: "Ad Management", href: "/ads", icon: Megaphone, roles: ADMIN_OR_CRM, ready: true },
+  // Beside Ads on purpose: what the ads cost and what the posts did are the
+  // two halves of the same conversation with a client.
+  { label: "Analytics", href: "/analytics", icon: TrendingUp, roles: ADMIN_OR_CRM, ready: true },
+  // Above Clients would be truer to the order things happen in, but the nav is
+  // ordered by how often it is opened, and a lead board is a daily habit for
+  // one role and a monthly glance for the rest.
+  { label: "Leads", href: "/leads", icon: Target, roles: ADMIN_OR_CRM, ready: true },
   { label: "Team", href: "/team", icon: Gauge, roles: SUPER_ADMIN, ready: true },
   { label: "Reports", href: "/reports", icon: BarChart3, roles: ADMIN_OR_CRM, ready: true },
+  { label: "Automations", href: "/automations", icon: Workflow, roles: ADMIN, ready: true },
   { label: "Settings", href: "/settings", icon: Settings, roles: ADMIN, ready: true },
 ];
 
