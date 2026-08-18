@@ -23,7 +23,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
-import { RangePicker } from "../range-picker";
+import { RangePicker } from "@/components/admin/range-picker";
 import { ClientPicker } from "../client-picker";
 import { getAudience } from "@/lib/audience";
 import { AudienceTile } from "@/components/admin/audience-tile";

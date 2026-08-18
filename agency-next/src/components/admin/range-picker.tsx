@@ -27,9 +27,14 @@ export function RangePicker({
   basePath = "/ads",
 }: {
   current: string;
-  /** Which board it is narrowing — the client page reuses it. */
+  /**
+   * Which board it is narrowing — the client page and the analytics board
+   * reuse it. May already carry a query (`/analytics?client=3`), so the range
+   * is appended with the right separator rather than a second `?`.
+   */
   basePath?: string;
 }) {
+  const to = (range: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}range=${range}`;
   const onYear = current === "this_year";
   // A rolling key, or a bookmarked one that no longer parses, steps from the
   // current month rather than leaving the arrows with nothing to move from.
@@ -37,9 +42,9 @@ export function RangePicker({
 
   return (
     <div className="flex items-center gap-2">
-      <MonthStepper month={month} href={(m) => `${basePath}?range=${m}`} />
+      <MonthStepper month={month} href={to} />
       <Link
-        href={`${basePath}?range=${onYear ? month : "this_year"}`}
+        href={to(onYear ? month : "this_year")}
         aria-pressed={onYear}
         className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
           onYear

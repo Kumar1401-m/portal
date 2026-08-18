@@ -515,14 +515,14 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   }
   assert.equal(step.monthRangeLabel("2026-09"), "Sept 2026", "and reads as a month, not a key");
 
-  for (const f of ["app/(app)/ads/range-picker.tsx", "app/(app)/clients/[id]/monthly-plan.tsx"]) {
+  for (const f of ["components/admin/range-picker.tsx", "app/(app)/clients/[id]/monthly-plan.tsx"]) {
     assert.match(read(f), /<MonthStepper/, `${f} uses the shared stepper`);
     assert.ok(!/ChevronLeft/.test(read(f)), `${f} has no arrows of its own left`);
   }
 
   // "This year" survives the change: it is the one period a month cannot say,
   // and it is what the board is opened on for a total.
-  const picker = read("app/(app)/ads/range-picker.tsx");
+  const picker = read("components/admin/range-picker.tsx");
   assert.match(picker, /This year/, "the year is still reachable");
   assert.match(picker, /aria-pressed=\{onYear\}/, "and says when it is the one showing");
   ok("months are stepped with arrows, from a single implementation");

@@ -15,7 +15,7 @@ import { adSummary, adsReadiness, lastAdSync } from "@/lib/ads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
-import { RangePicker } from "./range-picker";
+import { RangePicker } from "@/components/admin/range-picker";
 import { resolveRange } from "@/lib/date-range";
 import { SyncButton } from "./sync-button";
 import { ClientPicker } from "./client-picker";
