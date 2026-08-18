@@ -45,11 +45,19 @@ export type ScriptInput = {
   objective?: string;
 };
 
+/**
+ * Three sections, not five.
+ *
+ * An intro and a worked example were two more places for a short reel to lose
+ * its viewer — on a 30-second cut the intro is the hook repeated and the
+ * example is the body again. The body now carries the substance, including
+ * whatever example belongs in it, and the seconds they used to hold go to the
+ * two parts that do the work: getting somebody to stay, and getting them to
+ * act.
+ */
 export type Script = {
   hook: string;
-  intro: string;
   body: string;
-  examples: string;
   cta: string;
   /** The whole thing, as it would be read aloud. */
   full: string;
@@ -64,7 +72,19 @@ export type Script = {
   short: boolean;
 };
 
-export type ScriptSection = "hook" | "intro" | "body" | "examples" | "cta";
+export type ScriptSection = "hook" | "body" | "cta";
+
+/**
+ * What the closing line has to ask for.
+ *
+ * "Follow us" on its own is the weakest ending a reel can have — it asks a
+ * stranger for a commitment before they have any reason to give one. Save,
+ * share and comment cost nothing, they are what the algorithm actually counts,
+ * and a comment prompt is the only one of the four that reliably produces a
+ * reply worth answering. So the CTA asks for two or three of these by name,
+ * and the follow is the one that comes last.
+ */
+export const ENGAGEMENT_ASKS = ["save", "share", "comment", "follow"] as const;
 
 export type ThumbnailConcept = {
   title: string;
@@ -122,22 +142,32 @@ export const WORDS_PER_SECOND = 2.5;
 export function scriptPlan(seconds: number): Omit<ScriptSegment, "words">[] {
   const total = Math.min(180, Math.max(10, Math.round(seconds)));
 
-  const share: { key: ScriptSection; label: string; pct: number }[] = [
-    { key: "hook", label: "Hook", pct: 0.09 },
-    { key: "intro", label: "Intro", pct: 0.13 },
-    { key: "body", label: "Body", pct: 0.5 },
-    { key: "examples", label: "Example", pct: 0.17 },
-    { key: "cta", label: "Call to action", pct: 0.11 },
+  /*
+   * The two ends get floors; the body takes what is left.
+   *
+   * Taking a percentage of each in order and giving the remainder to the last
+   * one put the CTA on one second at fifteen seconds — too short to ask for a
+   * save, let alone a comment. So the hook and the CTA are sized first, each
+   * with a minimum that keeps them able to do their job, and the body absorbs
+   * the rest. It is the longest section at every length, which is right: it is
+   * the only part somebody stays for.
+   */
+  const hook = Math.max(3, Math.round(total * 0.1));
+  const cta = Math.max(4, Math.round(total * 0.18));
+  const body = Math.max(3, total - hook - cta);
+
+  const spans: { key: ScriptSection; label: string; span: number }[] = [
+    { key: "hook", label: "Hook", span: hook },
+    { key: "body", label: "Body", span: body },
+    { key: "cta", label: "Call to action", span: cta },
   ];
 
   const out: Omit<ScriptSegment, "words">[] = [];
   let at = 0;
-  share.forEach((s, i) => {
-    // The last section takes whatever is left, so the parts always add up to
-    // the length asked for rather than to 59 or 61 after rounding.
-    const span =
-      i === share.length - 1 ? total - at : Math.max(s.key === "hook" ? 3 : 2, Math.round(total * s.pct));
-    const to = Math.min(total, at + span);
+  spans.forEach((s, i) => {
+    // The last section runs to the end, so the parts always add up to the
+    // length asked for rather than to 59 or 61 after rounding.
+    const to = i === spans.length - 1 ? at + s.span : Math.min(total, at + s.span);
     out.push({
       key: s.key,
       label: s.label,

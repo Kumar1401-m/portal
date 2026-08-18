@@ -49,6 +49,7 @@ import {
   type ScriptSection,
   type ThumbnailConcept,
   type SeoPack,
+  ENGAGEMENT_ASKS,
   scriptPlan,
   wordFloor,
   countWords,
@@ -364,11 +365,32 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
     "You write short-video scripts for a digital-marketing agency's client.",
     "The script is spoken aloud by the business owner or their presenter — write words a person can say, not prose.",
     LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
+    "A script has exactly three parts: HOOK, BODY, CALL TO ACTION. No introduction and no separate examples section — an example belongs inside the body.",
     "The hook is the first three seconds and decides whether anything else is watched.",
+    "The body carries everything: the substance, the steps, the reasons and any example.",
     "LENGTH IS A REQUIREMENT, NOT A GUIDE. Every section must reach at least the words given for it.",
     "Going over is fine — an editor can trim. Coming in under is a failure: it leaves the video short on the day of the shoot.",
     "Reply with JSON only.",
   ].join(" ");
+
+  /*
+   * What the closing line has to actually ask for.
+   *
+   * "Follow us for more" is the weakest ending a reel can have: it asks a
+   * stranger for a commitment before they have a reason to give one. Save,
+   * share and comment cost the viewer nothing, they are what the algorithm
+   * counts, and a comment prompt is the only one that produces a reply the
+   * agency can answer — which is how a reel becomes an enquiry.
+   */
+  const ctaRule = [
+    "THE CALL TO ACTION — this is not one line, it is the section that earns the engagement:",
+    `- Ask for two or three of these by name: ${ENGAGEMENT_ASKS.join(", ")}.`,
+    "- Give a REASON for each ask, tied to this video: save it because they will need it later,",
+    "  share it with the person it is about, comment a specific word or answer.",
+    "- The comment ask must be a real question or prompt somebody can answer in three words.",
+    "- Put the follow last and make it the reason to come back, not a plea.",
+    "- Then the client's own call to action from their rules above, if they have one.",
+  ].join("\n");
 
   const ask = (extra?: string) =>
     [
@@ -382,16 +404,16 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
       budget,
       "",
       "Fill the body with actual substance — the steps, the reasons, the detail somebody",
-      "would stay to hear. Do not pad the hook or repeat the call to action to reach the count.",
+      "would stay to hear, and a concrete example inside it. Do not pad the hook to reach the count.",
+      "",
+      ctaRule,
       extra ?? "",
       "",
       "Reply as JSON:",
       "{",
       '  "hook": "the opening line",',
-      '  "intro": "what this is about",',
-      '  "body": "the main content — this is the longest section by far",',
-      '  "examples": "a concrete example, named and specific",',
-      '  "cta": "the closing call to action",',
+      '  "body": "everything of substance, including the example — by far the longest section",',
+      '  "cta": "the closing section: the engagement asks with their reasons, then the client\'s own CTA",',
       '  "full": "the whole script as it would be read aloud, in order",',
       '  "alt_hooks": ["two or three other openings"]',
       "}",
@@ -402,9 +424,7 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
   const build = (data: Record<string, unknown>): Script => {
     const s: Script = {
       hook: asStr(data.hook),
-      intro: asStr(data.intro),
       body: asStr(data.body),
-      examples: asStr(data.examples),
       cta: asStr(data.cta),
       full: asStr(data.full),
       altHooks: asList(data.alt_hooks),
@@ -417,7 +437,7 @@ export async function generateScript(clientId: number, input: ScriptInput): Prom
     // to handle here rather than showing an empty script beside five full
     // parts. Rebuilt from the sections either way, so `full` always agrees
     // with what is displayed above it.
-    s.full = [s.hook, s.intro, s.body, s.examples, s.cta].filter(Boolean).join("\n\n");
+    s.full = [s.hook, s.body, s.cta].filter(Boolean).join("\n\n");
     return measure(s, plan, floor);
   };
 
@@ -499,9 +519,7 @@ export async function regenerateSection(
       "",
       "The script as it stands:",
       `HOOK: ${current.hook}`,
-      `INTRO: ${current.intro}`,
       `BODY: ${current.body}`,
-      `EXAMPLES: ${current.examples}`,
       `CTA: ${current.cta}`,
       "",
       `Rewrite only the ${section.toUpperCase()}. Different from the current one, same job.`,

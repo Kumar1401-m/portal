@@ -192,7 +192,7 @@ function remeasure(s: Script): Script {
     // Same floor the server used, so the warning does not flicker on and off
     // between a fresh draft and an edited one.
     short: totalWords < Math.round(s.targetWords * 0.85),
-    full: [s.hook, s.intro, s.body, s.examples, s.cta].filter(Boolean).join("\n\n"),
+    full: [s.hook, s.body, s.cta].filter(Boolean).join("\n\n"),
   };
 }
 
@@ -571,7 +571,7 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
               <CopyButton
                 text={
                   script.full ||
-                  [script.hook, script.intro, script.body, script.examples, script.cta]
+                  [script.hook, script.body, script.cta]
                     .filter(Boolean)
                     .join("\n\n")
                 }
@@ -582,7 +582,7 @@ function ScriptPanel({ clientId, clientName }: { clientId: number; clientName: s
                 onClick={() => {
                   const body =
                     script.full ||
-                    [script.hook, script.intro, script.body, script.examples, script.cta]
+                    [script.hook, script.body, script.cta]
                       .filter(Boolean)
                       .join("\n\n");
                   saveScriptAction(clientId, topic || `${clientName} script`, body, platform).then((res) =>

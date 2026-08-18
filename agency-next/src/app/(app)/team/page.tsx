@@ -131,6 +131,21 @@ export default async function TeamPage({
                     <Gauge className="h-3.5 w-3.5" /> Capacity / day
                   </span>
                 </th>
+                {/*
+                  The denominator, on the row.
+
+                  Without it the table showed "3 a day" and then divided by
+                  fifty-four, so a designer with one delivery read as 1% and
+                  nothing on screen explained where the fifty-four came from.
+                  A percentage nobody can check from the row it sits on is a
+                  percentage people argue with.
+                */}
+                <th className="text-center">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Gauge className="h-3.5 w-3.5" /> Capacity in {data.days} day
+                    {data.days === 1 ? "" : "s"}
+                  </span>
+                </th>
                 <th className="text-center">
                   <span className="inline-flex items-center gap-1.5">
                     <BarChart3 className="h-3.5 w-3.5" /> Efficiency
@@ -156,6 +171,15 @@ export default async function TeamPage({
                   <TD className="text-center tabular-nums">
                     {m.capacityPerDay > 0 ? (
                       m.capacityPerDay
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TD>
+                  <TD className="text-center tabular-nums">
+                    {m.capacity > 0 ? (
+                      <span title={`${m.capacityPerDay} a day × ${data.days} days`}>
+                        {m.capacity}
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -216,13 +240,16 @@ export default async function TeamPage({
                 </td>
                 <td className="px-2 py-3 text-center tabular-nums">
                   {data.totals.capacityPerDay > 0 ? (
-                    <>
-                      {data.totals.capacityPerDay}
-                      <div className="text-xs font-normal text-muted-foreground">
-                        {data.totals.capacity} over {data.days} day
-                        {data.days === 1 ? "" : "s"}
-                      </div>
-                    </>
+                    data.totals.capacityPerDay
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                {/* Its own cell now that the row above has one, or the totals
+                    line up under the wrong headings. */}
+                <td className="px-2 py-3 text-center tabular-nums">
+                  {data.totals.capacity > 0 ? (
+                    data.totals.capacity
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
@@ -250,8 +277,19 @@ export default async function TeamPage({
               here because nothing in the portal tracks them, and a denominator
               nobody measured would make every row quietly wrong. */}
           <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-            Efficiency is deliveries ÷ (days in range × capacity per day). A task counts on the
-            day it reached editing hand-off, review, approval or posting. Capacity is set per
+            {/*
+              The period spelled out with today's actual numbers.
+
+              "Deliveries ÷ (days × capacity per day)" is exact and still left
+              somebody looking at 3 a day, 1 delivered and 1% wondering which
+              of the three was wrong. The range is what is missing from that
+              sum, so the range says itself.
+            */}
+            Efficiency is deliveries ÷ capacity <span className="font-medium">over the whole
+            range</span> — this one is {data.days} day{data.days === 1 ? "" : "s"}, so somebody set
+            to 3 a day is measured against {3 * data.days}, not 3. Narrow the dates above to a
+            single day to see one day&apos;s work against one day&apos;s target. A task counts on
+            the day it reached editing hand-off, review, approval or posting. Capacity is set per
             person in{" "}
             <Link href="/settings" className="text-primary hover:underline">
               Settings → Team

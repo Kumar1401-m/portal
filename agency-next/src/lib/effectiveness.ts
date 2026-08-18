@@ -89,6 +89,15 @@ const EMPTY = (from: string, to: string): TeamEfficiency => ({
  * in their favour across the line that matters, so it always reports the
  * percentage actually reached.
  */
+/**
+ * Floored, never rounded.
+ *
+ * Rounding crosses a line that matters: at 99.6% it prints "100%", which reads
+ * as "cleared capacity" about somebody who did not. A figure people are
+ * measured by should never round in their favour past the line — so 1.85%
+ * shows as 1%, and the row now shows the denominator it came from rather than
+ * leaving that percentage unexplainable.
+ */
 const pct = (done: number, capacity: number): number | null =>
   capacity > 0 ? Math.floor((done / capacity) * 100) : null;
 

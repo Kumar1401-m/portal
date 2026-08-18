@@ -157,8 +157,8 @@ const post = (mid, published, type, reach, likes) =>
   // disagrees with its own sections cannot put a third version on the clipboard.
   assert.match(
     src,
-    /s\.full = \[s\.hook, s\.intro, s\.body, s\.examples, s\.cta\]\.filter\(Boolean\)\.join/,
-    "`full` is assembled from the sections rather than trusted"
+    /s\.full = \[s\.hook, s\.body, s\.cta\]\.filter\(Boolean\)\.join/,
+    "`full` is assembled from the three sections rather than trusted"
   );
   ok("a silent model produces an empty panel, never a plausible script");
 }
@@ -239,6 +239,56 @@ await clean();
   const w = (n) => kinds.scriptPlan(n).reduce((t, p) => t + p.targetWords, 0);
   assert.ok(w(60) > w(30) * 1.8, `60s asks for far more than 30s (${w(60)} vs ${w(30)})`);
   ok("the clock adds up: no gaps, a real hook, and twice the seconds is twice the words");
+}
+
+/* ---------------- three sections, and a CTA that asks for something ---------------- */
+{
+  const kinds = await load("lib/content-kinds.ts");
+
+  // An intro and a worked example were two more places for a short reel to
+  // lose its viewer — on a 30-second cut the intro is the hook again and the
+  // example is the body again.
+  for (const secs of [15, 30, 60, 90]) {
+    const plan = kinds.scriptPlan(secs);
+    assert.deepEqual(
+      plan.map((p) => p.key),
+      ["hook", "body", "cta"],
+      `${secs}s has three sections, in order`
+    );
+
+    const body = plan.find((p) => p.key === "body");
+    const cta = plan.find((p) => p.key === "cta");
+    const hook = plan.find((p) => p.key === "hook");
+
+    // The body is still the longest — it is the only part somebody stays for.
+    assert.ok(
+      body.to - body.from > cta.to - cta.from && body.to - body.from > hook.to - hook.from,
+      `${secs}s: the body is the longest section`
+    );
+
+    // The CTA now does real work, so it gets real time. Taking a percentage in
+    // order and giving the remainder to the last section left it on one second
+    // at fifteen — too short to ask for a save, let alone a comment.
+    assert.ok(cta.to - cta.from >= 4, `${secs}s: the CTA has at least 4 seconds (got ${cta.to - cta.from})`);
+    assert.ok(hook.to - hook.from >= 3, `${secs}s: the hook still has at least 3`);
+    assert.equal(plan[plan.length - 1].to, secs, `${secs}s still ends exactly at ${secs}`);
+  }
+
+  // The four asks, in the order they should be made. Follow is last because it
+  // is the biggest thing to ask a stranger for.
+  assert.deepEqual(kinds.ENGAGEMENT_ASKS, ["save", "share", "comment", "follow"]);
+
+  const src = read("lib/content-ai.ts");
+  assert.match(src, /exactly three parts: HOOK, BODY, CALL TO ACTION/i, "the model is told the shape");
+  assert.match(src, /No introduction and no separate examples section/i);
+  assert.match(src, /an example belongs inside the body/i, "the example did not vanish, it moved");
+
+  // "Follow us for more" is the weakest ending a reel can have.
+  assert.match(src, /Ask for two or three of these by name/i);
+  assert.match(src, /Give a REASON for each ask/i, "an ask without a reason is ignored");
+  assert.match(src, /comment ask must be a real question/i);
+  assert.match(src, /Put the follow last/i);
+  ok("three sections, and a CTA that asks for saves, shares and comments by name");
 }
 
 /* ---------------- the floor is checked, not merely requested ---------------- */

@@ -16,6 +16,7 @@ const SRC = process.env.PORTAL_SRC;
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
 const db = await load("lib/db.ts");
 const eff = await load("lib/effectiveness.ts");
+const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
 
 let pass = 0;
 const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
@@ -177,8 +178,11 @@ const deliver = async (uid, day, n, tag) => {
   for (const kept of ["Employee", "Role", "Deliveries", "Capacity / day", "Efficiency"]) {
     assert.ok(page.includes(kept), `${kept} is`);
   }
-  assert.match(page, /Efficiency is deliveries ÷ \(days in range × capacity per day\)/,
-    "and the formula is printed next to the numbers");
+  // The formula is still printed beside the numbers, now with the range spelled
+  // out — "over the whole range" is what was missing when somebody read 3 a
+  // day, 1 delivered, and 1%.
+  assert.match(page, /Efficiency is deliveries ÷ capacity/,
+    "the formula is printed next to the numbers");
   assert.match(page, /requireUser\(SUPER_ADMIN_ROLES\)/, "super admin only — it names people");
 
   const filter = readFileSync(`${SRC}/app/(app)/team/date-filter.tsx`, "utf8");
@@ -189,4 +193,48 @@ const deliver = async (uid, day, n, tag) => {
 }
 
 await clean();
+/* ---------------- the denominator is the range, and it is on screen ---------------- */
+{
+  /*
+   * The bug this pins down: a designer set to 3 a day, with one delivery,
+   * showed "1%". The maths was right — the page defaults to month-to-date, so
+   * on the 18th the capacity is 3 × 18 = 54 and 1 ÷ 54 is 1.85% — but the row
+   * displayed "3" and divided by 54, so the number could not be checked from
+   * the row it sat on. Two things were wrong, and neither was the formula.
+   */
+  const days = eff.daysBetween("2026-08-01", "2026-08-18");
+  assert.equal(days, 18, "month-to-date on the 18th is eighteen days");
+
+  const capacity = 3 * days;
+  assert.equal(capacity, 54, "a target of 3 a day is 54 over that range");
+
+  // 1 ÷ 54 is 1.85%, and it floors to 1%. That figure is correct and stays —
+  // rounding it up to 2% would be the first step towards printing "100%" for
+  // 99.6%, which the block above exists to prevent.
+  assert.equal(Math.floor((1 / capacity) * 100), 1, "1 of 54 really is 1%");
+
+  const src = read("lib/effectiveness.ts");
+  assert.match(src, /Math\.floor\(\(done \/ capacity\) \* 100\)/, "still floored");
+
+  // So the fix is the row, not the formula: the range capacity is a column of
+  // its own now, and 1 of 54 is visible rather than something only a tooltip
+  // knew. A percentage nobody can check from the row it sits on is a
+  // percentage people argue with.
+  const page = read("app/(app)/team/page.tsx");
+  assert.match(page, /Capacity in \{data\.days\} day/, "the denominator has its own heading");
+  assert.match(page, /\{m\.capacity\}/, "and every row shows it");
+  assert.match(page, /over the whole\s*\n?\s*range/, "the note says which period is being divided by");
+  assert.match(page, /Narrow the dates above to a\s*\n?\s*single day/, "and how to see one day against one day");
+
+  // Three rows of the same table have to have the same number of cells, or the
+  // totals line up under the wrong headings.
+  const cells = (block, tag) => (block.match(new RegExp(`<${tag}[\\s>]`, "g")) || []).length;
+  const head = page.match(/<THead>[\s\S]*?<\/THead>/)[0];
+  const body = page.match(/<TBody>[\s\S]*?<\/TBody>/)[0];
+  const foot = page.match(/<tfoot[\s\S]*?<\/tfoot>/)[0];
+  assert.equal(cells(head, "th"), cells(body, "TD"), "header and body agree");
+  assert.equal(cells(head, "th"), cells(foot, "td"), "and so does the totals row");
+  ok("efficiency shows what it divided by, and rounds rather than floors");
+}
+
 await finish(pass);
