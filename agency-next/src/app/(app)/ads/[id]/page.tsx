@@ -13,8 +13,6 @@ import {
   TrendingDown,
   TrendingUp,
   TriangleAlert,
-  AtSign,
-  Users,
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient, crmClientIds } from "@/lib/crm";
@@ -28,6 +26,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { RangePicker } from "../range-picker";
 import { ClientPicker } from "../client-picker";
 import { getAudience } from "@/lib/audience";
+import { AudienceTile } from "@/components/admin/audience-tile";
 import { getClientsMini } from "@/lib/deliverables";
 import { fmtDate } from "@/lib/utils";
 
@@ -122,34 +121,26 @@ export default async function ClientAdsPage({
         two zeroes, which would read as an audience of none.
       */}
       {audience ? (
-        <div className="flex flex-wrap gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           {audience.instagram ? (
-            <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
-              <AtSign className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-lg font-semibold tabular-nums leading-none">
-                  {num(audience.instagram.followers)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Instagram followers
-                  {audience.instagram.username ? ` · @${audience.instagram.username}` : ""}
-                </p>
-              </div>
-            </div>
+            <AudienceTile
+              platform="instagram"
+              label="Instagram followers"
+              handle={audience.instagram.username ? `@${audience.instagram.username}` : null}
+              followers={audience.instagram.followers}
+              history={audience.instagram.history}
+              change={audience.instagram.change}
+            />
           ) : null}
           {audience.facebook ? (
-            <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
-              <Users className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-lg font-semibold tabular-nums leading-none">
-                  {num(audience.facebook.followers)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Facebook followers
-                  {audience.facebook.name ? ` · ${audience.facebook.name}` : ""}
-                </p>
-              </div>
-            </div>
+            <AudienceTile
+              platform="facebook"
+              label="Facebook followers"
+              handle={audience.facebook.name}
+              followers={audience.facebook.followers}
+              history={audience.facebook.history}
+              change={audience.facebook.change}
+            />
           ) : null}
         </div>
       ) : null}

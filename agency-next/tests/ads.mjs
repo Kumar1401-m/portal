@@ -417,7 +417,7 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   );
   // But Instagram alone still works — a client can have an IG account here
   // without their Page id ever being filled in.
-  assert.match(lib, /if \(!instagram && c\.ig_user_id\)/, "and Instagram alone is still asked");
+  assert.match(lib, /if \(!ig && c\.ig_user_id\)/, "and Instagram alone is still asked");
   // followers_count superseded fan_count (page likes); both are requested so
   // an older API version still yields something.
   assert.match(lib, /page\.followers_count \?\? page\.fan_count/, "followers wins, likes are the fallback");

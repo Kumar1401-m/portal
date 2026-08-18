@@ -449,6 +449,26 @@ type TableSpec = { table: string; purpose: string; ddl: string };
 
 const EXPECTED_TABLES: TableSpec[] = [
   {
+    table: "audience_snapshots",
+    purpose:
+      "One follower count per client, per platform, per day — so the ads page can show whether an account is growing rather than only what it has today.",
+    ddl: `CREATE TABLE IF NOT EXISTS audience_snapshots (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      platform   VARCHAR(16) NOT NULL,
+      followers  INT UNSIGNED NOT NULL,
+      taken_on   DATE NOT NULL,
+      PRIMARY KEY (id),
+      /*
+       * One row per client per platform per day, so writing on every page
+       * view is harmless — the second read of the day updates the count
+       * rather than adding a duplicate the month chart would then plot twice.
+       */
+      UNIQUE KEY uniq_audience_day (client_id, platform, taken_on),
+      KEY idx_audience_client (client_id, platform, taken_on)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
     table: "expenses",
     purpose:
       "What the agency spends — salaries, subscriptions, ad budgets, rent — with the recurring ones due again on a date.",

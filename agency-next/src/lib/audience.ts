@@ -17,14 +17,25 @@
  * down with it: every failure returns null and the caller renders nothing.
  */
 import "server-only";
-import { queryOne } from "./db";
+import { query, queryOne, execute, hasTable } from "./db";
 import { env } from "./env";
 
 const GRAPH = "https://graph.facebook.com";
 
+/** A month's closing follower count. */
+export type MonthPoint = { month: string; followers: number };
+
+export type Platform = {
+  followers: number;
+  /** Oldest first, at most twelve. Empty until a second month is recorded. */
+  history: MonthPoint[];
+  /** Gained since the end of last month. Null when there is no last month. */
+  change: number | null;
+};
+
 export type Audience = {
-  instagram: { username: string | null; followers: number } | null;
-  facebook: { name: string | null; followers: number } | null;
+  instagram: (Platform & { username: string | null }) | null;
+  facebook: (Platform & { name: string | null }) | null;
 };
 
 type Row = {
@@ -74,8 +85,8 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
     }
   };
 
-  let instagram: Audience["instagram"] = null;
-  let facebook: Audience["facebook"] = null;
+  let ig: { username: string | null; followers: number } | null = null;
+  let fb: { name: string | null; followers: number } | null = null;
 
   if (c.fb_page_id) {
     const page = await get<{
@@ -90,11 +101,11 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
     if (page) {
       const followers = page.followers_count ?? page.fan_count;
       if (typeof followers === "number") {
-        facebook = { name: page.name ?? null, followers };
+        fb = { name: page.name ?? null, followers };
       }
-      const ig = page.instagram_business_account;
-      if (ig && typeof ig.followers_count === "number") {
-        instagram = { username: ig.username ?? c.ig_username, followers: ig.followers_count };
+      const linked = page.instagram_business_account;
+      if (linked && typeof linked.followers_count === "number") {
+        ig = { username: linked.username ?? c.ig_username, followers: linked.followers_count };
       }
     }
   }
@@ -102,14 +113,104 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
   // Either there is no Page, or the Page did not carry the linked account —
   // a client can have Instagram set up here without their Page id being
   // filled in, and that must still produce a number.
-  if (!instagram && c.ig_user_id) {
-    const ig = await get<{ username?: string; followers_count?: number }>(
+  if (!ig && c.ig_user_id) {
+    const direct = await get<{ username?: string; followers_count?: number }>(
       `/${c.ig_user_id}?fields=username,followers_count`
     );
-    if (ig && typeof ig.followers_count === "number") {
-      instagram = { username: ig.username ?? c.ig_username, followers: ig.followers_count };
+    if (direct && typeof direct.followers_count === "number") {
+      ig = { username: direct.username ?? c.ig_username, followers: direct.followers_count };
     }
   }
 
-  return instagram || facebook ? { instagram, facebook } : null;
+  if (!ig && !fb) return null;
+
+  /*
+   * Today is recorded, and the months are read back.
+   *
+   * Writing on a page view rather than from a cron is what makes this cost
+   * nothing to run: the unique key means the tenth view of the day updates
+   * one row rather than adding ten. The trade is honest — a client nobody
+   * opens has gaps — and it is the right one here, because the number is only
+   * ever looked at on the page that fetches it.
+   */
+  const [igHistory, fbHistory] = await Promise.all([
+    ig ? record(clientId, "instagram", ig.followers) : Promise.resolve([]),
+    fb ? record(clientId, "facebook", fb.followers) : Promise.resolve([]),
+  ]);
+
+  return {
+    instagram: ig ? { ...ig, ...trend(igHistory, ig.followers) } : null,
+    facebook: fb ? { ...fb, ...trend(fbHistory, fb.followers) } : null,
+  };
+}
+
+/**
+ * Write today's count, and hand back the last twelve months.
+ *
+ * Best-effort in both directions: a database without the table, or a write
+ * that fails, costs the chart and never the number beside it. The page has
+ * already got what it came for by the time this runs.
+ */
+async function record(
+  clientId: number,
+  platform: "instagram" | "facebook",
+  followers: number
+): Promise<MonthPoint[]> {
+  try {
+    if (!(await hasTable("audience_snapshots"))) return [];
+    await execute(
+      `INSERT INTO audience_snapshots (client_id, platform, followers, taken_on)
+       VALUES (?,?,?,CURDATE())
+       ON DUPLICATE KEY UPDATE followers = VALUES(followers)`,
+      [clientId, platform, followers]
+    );
+
+    /*
+     * Each month's *closing* count, not its average and not its first.
+     *
+     * "Grew by 40 in July" means where July finished. So the row for a month
+     * is the one on the newest day we have for it, found by joining back on
+     * that date rather than by an aggregate that would mix months.
+     */
+    return await query<MonthPoint>(
+      `SELECT DATE_FORMAT(s.taken_on, '%Y-%m') AS month, s.followers
+         FROM audience_snapshots s
+         JOIN (
+           SELECT MAX(taken_on) AS last_day
+             FROM audience_snapshots
+            WHERE client_id = ? AND platform = ?
+            GROUP BY DATE_FORMAT(taken_on,'%Y-%m')
+            ORDER BY last_day DESC
+            LIMIT 12
+         ) t ON t.last_day = s.taken_on
+        WHERE s.client_id = ? AND s.platform = ?
+        ORDER BY s.taken_on ASC`,
+      [clientId, platform, clientId, platform]
+    );
+  } catch (err) {
+    console.warn(
+      "[audience] could not record the snapshot:",
+      err instanceof Error ? err.message : err
+    );
+    return [];
+  }
+}
+
+/**
+ * What the tile draws, from the rows the table holds.
+ *
+ * `change` is measured against the end of *last* month rather than the first
+ * reading of this one, so a month still running reads as "up 40 so far"
+ * instead of resetting to nothing on the 1st. Null when there is no earlier
+ * month at all — a first reading has no growth to report, and "+0" would
+ * claim a flat month nobody watched.
+ */
+function trend(
+  history: MonthPoint[],
+  current: number
+): { history: MonthPoint[]; change: number | null } {
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const previous = history.filter((p) => p.month < thisMonth);
+  const last = previous[previous.length - 1];
+  return { history, change: last ? current - last.followers : null };
 }
