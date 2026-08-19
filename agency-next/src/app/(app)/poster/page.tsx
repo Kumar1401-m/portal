@@ -13,7 +13,8 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceBadge } from "@/components/ui/service-badge";
 import { StatCard } from "@/components/ui/stat-card";
 import { SERVICES } from "@/lib/services";
-import { label, fmtDate, cn } from "@/lib/utils";
+import { fmtDate, cn } from "@/lib/utils";
+import { posterStageLabel } from "@/lib/constants";
 
 export const metadata = { title: "Posters · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -88,7 +89,9 @@ export default async function PosterPage() {
                           {p.title}
                         </Link>
                         <ServiceBadge task={p} category={p.content_category} />
-                        <Badge tone={statusTone(p.status)}>{label(p.status)}</Badge>
+                        {/* Poster words, not the raw status: a poster handed to its
+                            designer read "Waiting for raw" on their own board. */}
+                        <Badge tone={statusTone(p.status)}>{posterStageLabel(p.status)}</Badge>
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {p.company_name}

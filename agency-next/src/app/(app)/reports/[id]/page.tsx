@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
 import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
-import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
+import { contentStatusLabel, editorStatusLabel, posterStageLabel } from "@/lib/constants";
 import { monthKey } from "@/lib/utils";
 import { buildMonthlyReport, renderReportText } from "@/lib/monthly-report";
 import { MonthlyReportCard } from "./report-card";
@@ -117,6 +117,8 @@ export default async function ClientReportPage({
     const key = t.content_category?.trim() || "Uncategorised";
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
+  const posterCount = tasks.filter((t) => serviceOf(t) === "poster_designing").length;
+  const videoCount = tasks.length - posterCount;
 
   return (
     <div className="space-y-4">
@@ -188,9 +190,13 @@ export default async function ClientReportPage({
                 </span>
               );
             })}
+            {/* "Total Videos" counted the posters as videos. It is two
+                numbers or one, depending on what this client actually buys. */}
             <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-sm font-medium text-white">
               <Layers className="h-4 w-4" />
-              Total Videos: {tasks.length}
+              {posterCount > 0 && videoCount > 0
+                ? `${videoCount} video${videoCount === 1 ? "" : "s"} · ${posterCount} poster${posterCount === 1 ? "" : "s"}`
+                : `Total: ${tasks.length}`}
             </span>
           </div>
 
@@ -203,18 +209,39 @@ export default async function ClientReportPage({
           <table className="w-full table-fixed text-sm">
             <thead className="border-y border-border bg-muted/40">
               <tr className="[&_th]:px-2 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
-                <th style={{ width: "3%" }}>S.No</th>
-                <th style={{ width: "9%" }}>Creative Type</th>
-                <th style={{ width: "8%" }}>Post schedule date</th>
-                <th style={{ width: "9%" }}>Promotion Type</th>
-                <th style={{ width: "5%" }}>Shoot Link</th>
-                <th style={{ width: "5%" }}>Editor Link</th>
-                <th style={{ width: "6%" }}>Thumbnail</th>
-                <th style={{ width: "15%" }}>Title</th>
-                <th style={{ width: "10%" }}>Description</th>
-                <th style={{ width: "9%" }}>Content Status</th>
-                <th style={{ width: "9%" }}>Editor Status</th>
-                <th style={{ width: "8%" }}>Remarks</th>
+                {/*
+                  Eleven columns, not thirteen.
+
+                  Shoot Link, Editor Link and Thumbnail were three columns that
+                  said "—" on most rows and all three of them on every poster —
+                  nobody films a poster, so a Shoot Link column against one is
+                  a question with no answer. They are one Files column now, and
+                  it shows only what that row actually has.
+                */}
+                <th style={{ width: "3%" }} className="hidden sm:table-cell">
+                  S.No
+                </th>
+                <th style={{ width: "9%" }}>Type</th>
+                <th style={{ width: "8%" }} className="hidden sm:table-cell">
+                  Date
+                </th>
+                <th style={{ width: "18%" }}>Title</th>
+                <th style={{ width: "8%" }} className="hidden xl:table-cell">
+                  Promotion
+                </th>
+                <th style={{ width: "7%" }} className="hidden md:table-cell">
+                  Files
+                </th>
+                <th style={{ width: "12%" }} className="hidden lg:table-cell">
+                  Brief
+                </th>
+                <th style={{ width: "11%" }} className="hidden md:table-cell">
+                  Content status
+                </th>
+                <th style={{ width: "12%" }}>Stage</th>
+                <th style={{ width: "8%" }} className="hidden lg:table-cell">
+                  Remarks
+                </th>
                 <th style={{ width: "4%" }} className="text-right">
                   Actions
                 </th>
@@ -223,7 +250,7 @@ export default async function ClientReportPage({
             <tbody>
               {tasks.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-2 py-10 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-2 py-10 text-center text-muted-foreground">
                     No tasks for {client.company_name} this month. Anything you create for them
                     shows up here.
                   </td>
@@ -232,14 +259,31 @@ export default async function ClientReportPage({
                 tasks.map((t, i) => {
                   const svc = SERVICES[serviceOf(t)];
                   const done = DONE_STATUSES.includes(t.status);
+                  // A poster is not filmed and not edited, so it is not
+                  // described in those words anywhere on this row.
+                  const isPoster = serviceOf(t) === "poster_designing";
                   return (
                     <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/40">
-                      <td className="px-2 py-3 align-top text-muted-foreground">{i + 1}</td>
+                      <td className="hidden px-2 py-3 align-top text-muted-foreground sm:table-cell">
+                        {i + 1}
+                      </td>
                       <td className="px-2 py-3 align-top">{t.content_category || svc.short}</td>
-                      <td className="px-2 py-3 align-top">
+                      <td className="hidden px-2 py-3 align-top sm:table-cell">
                         {shortDate(t.scheduled_at || t.due_date)}
                       </td>
                       <td className="px-2 py-3 align-top">
+                        <Link
+                          href={`/deliverables/${t.id}`}
+                          className="hover:text-primary hover:underline"
+                        >
+                          {t.title}
+                        </Link>
+                        {/* What the narrow screens folded away, restacked. */}
+                        <span className="mt-0.5 block text-xs text-muted-foreground sm:hidden">
+                          {shortDate(t.scheduled_at || t.due_date)}
+                        </span>
+                      </td>
+                      <td className="hidden px-2 py-3 align-top xl:table-cell">
                         {t.promotion_type ? (
                           <span
                             className={`inline-block rounded px-2 py-1 text-xs font-medium text-white ${promoColour(
@@ -252,52 +296,48 @@ export default async function ClientReportPage({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-2 py-3 align-top">
-                        {t.raw_drive_link ? (
-                          <a
-                            href={t.raw_drive_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 underline"
-                          >
-                            View
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3 align-top">
-                        {t.edited_link ? (
-                          <a
-                            href={t.edited_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 underline"
-                          >
-                            View
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3 align-top">
-                        {t.thumbnail_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={t.thumbnail_url} alt="" className="h-8 w-12 rounded object-cover" />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">N/A</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-3 align-top">
-                        <Link
-                          href={`/deliverables/${t.id}`}
-                          className="hover:text-primary hover:underline"
-                        >
-                          {t.title}
-                        </Link>
+                      {/*
+                        One column for everything attached to the row, naming
+                        what each link is. A poster has a design and never a
+                        shoot; a video may have all three.
+                      */}
+                      <td className="hidden px-2 py-3 align-top md:table-cell">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {!isPoster && t.raw_drive_link ? (
+                            <a
+                              href={t.raw_drive_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-blue-600 underline"
+                            >
+                              Shoot
+                            </a>
+                          ) : null}
+                          {t.edited_link ? (
+                            <a
+                              href={t.edited_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-blue-600 underline"
+                            >
+                              {isPoster ? "Design" : "Video"}
+                            </a>
+                          ) : null}
+                          {t.thumbnail_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={t.thumbnail_url}
+                              alt=""
+                              className="h-8 w-12 rounded object-cover"
+                            />
+                          ) : null}
+                          {!t.edited_link && !t.thumbnail_url && (isPoster || !t.raw_drive_link) ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : null}
+                        </div>
                       </td>
                       <td
-                        className="px-2 py-3 align-top text-muted-foreground"
+                        className="hidden px-2 py-3 align-top text-muted-foreground lg:table-cell"
                         title={t.description ?? ""}
                       >
                         {/* Truncation goes on an inner block, not the cell —
@@ -306,14 +346,20 @@ export default async function ClientReportPage({
                             a scrollbar under the table. */}
                         <span className="block truncate">{t.description || "—"}</span>
                       </td>
-                      <td className="px-2 py-3 align-top">
+                      <td className="hidden px-2 py-3 align-top md:table-cell">
                         <StatusPill text={contentStatusLabel(t.status)} done={done} />
                       </td>
+                      {/* The stage, in the words of the work it describes: a
+                          poster handed to its designer read "Awaiting raw"
+                          before this, which is raw footage nobody is shooting. */}
                       <td className="px-2 py-3 align-top">
-                        <StatusPill text={editorStatusLabel(t.status)} done={done} />
+                        <StatusPill
+                          text={isPoster ? posterStageLabel(t.status) : editorStatusLabel(t.status)}
+                          done={done}
+                        />
                       </td>
                       <td
-                        className="px-2 py-3 align-top text-muted-foreground"
+                        className="hidden px-2 py-3 align-top text-muted-foreground lg:table-cell"
                         title={t.reject_reason ?? ""}
                       >
                         <span className="block truncate">{t.reject_reason || "—"}</span>

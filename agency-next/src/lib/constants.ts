@@ -263,6 +263,42 @@ export function invoiceStatusTone(status: string): BadgeTone {
   return "muted";
 }
 
+/**
+ * The same statuses, in poster words.
+ *
+ * A poster and a video move through one `status` column, and the labels were
+ * all written for video: a poster handed to its designer sits at
+ * `waiting_for_raw` and read as **"Awaiting raw"** on every report — raw
+ * footage, for a poster nobody is filming. Whoever read that row could not
+ * tell whether the design had been started, and that is most of what "the
+ * client report is impossible to understand" meant.
+ *
+ * Same statuses, same order, different vocabulary. Nothing here changes what
+ * a status means or how work moves; it says out loud what the poster flow
+ * already does.
+ */
+export function posterStageLabel(status: string): string {
+  const map: Record<string, string> = {
+    pending: "Yet to start",
+    content_review: "Content being written",
+    // The poster hand-off sets this the moment the brief goes to the designer.
+    waiting_for_raw: "With the designer",
+    raw_uploaded: "With the designer",
+    editing: "With the designer",
+    caption_ready: "Designed — with the admin",
+    review: "With the client",
+    changes_requested: "Changes requested",
+    resolved: "Changes done",
+    approved: "Approved",
+    scheduled: "Approved",
+    posted: "Posted",
+    completed: "Approved",
+    rejected: "Rejected",
+    cancelled: "Cancelled",
+  };
+  return map[status] ?? "Yet to start";
+}
+
 export function editorStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pending: "Yet to start",

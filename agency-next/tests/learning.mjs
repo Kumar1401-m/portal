@@ -277,5 +277,47 @@ await clean();
   ok("a poster idea becomes a task, keeps its kind, and comes back through the same loop");
 }
 
+/* ---------------- a poster is not described in video words ---------------- */
+{
+  const { posterStageLabel, editorStatusLabel } = await load("lib/constants.ts");
+
+  /*
+   * The complaint this answers: the client report was unreadable, and the
+   * worst of it was a poster sitting with its designer showing "Awaiting raw"
+   * — raw footage, for something nobody is filming. The poster hand-off sets
+   * `waiting_for_raw` when the brief goes to the designer, so that one status
+   * has to read differently depending on what the work is.
+   */
+  assert.equal(editorStatusLabel("waiting_for_raw"), "Awaiting raw", "still right for a video");
+  assert.equal(posterStageLabel("waiting_for_raw"), "With the designer", "and right for a poster");
+  assert.equal(posterStageLabel("caption_ready"), "Designed — with the admin");
+  assert.equal(posterStageLabel("review"), "With the client");
+  assert.equal(posterStageLabel("pending"), "Yet to start");
+  assert.equal(posterStageLabel("nonsense"), "Yet to start", "an unknown status is not a crash");
+
+  // No poster word may mention shooting, editing or raw footage.
+  for (const s of ["pending", "waiting_for_raw", "raw_uploaded", "editing", "caption_ready", "review"]) {
+    const said = posterStageLabel(s).toLowerCase();
+    for (const wrong of ["raw", "shoot", "footage", "edit"]) {
+      assert.ok(!said.includes(wrong), `poster status "${s}" says "${said}", which mentions ${wrong}`);
+    }
+  }
+
+  const report = read("app/(app)/reports/[id]/page.tsx");
+  // Three columns that said "—" on every poster are one column that shows
+  // what the row actually has.
+  assert.ok(!/>Shoot Link</.test(report), "no Shoot Link column");
+  assert.ok(!/>Editor Link</.test(report), "no Editor Link column");
+  assert.match(report, /const isPoster = serviceOf\(t\) === "poster_designing"/, "the row knows what it is");
+  assert.match(report, /!isPoster && t\.raw_drive_link/, "a shoot link is offered only where there is a shoot");
+  assert.match(report, /isPoster \? "Design" : "Video"/, "and the finished file is named for what it is");
+  assert.match(report, /isPoster \? posterStageLabel/, "the stage is said in the right words");
+  assert.match(report, /colSpan=\{11\}/, "the empty state spans the columns that exist");
+
+  // The board the designers themselves live on had the same problem.
+  assert.match(read("app/(app)/poster/page.tsx"), /posterStageLabel\(p\.status\)/);
+  ok("a poster is never asked for a shoot, and never told it is awaiting raw footage");
+}
+
 await clean();
 await finish(pass);
