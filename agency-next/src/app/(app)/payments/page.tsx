@@ -68,11 +68,13 @@ export default async function PaymentsPage() {
             <Table>
               <THead>
                 <tr>
+                  {/* A phone keeps the number, the amount and the actions.
+                      The client and the date restack under the number. */}
                   <th>Invoice #</th>
-                  <th>Client</th>
+                  <th className="hidden md:table-cell">Client</th>
                   <th>Total</th>
-                  <th>Status</th>
-                  <th>Due</th>
+                  <th className="hidden sm:table-cell">Status</th>
+                  <th className="hidden lg:table-cell">Due</th>
                   <th className="text-right">Action</th>
                 </tr>
               </THead>
@@ -90,12 +92,21 @@ export default async function PaymentsPage() {
                         {inv.invoice_no}
                       </Link>
                     </TD>
-                    <TD>{inv.company_name}</TD>
-                    <TD className="tabular-nums">{money(inv.total)}</TD>
-                    <TD>
+                    <TD className="hidden md:table-cell">{inv.company_name}</TD>
+                    <TD className="tabular-nums">
+                      {money(inv.total)}
+                      {/* Who and when, folded away from the row itself. */}
+                      <span className="mt-0.5 block text-xs font-normal text-muted-foreground md:hidden">
+                        {inv.company_name}
+                        <span className="sm:hidden"> · {invoiceStatusLabel(inv.status)}</span>
+                      </span>
+                    </TD>
+                    <TD className="hidden sm:table-cell">
                       <Badge tone={invoiceStatusTone(inv.status)}>{invoiceStatusLabel(inv.status)}</Badge>
                     </TD>
-                    <TD className="text-muted-foreground">{fmtDate(inv.due_date)}</TD>
+                    <TD className="hidden text-muted-foreground lg:table-cell">
+                      {fmtDate(inv.due_date)}
+                    </TD>
                     <TD>
                       <div className="flex items-center justify-end">
                         {inv.status !== "paid" && inv.pending_payment_id ? (
@@ -170,10 +181,10 @@ export default async function PaymentsPage() {
                 <tr>
                   <th>Date</th>
                   <th>Client</th>
-                  <th>Invoice</th>
+                  <th className="hidden md:table-cell">Invoice</th>
                   <th>Amount</th>
-                  <th>Method</th>
-                  <th>Status</th>
+                  <th className="hidden lg:table-cell">Method</th>
+                  <th className="hidden sm:table-cell">Status</th>
                   {canManage ? <th className="text-right">Delete</th> : null}
                 </tr>
               </THead>
@@ -182,10 +193,12 @@ export default async function PaymentsPage() {
                   <TR key={p.id}>
                     <TD className="text-muted-foreground">{fmtDate(p.paid_at || p.created_at)}</TD>
                     <TD>{p.company_name}</TD>
-                    <TD className="text-muted-foreground">{p.invoice_no || "—"}</TD>
+                    <TD className="hidden text-muted-foreground md:table-cell">
+                      {p.invoice_no || "—"}
+                    </TD>
                     <TD className="tabular-nums">{money(p.amount)}</TD>
-                    <TD>{p.method ? label(p.method) : "—"}</TD>
-                    <TD>
+                    <TD className="hidden lg:table-cell">{p.method ? label(p.method) : "—"}</TD>
+                    <TD className="hidden sm:table-cell">
                       <Badge tone={statusTone(p.status)}>{label(p.status)}</Badge>
                     </TD>
                     {canManage ? (

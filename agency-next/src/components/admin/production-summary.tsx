@@ -12,9 +12,21 @@ import type { ProductionRow } from "@/lib/queries";
 import { TargetCell, TargetText } from "./target-cell";
 import { Card } from "@/components/ui/card";
 
-function Th({ children }: { children: React.ReactNode }) {
+/**
+ * A heading, optionally folded away on small screens.
+ *
+ * Nine columns share 390px at about forty each, which is narrower than the
+ * numbers standing in them. So on a phone this table keeps the client and the
+ * counts that decide what to do next, and the rest are restacked under the
+ * client's name in the cell below — the grid goes, the facts stay.
+ */
+function Th({ children, hide }: { children: React.ReactNode; hide?: string }) {
   return (
-    <th className="whitespace-nowrap px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide first:text-left">
+    <th
+      // Headings wrap on a phone and only refuse to on a laptop: "Pending
+      // approval" held on one line is 78px of table nobody can see.
+      className={`px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide first:text-left sm:whitespace-nowrap ${hide ?? ""}`}
+    >
       {children}
     </th>
   );
@@ -70,7 +82,7 @@ export function ProductionSummary({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gradient-to-r from-orange-600 to-amber-600 text-white">
-              <Th>#</Th>
+              <Th hide="hidden sm:table-cell">#</Th>
               <Th>Client</Th>
               <Th>
                 <span className="inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> Required</span>
@@ -79,17 +91,17 @@ export function ProductionSummary({
                 <span className="inline-flex items-center gap-1"><PenTool className="h-3.5 w-3.5" /> Designed</span>
               </Th>
               {showPosters ? (
-                <Th>
+                <Th hide="hidden lg:table-cell">
                   <span className="inline-flex items-center gap-1"><ImageIcon className="h-3.5 w-3.5" /> Posters</span>
                 </Th>
               ) : null}
-              <Th>
+              <Th hide="hidden md:table-cell">
                 <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> Approved</span>
               </Th>
-              <Th>
+              <Th hide="hidden lg:table-cell">
                 <span className="inline-flex items-center gap-1"><Hourglass className="h-3.5 w-3.5" /> Pending approval</span>
               </Th>
-              <Th>
+              <Th hide="hidden lg:table-cell">
                 <span className="inline-flex items-center gap-1"><PencilLine className="h-3.5 w-3.5" /> Changes</span>
               </Th>
               <Th>
@@ -107,11 +119,18 @@ export function ProductionSummary({
             ) : (
               rows.map((r, i) => (
                 <tr key={r.id} className="border-b border-border odd:bg-muted/30 hover:bg-muted/60">
-                  <td className="px-3 py-2.5 text-center text-muted-foreground">{i + 1}</td>
+                  <td className="hidden px-3 py-2.5 text-center text-muted-foreground sm:table-cell">{i + 1}</td>
                   <td className="px-3 py-2.5">
                     <Link href={`/clients/${r.id}`} className="font-medium hover:text-primary hover:underline">
                       {r.company_name}
                     </Link>
+                    {/* The columns a phone folded away. Without them the row
+                        says what is left to do and never what is settled. */}
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground md:hidden">
+                      {r.approved} approved
+                      {r.awaiting ? ` · ${r.awaiting} awaiting` : ""}
+                      {r.changes ? ` · ${r.changes} changes` : ""}
+                    </span>
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     {canEditTargets ? (
@@ -122,20 +141,20 @@ export function ProductionSummary({
                   </td>
                   <td className="px-3 py-2.5 text-center tabular-nums">{r.designed}</td>
                   {showPosters ? (
-                    <td className="px-3 py-2.5 text-center tabular-nums text-orange-600 dark:text-orange-400">
+                    <td className="hidden px-3 py-2.5 text-center tabular-nums text-orange-600 lg:table-cell dark:text-orange-400">
                       {r.posters_designed}
                       {r.posters_required ? (
                         <span className="text-muted-foreground">/{r.posters_required}</span>
                       ) : null}
                     </td>
                   ) : null}
-                  <td className="px-3 py-2.5 text-center tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
+                  <td className="hidden px-3 py-2.5 text-center font-medium tabular-nums text-emerald-600 md:table-cell dark:text-emerald-400">
                     {r.approved}
                   </td>
-                  <td className="px-3 py-2.5 text-center tabular-nums text-amber-600 dark:text-amber-400">
+                  <td className="hidden px-3 py-2.5 text-center tabular-nums text-amber-600 lg:table-cell dark:text-amber-400">
                     {r.awaiting}
                   </td>
-                  <td className="px-3 py-2.5 text-center tabular-nums text-rose-600 dark:text-rose-400">
+                  <td className="hidden px-3 py-2.5 text-center tabular-nums text-rose-600 lg:table-cell dark:text-rose-400">
                     {r.changes}
                   </td>
                   {/* "12 · 8 not started" reads very differently from "12",
@@ -161,21 +180,27 @@ export function ProductionSummary({
           {rows.length > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-border bg-muted/50 font-semibold">
-                <td className="px-3 py-3" />
+                <td className="hidden px-3 py-3 sm:table-cell" />
                 <td className="px-3 py-3">Totals</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.required}</td>
                 <td className="px-3 py-3 text-center tabular-nums">{totals.designed}</td>
                 {showPosters ? (
-                  <td className="px-3 py-3 text-center tabular-nums">
+                  <td className="hidden px-3 py-3 text-center tabular-nums lg:table-cell">
                     {totals.posters_designed}
                     {totals.posters_required ? (
                       <span className="text-muted-foreground">/{totals.posters_required}</span>
                     ) : null}
                   </td>
                 ) : null}
-                <td className="px-3 py-3 text-center tabular-nums">{totals.approved}</td>
-                <td className="px-3 py-3 text-center tabular-nums">{totals.awaiting}</td>
-                <td className="px-3 py-3 text-center tabular-nums">{totals.changes}</td>
+                <td className="hidden px-3 py-3 text-center tabular-nums md:table-cell">
+                  {totals.approved}
+                </td>
+                <td className="hidden px-3 py-3 text-center tabular-nums lg:table-cell">
+                  {totals.awaiting}
+                </td>
+                <td className="hidden px-3 py-3 text-center tabular-nums lg:table-cell">
+                  {totals.changes}
+                </td>
                 <td className="px-3 py-3 text-center tabular-nums">
                   {totals.pending}
                   {totals.notStarted > 0 ? (

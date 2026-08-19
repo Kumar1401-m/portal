@@ -108,7 +108,10 @@ export default async function AdsPage({
             {syncedAt ? `, last refreshed ${prettyLocal(syncedAt) ?? "—"}` : ", never refreshed yet"}.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Wraps, or the three of them are 509px on a 390px screen and drag
+            the whole page sideways — a client picker, a date range and a
+            button is more than a phone fits on one line. */}
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <ClientPicker clients={clients} range={key} />
           <RangePicker current={key} />
           <SyncButton />

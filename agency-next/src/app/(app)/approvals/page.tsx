@@ -163,10 +163,12 @@ export default async function ApprovalsPage({
           <Table>
             <THead>
               <tr>
+                {/* The client and the category restack under the title;
+                    what stays is what it is and what to do about it. */}
                 <th>Title</th>
-                <th>Client</th>
-                <th>Service &amp; category</th>
-                <th>Due</th>
+                <th className="hidden md:table-cell">Client</th>
+                <th className="hidden lg:table-cell">Service &amp; category</th>
+                <th className="hidden sm:table-cell">Due</th>
                 <th className="text-right">Action</th>
               </tr>
             </THead>
@@ -180,12 +182,18 @@ export default async function ApprovalsPage({
                     >
                       {d.title}
                     </Link>
+                    <span className="mt-0.5 block text-xs text-muted-foreground md:hidden">
+                      {d.company_name}
+                      <span className="sm:hidden"> · due {fmtDate(d.due_date)}</span>
+                    </span>
                   </TD>
-                  <TD>{d.company_name}</TD>
-                  <TD>
+                  <TD className="hidden md:table-cell">{d.company_name}</TD>
+                  <TD className="hidden lg:table-cell">
                     <ServiceBadge task={d} category={d.content_category} />
                   </TD>
-                  <TD className="text-muted-foreground">{fmtDate(d.due_date)}</TD>
+                  <TD className="hidden text-muted-foreground sm:table-cell">
+                    {fmtDate(d.due_date)}
+                  </TD>
                   <TD>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {/* One button, where there were two. The other sent the

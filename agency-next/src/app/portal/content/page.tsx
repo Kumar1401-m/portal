@@ -77,43 +77,58 @@ export default async function PortalContentPage() {
               <Table>
                 <THead>
                   <tr>
-                    <th className="w-12 text-right">#</th>
-                    <th>Post date</th>
-                    <th>Type</th>
-                    <th>Promotion</th>
+                    {/*
+                      What a client's phone keeps: what it is, where it stands,
+                      and the way in. Ten columns on a 390px screen is thirty
+                      pixels each — the date, the type and the two link columns
+                      restack under the title instead.
+                    */}
+                    <th className="hidden w-12 text-right sm:table-cell">#</th>
+                    <th className="hidden md:table-cell">Post date</th>
+                    <th className="hidden lg:table-cell">Type</th>
+                    <th className="hidden xl:table-cell">Promotion</th>
                     <th>Title</th>
-                    <th>Shoot</th>
-                    <th>Video</th>
+                    <th className="hidden lg:table-cell">Shoot</th>
+                    <th className="hidden lg:table-cell">Video</th>
                     <th>Content status</th>
-                    <th>Editor status</th>
+                    <th className="hidden xl:table-cell">Editor status</th>
                     <th className="text-right">Open</th>
                   </tr>
                 </THead>
                 <TBody>
                   {items.map((it, i) => (
                     <TR key={it.id}>
-                      <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
-                      <TD className="whitespace-nowrap tabular-nums">
+                      <TD className="hidden text-right tabular-nums text-muted-foreground sm:table-cell">
+                        {i + 1}
+                      </TD>
+                      <TD className="hidden whitespace-nowrap tabular-nums md:table-cell">
                         {it.post_date ? (
                           fmtDate(it.post_date)
                         ) : (
                           <span className="text-muted-foreground">Not set</span>
                         )}
                       </TD>
-                      <TD>
+                      <TD className="hidden lg:table-cell">
                         <ServiceBadge task={it} category={it.content_category} />
                       </TD>
-                      <TD className="text-muted-foreground">{it.promotion_type || "—"}</TD>
-                      <TD className="max-w-[22rem]">
+                      <TD className="hidden text-muted-foreground xl:table-cell">
+                        {it.promotion_type || "—"}
+                      </TD>
+                      <TD className="max-w-[11rem] sm:max-w-[22rem]">
                         <p className="truncate font-medium">{it.title}</p>
                         {it.description ? (
                           <p className="truncate text-xs text-muted-foreground">{it.description}</p>
                         ) : null}
+                        {/* The date, which is the thing a client looks for
+                            first and the column a phone had to fold away. */}
+                        <p className="text-xs text-muted-foreground md:hidden">
+                          {it.post_date ? fmtDate(it.post_date) : "No date set"}
+                        </p>
                       </TD>
-                      <TD>
+                      <TD className="hidden lg:table-cell">
                         <LinkCell href={it.raw_drive_link}>View</LinkCell>
                       </TD>
-                      <TD>
+                      <TD className="hidden lg:table-cell">
                         <LinkCell href={it.edited_link}>View</LinkCell>
                       </TD>
                       <TD>
@@ -121,7 +136,7 @@ export default async function PortalContentPage() {
                           {contentStatusLabel(it.status)}
                         </Badge>
                       </TD>
-                      <TD>
+                      <TD className="hidden xl:table-cell">
                         <Badge tone={editorStatusTone(it.status)}>
                           {editorStatusLabel(it.status)}
                         </Badge>

@@ -163,24 +163,37 @@ export default async function MyWorkPage({
             <Table>
               <THead>
                 <tr>
+                  {/* What a phone keeps. Five columns on 390px gives the task
+                      title about seventy of them; the client and the due date
+                      say more restacked under the title than squeezed beside
+                      it, and the stage is the one thing scanned down a column. */}
                   <th>Task</th>
-                  <th>Client</th>
+                  <th className="hidden md:table-cell">Client</th>
                   <th>Stage</th>
-                  <th className="whitespace-nowrap">Due</th>
+                  <th className="hidden whitespace-nowrap sm:table-cell">Due</th>
                   <th className="text-right">Open</th>
                 </tr>
               </THead>
               <TBody>
                 {work.upNext.map((t) => (
                   <TR key={t.id}>
-                    <TD className="max-w-[18rem]">
+                    {/* 18rem is wider than a phone has to give: capped at
+                        11rem there so the stage and the way in still fit. */}
+                    <TD className="max-w-[11rem] sm:max-w-[18rem]">
                       <span className="truncate font-medium">{t.title}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground md:hidden">
+                        {t.company}
+                        <span className={`sm:hidden ${t.overdue ? "font-medium text-destructive" : ""}`}>
+                          {" · "}
+                          {t.dueDate ? fmtDate(t.dueDate) : "no date"}
+                        </span>
+                      </span>
                     </TD>
-                    <TD className="text-muted-foreground">{t.company}</TD>
+                    <TD className="hidden text-muted-foreground md:table-cell">{t.company}</TD>
                     <TD>
                       <Badge tone={editorStatusTone(t.status)}>{editorStatusLabel(t.status)}</Badge>
                     </TD>
-                    <TD className="whitespace-nowrap tabular-nums">
+                    <TD className="hidden whitespace-nowrap tabular-nums sm:table-cell">
                       <span className={t.overdue ? "font-medium text-destructive" : "text-muted-foreground"}>
                         {t.dueDate ? fmtDate(t.dueDate) : "No date"}
                       </span>
@@ -190,7 +203,10 @@ export default async function MyWorkPage({
                         href={`/deliverables/${t.id}`}
                         className={buttonClasses({ variant: "ghost", size: "sm" })}
                       >
-                        Open <ArrowRight className="h-4 w-4" />
+                        {/* The word costs sixty pixels a phone does not have,
+                            and the arrow says the same thing. */}
+                        <span className="hidden sm:inline">Open</span>
+                        <ArrowRight className="h-4 w-4" />
                       </Link>
                     </TD>
                   </TR>
@@ -217,10 +233,10 @@ export default async function MyWorkPage({
               <THead>
                 <tr>
                   <th>Client</th>
-                  <th className="text-center">Assigned</th>
-                  <th className="text-center">Finished</th>
-                  <th className="text-center">Still to do</th>
-                  <th className="whitespace-nowrap">Next due</th>
+                  <th className="hidden text-center sm:table-cell">Assigned</th>
+                  <th className="hidden text-center sm:table-cell">Finished</th>
+                  <th className="hidden text-center md:table-cell">Still to do</th>
+                  <th className="hidden whitespace-nowrap lg:table-cell">Next due</th>
                   <th>Progress</th>
                 </tr>
               </THead>
@@ -229,15 +245,23 @@ export default async function MyWorkPage({
                   const pct = c.assigned ? Math.round((c.done / c.assigned) * 100) : 0;
                   return (
                     <TR key={c.clientId}>
-                      <TD className="font-medium">{c.company}</TD>
-                      <TD className="text-center tabular-nums">{c.assigned}</TD>
-                      <TD className="text-center tabular-nums text-emerald-600 dark:text-emerald-400">
+                      <TD className="font-medium">
+                        {c.company}
+                        {/* The counts, restacked, because on a phone the bar
+                            alone says how far along but never out of what. */}
+                        <span className="mt-0.5 block text-xs font-normal text-muted-foreground sm:hidden">
+                          {c.done} of {c.assigned} done
+                          {c.assigned - c.done > 0 ? ` · ${c.assigned - c.done} to go` : ""}
+                        </span>
+                      </TD>
+                      <TD className="hidden text-center tabular-nums sm:table-cell">{c.assigned}</TD>
+                      <TD className="hidden text-center tabular-nums text-emerald-600 sm:table-cell dark:text-emerald-400">
                         {c.done}
                       </TD>
-                      <TD className="text-center tabular-nums">
+                      <TD className="hidden text-center tabular-nums md:table-cell">
                         {c.toDo || <span className="text-muted-foreground">—</span>}
                       </TD>
-                      <TD className="whitespace-nowrap tabular-nums text-muted-foreground">
+                      <TD className="hidden whitespace-nowrap tabular-nums text-muted-foreground lg:table-cell">
                         {c.nextDue ? fmtDate(c.nextDue) : "—"}
                       </TD>
                       <TD className="w-40">

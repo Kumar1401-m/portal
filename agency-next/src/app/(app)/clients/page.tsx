@@ -74,12 +74,15 @@ export default async function ClientsPage() {
           <Table>
             <THead>
               <tr>
+                {/* A phone keeps who they are and where they stand; the
+                    contact, the package and the renewal date come back under
+                    the name rather than shrinking the name to fit them. */}
                 <th>Company</th>
-                <th>Contact</th>
+                <th className="hidden md:table-cell">Contact</th>
                 <th>Status</th>
-                <th>Package</th>
-                <th className="text-center">Monthly</th>
-                <th>Renewal</th>
+                <th className="hidden lg:table-cell">Package</th>
+                <th className="hidden text-center sm:table-cell">Monthly</th>
+                <th className="hidden lg:table-cell">Renewal</th>
               </tr>
             </THead>
             <TBody>
@@ -100,20 +103,27 @@ export default async function ClientsPage() {
                         >
                           {c.company_name}
                         </Link>
-                        <div className="text-xs text-muted-foreground">{c.email || "—"}</div>
+                        <div className="truncate text-xs text-muted-foreground">{c.email || "—"}</div>
+                        <div className="text-xs text-muted-foreground md:hidden">
+                          {[c.contact_person, c.phone].filter(Boolean).join(" · ") || null}
+                        </div>
                       </div>
                     </div>
                   </TD>
-                  <TD>
+                  <TD className="hidden md:table-cell">
                     <div>{c.contact_person || "—"}</div>
                     <div className="text-xs text-muted-foreground">{c.phone || ""}</div>
                   </TD>
                   <TD>
                     <Badge tone={statusTone(c.status)}>{label(c.status)}</Badge>
                   </TD>
-                  <TD>{c.monthly_package || "—"}</TD>
-                  <TD className="text-center tabular-nums">{c.monthly_deliverables || "—"}</TD>
-                  <TD className="text-muted-foreground">{fmtDate(c.renewal_date)}</TD>
+                  <TD className="hidden lg:table-cell">{c.monthly_package || "—"}</TD>
+                  <TD className="hidden text-center tabular-nums sm:table-cell">
+                    {c.monthly_deliverables || "—"}
+                  </TD>
+                  <TD className="hidden text-muted-foreground lg:table-cell">
+                    {fmtDate(c.renewal_date)}
+                  </TD>
                 </TR>
               ))}
             </TBody>

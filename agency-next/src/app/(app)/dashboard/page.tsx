@@ -123,11 +123,13 @@ export default async function DashboardPage() {
             <Table>
               <THead>
                 <tr>
+                  {/* The two that matter on a phone: what it is and how late.
+                      The client and the schedule restack under the title. */}
                   <th>Task</th>
-                  <th>Client</th>
-                  <th>Scheduled for</th>
+                  <th className="hidden md:table-cell">Client</th>
+                  <th className="hidden lg:table-cell">Scheduled for</th>
                   <th className="text-center">How late</th>
-                  <th>Instagram</th>
+                  <th className="hidden sm:table-cell">Instagram</th>
                 </tr>
               </THead>
               <TBody>
@@ -140,9 +142,13 @@ export default async function DashboardPage() {
                       >
                         {m.title}
                       </Link>
+                      <span className="mt-0.5 block text-xs text-muted-foreground md:hidden">
+                        {m.company_name}
+                        <span className="lg:hidden"> · {fmtDate(m.scheduled_at)}</span>
+                      </span>
                     </TD>
-                    <TD className="text-muted-foreground">{m.company_name}</TD>
-                    <TD className="whitespace-nowrap text-muted-foreground">
+                    <TD className="hidden text-muted-foreground md:table-cell">{m.company_name}</TD>
+                    <TD className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">
                       {fmtDate(m.scheduled_at)}
                     </TD>
                     <TD className="text-center">
@@ -154,7 +160,9 @@ export default async function DashboardPage() {
                             : `${m.late_minutes}m`}
                       </Badge>
                     </TD>
-                    <TD className="text-muted-foreground">{label(m.instagram_status)}</TD>
+                    <TD className="hidden text-muted-foreground sm:table-cell">
+                      {label(m.instagram_status)}
+                    </TD>
                   </TR>
                 ))}
               </TBody>

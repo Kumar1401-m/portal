@@ -110,13 +110,21 @@ export default async function TeamPage({
           <Table dense>
             <THead>
               <tr>
-                <th className="w-10 text-right">#</th>
+                <th className="hidden w-10 text-right sm:table-cell">#</th>
                 <th>
                   <span className="inline-flex items-center gap-1.5">
                     <Users className="h-3.5 w-3.5" /> Employee
                   </span>
                 </th>
-                <th>
+                {/*
+                  What a phone keeps: who, how much, and how that compares.
+
+                  Seven columns share 390px at fifty-three each, which turned
+                  "Content Manager" into three letters and an ellipsis. The
+                  role and the two capacity columns fold away and reappear
+                  under the name, so the phone loses the grid and never a fact.
+                */}
+                <th className="hidden md:table-cell">
                   <span className="inline-flex items-center gap-1.5">
                     <Briefcase className="h-3.5 w-3.5" /> Role
                   </span>
@@ -126,7 +134,7 @@ export default async function TeamPage({
                     <ListChecks className="h-3.5 w-3.5" /> Deliveries
                   </span>
                 </th>
-                <th className="text-center">
+                <th className="hidden text-center lg:table-cell">
                   <span className="inline-flex items-center gap-1.5">
                     <Gauge className="h-3.5 w-3.5" /> Capacity / day
                   </span>
@@ -140,7 +148,7 @@ export default async function TeamPage({
                   A percentage nobody can check from the row it sits on is a
                   percentage people argue with.
                 */}
-                <th className="text-center">
+                <th className="hidden text-center md:table-cell">
                   <span className="inline-flex items-center gap-1.5">
                     <Gauge className="h-3.5 w-3.5" /> Capacity in {data.days} day
                     {data.days === 1 ? "" : "s"}
@@ -156,9 +164,18 @@ export default async function TeamPage({
             <TBody>
               {data.members.map((m, i) => (
                 <TR key={m.id}>
-                  <TD className="text-right tabular-nums text-muted-foreground">{i + 1}</TD>
-                  <TD className="font-medium">{m.name}</TD>
-                  <TD>
+                  <TD className="hidden text-right tabular-nums text-muted-foreground sm:table-cell">{i + 1}</TD>
+                  <TD className="font-medium">
+                    {m.name}
+                    {/* The columns a phone folded away, restacked here. */}
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground md:hidden">
+                      {label(m.role)}
+                      {m.capacityPerDay > 0
+                        ? ` · ${m.capacityPerDay}/day · ${m.capacity} in ${data.days} day${data.days === 1 ? "" : "s"}`
+                        : " · no capacity set"}
+                    </span>
+                  </TD>
+                  <TD className="hidden md:table-cell">
                     <span className="rounded-md bg-sky-500/12 px-2 py-1 text-xs font-medium text-sky-700 dark:text-sky-300">
                       {label(m.role)}
                     </span>
@@ -168,14 +185,14 @@ export default async function TeamPage({
                       {m.deliveries}
                     </span>
                   </TD>
-                  <TD className="text-center tabular-nums">
+                  <TD className="hidden text-center tabular-nums lg:table-cell">
                     {m.capacityPerDay > 0 ? (
                       m.capacityPerDay
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TD>
-                  <TD className="text-center tabular-nums">
+                  <TD className="hidden text-center tabular-nums md:table-cell">
                     {m.capacity > 0 ? (
                       <span title={`${m.capacityPerDay} a day × ${data.days} days`}>
                         {m.capacity}
@@ -222,9 +239,9 @@ export default async function TeamPage({
             */}
             <tfoot className="border-t-2 border-border bg-muted/40 font-medium">
               <tr>
-                <td className="px-2 py-3" />
+                <td className="hidden px-2 py-3 sm:table-cell" />
                 <td className="px-2 py-3">Total</td>
-                <td className="px-2 py-3 text-xs font-normal text-muted-foreground">
+                <td className="hidden px-2 py-3 text-xs font-normal text-muted-foreground md:table-cell">
                   {data.totals.people} {data.totals.people === 1 ? "person" : "people"}
                   {data.totals.measured < data.totals.people
                     ? ` · ${data.totals.measured} with capacity`
@@ -238,7 +255,7 @@ export default async function TeamPage({
                     </div>
                   ) : null}
                 </td>
-                <td className="px-2 py-3 text-center tabular-nums">
+                <td className="hidden px-2 py-3 text-center tabular-nums lg:table-cell">
                   {data.totals.capacityPerDay > 0 ? (
                     data.totals.capacityPerDay
                   ) : (
@@ -247,7 +264,7 @@ export default async function TeamPage({
                 </td>
                 {/* Its own cell now that the row above has one, or the totals
                     line up under the wrong headings. */}
-                <td className="px-2 py-3 text-center tabular-nums">
+                <td className="hidden px-2 py-3 text-center tabular-nums md:table-cell">
                   {data.totals.capacity > 0 ? (
                     data.totals.capacity
                   ) : (

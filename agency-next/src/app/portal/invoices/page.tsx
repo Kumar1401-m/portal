@@ -36,22 +36,33 @@ export default async function PortalInvoicesPage() {
           <Table>
             <THead>
               <tr>
+                {/* A phone keeps the number, what is owed and what to do
+                    about it. The two dates come back under the number. */}
                 <th>Invoice #</th>
-                <th>Issued</th>
-                <th>Due</th>
+                <th className="hidden md:table-cell">Issued</th>
+                <th className="hidden sm:table-cell">Due</th>
                 <th>Amount</th>
-                <th>Status</th>
+                <th className="hidden sm:table-cell">Status</th>
                 <th className="text-right">Action</th>
               </tr>
             </THead>
             <TBody>
               {invoices.map((inv) => (
                 <TR key={inv.id}>
-                  <TD className="font-medium">{inv.invoice_no}</TD>
-                  <TD className="text-muted-foreground">{fmtDate(inv.issue_date)}</TD>
-                  <TD className="text-muted-foreground">{fmtDate(inv.due_date)}</TD>
+                  <TD className="font-medium">
+                    {inv.invoice_no}
+                    <span className="mt-0.5 block text-xs font-normal text-muted-foreground sm:hidden">
+                      due {fmtDate(inv.due_date)} · {invoiceStatusLabel(inv.status)}
+                    </span>
+                  </TD>
+                  <TD className="hidden text-muted-foreground md:table-cell">
+                    {fmtDate(inv.issue_date)}
+                  </TD>
+                  <TD className="hidden text-muted-foreground sm:table-cell">
+                    {fmtDate(inv.due_date)}
+                  </TD>
                   <TD className="tabular-nums">{money(inv.total)}</TD>
-                  <TD>
+                  <TD className="hidden sm:table-cell">
                     <Badge tone={invoiceStatusTone(inv.status)}>{invoiceStatusLabel(inv.status)}</Badge>
                   </TD>
                   <TD className="text-right">

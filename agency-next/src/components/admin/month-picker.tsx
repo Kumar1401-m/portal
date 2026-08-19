@@ -47,7 +47,9 @@ export function MonthPicker({
       <Link
         href={href(shift(month, -1))}
         aria-label="Previous month"
-        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-7 w-7" })}
+        // Bigger than they look on a laptop: 28px is under every phone
+        // platform's minimum, and these two sit a thumb's width apart.
+        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-10 w-10 sm:h-7 sm:w-7" })}
       >
         <ChevronLeft className="h-4 w-4" />
       </Link>
@@ -61,7 +63,7 @@ export function MonthPicker({
       <Link
         href={href(shift(month, 1))}
         aria-label="Next month"
-        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-7 w-7" })}
+        className={buttonClasses({ variant: "ghost", size: "icon", className: "h-10 w-10 sm:h-7 sm:w-7" })}
       >
         <ChevronRight className="h-4 w-4" />
       </Link>

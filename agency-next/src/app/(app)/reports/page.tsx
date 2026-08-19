@@ -100,14 +100,21 @@ export default async function ReportsPage({
           >
             <thead className="border-b border-border">
               <tr className="[&_th]:px-3 [&_th]:py-3 [&_th]:align-top [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:leading-snug [&_th]:text-primary">
-                <th style={{ width: pc(w.sno) }}>S.No</th>
+                {/* A matrix scrolls on a phone whatever we do — but the row
+                    number and the tier are two columns of it that nobody
+                    swipes for. */}
+                <th style={{ width: pc(w.sno) }} className="hidden sm:table-cell">
+                  S.No
+                </th>
                 <th style={{ width: pc(w.client) }}>
                   <span className="inline-flex items-center gap-1.5">
                     <User className="h-3.5 w-3.5 shrink-0" /> Name of the Client
                     <ListFilter className="h-3.5 w-3.5 shrink-0 opacity-60" />
                   </span>
                 </th>
-                <th style={{ width: pc(w.tier) }}>Category</th>
+                <th style={{ width: pc(w.tier) }} className="hidden md:table-cell">
+                  Category
+                </th>
                 {categories.map((c) => [
                   <th key={`h1-${c}`} style={{ width: pc(w.count) }}>
                     No Of {c}
@@ -134,7 +141,9 @@ export default async function ReportsPage({
               ) : (
                 rows.map((r, i) => (
                   <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/40">
-                    <td className="px-3 py-3 align-top text-muted-foreground">{i + 1}</td>
+                    <td className="hidden px-3 py-3 align-top text-muted-foreground sm:table-cell">
+                      {i + 1}
+                    </td>
                     <td className="px-3 py-3 align-top">
                       <Link
                         href={`/reports/${r.id}?month=${month}${service ? `&service=${service}` : ""}`}
@@ -143,7 +152,7 @@ export default async function ReportsPage({
                         {r.company_name}
                       </Link>
                     </td>
-                    <td className="px-3 py-3 align-top">{r.tier || "—"}</td>
+                    <td className="hidden px-3 py-3 align-top md:table-cell">{r.tier || "—"}</td>
                     {categories.map((c) => {
                       const t = r.categories[c] ?? { total: 0, approved: 0 };
                       return [

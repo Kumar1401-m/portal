@@ -84,11 +84,12 @@ export function ExpenseTable({
           <Table dense>
             <THead>
               <tr>
+                {/* The category and the date fold under "What". */}
                 <th>What</th>
-                <th>Category</th>
+                <th className="hidden md:table-cell">Category</th>
                 <th className="text-right">Amount</th>
-                <th className="whitespace-nowrap">Due</th>
-                <th>Status</th>
+                <th className="hidden whitespace-nowrap sm:table-cell">Due</th>
+                <th className="hidden sm:table-cell">Status</th>
                 <th className="text-right">Actions</th>
               </tr>
             </THead>
@@ -179,12 +180,18 @@ function ExpenseRow({
               {[row.vendor, row.clientName].filter(Boolean).join(" · ")}
             </p>
           ) : null}
+          {/* The category and the date, folded away on a phone. */}
+          <p className="truncate text-xs text-muted-foreground sm:hidden">
+            {categoryLabel(row.category)} · due {fmtDate(row.dueOn)}
+          </p>
         </TD>
-        <TD className="text-muted-foreground">{categoryLabel(row.category)}</TD>
+        <TD className="hidden text-muted-foreground md:table-cell">
+          {categoryLabel(row.category)}
+        </TD>
         <TD className="whitespace-nowrap text-right font-medium tabular-nums">
           {money(row.amount)}
         </TD>
-        <TD className="whitespace-nowrap tabular-nums">
+        <TD className="hidden whitespace-nowrap tabular-nums sm:table-cell">
           <span
             className={
               row.overdue && !row.paidOn ? "font-medium text-destructive" : "text-muted-foreground"
@@ -193,7 +200,7 @@ function ExpenseRow({
             {fmtDate(row.dueOn)}
           </span>
         </TD>
-        <TD>
+        <TD className="hidden sm:table-cell">
           {row.paidOn ? (
             <Badge tone="success">Paid {fmtDate(row.paidOn)}</Badge>
           ) : row.overdue ? (
