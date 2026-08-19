@@ -26,6 +26,13 @@ export type Strategy = {
 export type Idea = {
   topic: string;
   hook: string;
+  /**
+   * Which of the nine formats this is — the thing the loop records against the
+   * task and measures the result by. Without it an idea becomes "a reel", and
+   * a reel is not a decision anybody can learn from.
+   */
+  type: ContentTypeKey;
+  typeLabel: string;
   format: string;
   audience: string;
   cta: string;
@@ -249,6 +256,120 @@ export const CONTENT_TYPES: ContentType[] = [
 /** The chosen format, or the default. Never throws on an unknown key. */
 export const contentType = (key?: string | null): ContentType =>
   CONTENT_TYPES.find((t) => t.key === key) ?? CONTENT_TYPES[0];
+
+/**
+ * The kinds of poster this agency actually makes.
+ *
+ * A poster is not a short reel with fewer words. It is read across a room in
+ * about a second, and what that second has to deliver depends entirely on why
+ * the poster exists — an offer has to be legible at a glance and a festival
+ * greeting has to feel like a greeting rather than an advert wearing one.
+ *
+ * Same job as `CONTENT_TYPES`: the kind is chosen first and it decides the
+ * shape of the copy and what the poster asks for. And, like the reel formats,
+ * it is recorded against the task so the loop can learn which kinds actually
+ * earn anything.
+ */
+export type PosterKind = {
+  key: string;
+  label: string;
+  /** What this kind is, in one line. Shown in the picker, given to the model. */
+  what: string;
+  /** What the copy has to do. The part that stops every poster reading alike. */
+  shape: string;
+  /** What it asks of somebody who stops. */
+  ask: string;
+};
+
+export const POSTER_KINDS: PosterKind[] = [
+  {
+    key: "offer",
+    label: "Offer / discount",
+    what: "A price, a saving or a limited deal.",
+    shape:
+      "The offer IS the headline — the number goes in it, not in the small print. Then what is included, then when it ends. Never bury the price.",
+    ask: "Call or message to book it, with the deadline said plainly.",
+  },
+  {
+    key: "festival",
+    label: "Festival greeting",
+    what: "A greeting on a festival or a national day.",
+    shape:
+      "The greeting first and the business second. No offer, no service list — a greeting that sells is the one people scroll past.",
+    ask: "Nothing. The client's name and logo are the whole of the ask.",
+  },
+  {
+    key: "testimonial",
+    label: "Client testimonial",
+    what: "A real customer, in their own words.",
+    shape:
+      "The quote is the headline, cut to its strongest sentence. Then who said it and what they came for. Nothing the business says about itself.",
+    ask: "Come and see for yourself — soft, because the proof has done the work.",
+  },
+  {
+    key: "tip",
+    label: "Tip / awareness",
+    what: "One useful thing, given away.",
+    shape:
+      "One tip, not five. Say the thing people get wrong, then what to do instead, in the fewest words that still teach it.",
+    ask: "Save it, and ask us if you want the rest.",
+  },
+  {
+    key: "announcement",
+    label: "Announcement",
+    what: "Something new: a service, a branch, new timings.",
+    shape:
+      "What changed, from when, and where. A date and an address are the two things people photograph this for.",
+    ask: "The address and the phone number, large enough to read from a photo.",
+  },
+  {
+    key: "hiring",
+    label: "We're hiring",
+    what: "An open role at the client's business.",
+    shape:
+      "The role and the place in the headline. Then what is needed and what is offered — a hiring poster with no pay range or no location gets shared and never answered.",
+    ask: "Where to send it, and by when.",
+  },
+  {
+    key: "before_after",
+    label: "Before and after",
+    what: "A result, shown as a change.",
+    shape:
+      "Two states and the gap between them. The words only label what the picture already shows — how long it took, and what it took.",
+    ask: "Book the same thing, named as the thing in the picture.",
+  },
+  {
+    key: "price_list",
+    label: "Price list / menu",
+    what: "What things cost, laid out.",
+    shape:
+      "Items and prices in one column, most-wanted first, at most eight lines. A price list somebody has to zoom into is a price list nobody read.",
+    ask: "How to order, once, at the bottom.",
+  },
+];
+
+export const posterKind = (key?: string | null): PosterKind =>
+  POSTER_KINDS.find((k) => k.key === key) ?? POSTER_KINDS[0];
+
+/**
+ * Every format key the portal records against a task, reel and poster alike.
+ *
+ * The loop reads results back by this key, and it is the guard on a column
+ * that predates all of it — see `learning.ts`.
+ */
+export const ALL_FORMAT_KEYS: string[] = [
+  ...CONTENT_TYPES.map((t) => t.key),
+  ...POSTER_KINDS.map((k) => k.key),
+];
+
+/** The human name for any recorded format key, whichever list it came from. */
+export function formatLabelFor(key: string): string {
+  return (
+    CONTENT_TYPES.find((t) => t.key === key)?.label ??
+    POSTER_KINDS.find((k) => k.key === key)?.label ??
+    key
+  );
+}
 
 export type ThumbnailConcept = {
   title: string;

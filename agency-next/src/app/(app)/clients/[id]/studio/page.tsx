@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { thisMonthKey } from "@/lib/date-range";
 import { Studio } from "./studio";
+import { LearnedPanel } from "./learned-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,9 @@ export default async function StudioPage({ params }: { params: Promise<{ id: str
         city={city}
         grounded={brief?.grounded ?? false}
         knowledgeFilled={completeness(knowledge)}
+            /* Rendered here, on the server, and handed to the client component:
+               the loop reads the database and the studio is a browser page. */
+            learned={<LearnedPanel clientId={clientId} />}
       />
     </div>
   );

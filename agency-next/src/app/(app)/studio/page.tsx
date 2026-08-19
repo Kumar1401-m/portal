@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { thisMonthKey } from "@/lib/date-range";
 import { Studio } from "../clients/[id]/studio/studio";
 import { StudioClientPicker } from "./client-picker";
+import { LearnedPanel } from "../clients/[id]/studio/learned-panel";
 
 export const metadata = { title: "Content studio · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -89,6 +90,9 @@ export default async function StudioPage({
             city={city}
             grounded={brief?.grounded ?? false}
             knowledgeFilled={completeness(knowledge)}
+            /* Rendered here, on the server, and handed to the client component:
+               the loop reads the database and the studio is a browser page. */
+            learned={<LearnedPanel clientId={clientId} />}
           />
           <p className="text-xs text-muted-foreground">
             Writing for the wrong account is the one mistake this page makes easy — everything

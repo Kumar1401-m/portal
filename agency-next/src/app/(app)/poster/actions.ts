@@ -7,6 +7,7 @@ import { notifyAdmins, notifyUser } from "@/lib/notify";
 import { canAccessClient } from "@/lib/crm";
 import { modelConfigured } from "@/lib/ai-engines";
 import { posterContent, renderPosterBrief } from "@/lib/content-ai";
+import { posterKind } from "@/lib/content-kinds";
 
 export type PosterState = { ok: boolean; error?: string };
 
@@ -73,7 +74,8 @@ export type PosterContentState =
  */
 export async function draftPosterContentAction(
   deliverableId: number,
-  topic: string
+  topic: string,
+  kind?: string
 ): Promise<PosterContentState> {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
 
@@ -89,10 +91,26 @@ export async function draftPosterContentAction(
     return { ok: false, error: "No model key is configured — write the content by hand below." };
   }
 
-  const content = await posterContent(d.client_id, { topic: topic.trim() || d.title }).catch(() => null);
-  return content
-    ? { ok: true, brief: renderPosterBrief(content) }
-    : { ok: false, error: "Nothing usable came back. Write it by hand below." };
+  const content = await posterContent(d.client_id, {
+    topic: topic.trim() || d.title,
+    kind,
+  }).catch(() => null);
+  if (!content) return { ok: false, error: "Nothing usable came back. Write it by hand below." };
+
+  /*
+   * The kind is recorded now, on the draft, not when the poster is shared.
+   *
+   * This is the decision the portal made, and it has to be written down at the
+   * moment it is made — a poster that is drafted, edited by hand and then sent
+   * on is still a poster of that kind, and `learning.ts` will read the result
+   * back by this key months later.
+   */
+  await execute("UPDATE deliverables SET content_type = ? WHERE id = ?", [
+    posterKind(kind).key,
+    d.id,
+  ]);
+
+  return { ok: true, brief: renderPosterBrief(content) };
 }
 
 /**

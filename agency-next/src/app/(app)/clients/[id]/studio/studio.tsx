@@ -76,6 +76,7 @@ export function Studio({
   city,
   grounded,
   knowledgeFilled,
+  learned,
 }: {
   clientId: number;
   clientName: string;
@@ -84,6 +85,14 @@ export function Studio({
   /** Whether there is enough published history for the advice to be grounded. */
   grounded: boolean;
   knowledgeFilled: number;
+  /**
+   * What the loop has learned, rendered on the server and handed in.
+   *
+   * A node rather than data: this panel reads the database, and the page it
+   * sits on is a client component. Passing the finished element is the whole
+   * of the bridge — no server module reaches the browser bundle.
+   */
+  learned?: React.ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("strategy");
 
@@ -132,7 +141,14 @@ export function Studio({
         ))}
       </div>
 
-      {tab === "strategy" ? <StrategyPanel clientId={clientId} month={month} /> : null}
+      {tab === "strategy" ? (
+        <div className="space-y-3">
+          {/* The loop's memory sits above the month's plan, because it is what
+              the plan is supposed to be built from. */}
+          {learned}
+          <StrategyPanel clientId={clientId} month={month} />
+        </div>
+      ) : null}
       {tab === "ideas" ? <IdeasPanel clientId={clientId} /> : null}
       {tab === "script" ? <ScriptPanel clientId={clientId} clientName={clientName} /> : null}
       {tab === "thumbnail" ? <ThumbnailPanel clientId={clientId} /> : null}
@@ -353,6 +369,12 @@ function IdeasPanel({ clientId }: { clientId: number }) {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <p className="font-medium">{idea.topic}</p>
               <div className="flex shrink-0 items-center gap-1.5">
+                {/* The format, not just "Reel". It is what gets recorded on the
+                    task and what the result is measured by later, so it is
+                    shown here rather than buried in the brief. */}
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  {idea.typeLabel || contentType(idea.type).label}
+                </span>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                   {idea.format}
                 </span>

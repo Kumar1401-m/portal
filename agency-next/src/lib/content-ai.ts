@@ -50,11 +50,14 @@ import {
   type ThumbnailConcept,
   type SeoPack,
   ENGAGEMENT_ASKS,
+  CONTENT_TYPES,
   contentType,
+  posterKind,
   scriptPlan,
   wordFloor,
   countWords,
 } from "./content-kinds";
+import { learned, learnedLines } from "./learning";
 export * from "./content-kinds";
 
 /** How far back "what already worked" reaches. */
@@ -69,6 +72,11 @@ export type ContentBrief = {
   rules: string | null;
   /** What their own account rewards, in plain sentences. Empty when unknown. */
   performance: string[];
+  /**
+   * What the portal's own past decisions earned — see `learning.ts`. Empty
+   * until enough posts made from a recorded format have results.
+   */
+  lessons: string[];
   /** True when there is enough history for the performance lines to mean anything. */
   grounded: boolean;
 };
@@ -160,12 +168,25 @@ export async function buildBrief(clientId: number): Promise<ContentBrief | null>
     }
   }
 
+  /*
+   * What the loop has learned, on top of what the raw numbers say.
+   *
+   * `performance` above is about media types and posting times — facts about
+   * the account. These are about the portal's own decisions: which of the
+   * formats it chose actually earned anything. That is the arrow that closes
+   * the loop, and it is the reason a brief written in March is not the same
+   * brief written in September.
+   */
+  const memory = await learned(clientId).catch(() => null);
+  const lessons = memory ? learnedLines(memory) : [];
+
   return {
     clientId,
     client: ctx.name,
     context: renderContext(ctx),
     rules: renderKnowledgeRules(ctx),
     performance,
+    lessons,
     grounded,
   };
 }
@@ -179,6 +200,13 @@ function briefBlock(b: ContentBrief): string {
         b.performance.map((p) => `- ${p}`).join("\n")
       : `WHAT ALREADY WORKS FOR THIS ACCOUNT\nNot enough published history yet. Do not claim a pattern; ` +
         `suggest what suits the business and say so plainly.`,
+    // The loop's own memory, kept separate from the account's raw numbers:
+    // these are results of decisions this portal made, which is what makes
+    // this month's advice different from last month's.
+    b.lessons.length
+      ? `WHAT WE HAVE LEARNED FROM WHAT WE MADE (measured, not guessed)\n` +
+        b.lessons.map((l) => `- ${l}`).join("\n")
+      : "",
     b.rules ?? "",
   ]
     .filter(Boolean)
@@ -297,10 +325,16 @@ export async function contentIdeas(clientId: number, count = 10): Promise<Idea[]
     [
       `Give ${n} content ideas for ${b.client}.`,
       "",
+      // The type is what the loop records and measures, so it has to come back
+      // as one of these exact keys rather than as a description of one.
+      `Every idea must name its type, exactly one of these keys:`,
+      CONTENT_TYPES.map((t) => `  ${t.key} — ${t.label}: ${t.what}`).join("\n"),
+      "",
       "Reply as JSON:",
       '{ "ideas": [{',
       '  "topic": "the subject in a few words",',
       '  "hook": "the first line, as it would be spoken or shown",',
+      '  "type": "one of the keys above",',
       '  "format": "Reel | Carousel | Post | Story",',
       '  "audience": "who this one is for",',
       '  "cta": "the call to action",',
@@ -311,15 +345,23 @@ export async function contentIdeas(clientId: number, count = 10): Promise<Idea[]
   );
   if (!data || !Array.isArray(data.ideas)) return null;
 
-  return (data.ideas as Record<string, unknown>[]).map((i) => ({
-    topic: asStr(i.topic),
-    hook: asStr(i.hook),
-    format: asStr(i.format) || "Reel",
-    audience: asStr(i.audience),
-    cta: asStr(i.cta),
-    why: asStr(i.why),
-    potential: asStr(i.potential).toLowerCase() || "medium",
-  }));
+  return (data.ideas as Record<string, unknown>[]).map((i) => {
+    // Falls back to the default rather than storing whatever came back — an
+    // unrecognised key would be recorded and then silently ignored by every
+    // read, which looks exactly like a format that never performs.
+    const kind = contentType(asStr(i.type));
+    return {
+      topic: asStr(i.topic),
+      hook: asStr(i.hook),
+      type: kind.key,
+      typeLabel: kind.label,
+      format: asStr(i.format) || "Reel",
+      audience: asStr(i.audience),
+      cta: asStr(i.cta),
+      why: asStr(i.why),
+      potential: asStr(i.potential).toLowerCase() || "medium",
+    };
+  });
 }
 
 /* ------------------------------ 3. Scripts ------------------------------ */
@@ -728,8 +770,9 @@ export async function ideaToTask(input: {
   const res = await execute(
     `INSERT INTO deliverables
        (client_id, title, description, content_hook, platform, service, content_category,
-        video_type, target_audience, due_date, priority, status, month_key, created_by, assigned_to)
-     VALUES (?,?,?,?,'instagram','video_editing',?,?,?,?,'medium','pending',?,?,?)`,
+        content_type, video_type, target_audience, due_date, priority, status, month_key,
+        created_by, assigned_to)
+     VALUES (?,?,?,?,'instagram','video_editing',?,?,?,?,?,'medium','pending',?,?,?)`,
     [
       input.clientId,
       input.idea.topic.slice(0, 255),
@@ -741,6 +784,15 @@ export async function ideaToTask(input: {
         .slice(0, 2000),
       input.idea.hook.slice(0, 1000),
       category,
+      /*
+       * The decision, written down.
+       *
+       * This one column is what closes the loop: when this post has results,
+       * `learning.ts` reads them back by this key and the next brief is
+       * written knowing whether a myths reel was worth making. Without it the
+       * task says "Instagram Reel" — which is a taxonomy, not a decision.
+       */
+      contentType(input.idea.type).key,
       category,
       input.idea.audience.slice(0, 255),
       input.dueDate || null,
@@ -793,22 +845,30 @@ export type PosterContent = {
  */
 export async function posterContent(
   clientId: number,
-  input: { topic: string; occasion?: string | null }
+  input: { topic: string; occasion?: string | null; kind?: string | null }
 ): Promise<PosterContent | null> {
   const b = await buildBrief(clientId);
   if (!b) return null;
+
+  // Same rule as a reel: the kind is chosen first and it decides the shape.
+  // An offer poster and a festival greeting are not the same poster with
+  // different words in it.
+  const kind = posterKind(input.kind);
 
   const data = await generate(
     b,
     [
       "You write the copy that goes on a printed or social poster for a business.",
       "A poster is read at a glance: the headline is at most 8 words, the supporting text at most 20.",
+      `THIS ONE IS A ${kind.label.toUpperCase()} — ${kind.what} ${kind.shape}`,
+      `What it asks of somebody who stops: ${kind.ask}`,
       "Write in the language and tone the brief describes.",
       "The call to action must be one the client already uses.",
       "Reply with JSON only.",
     ].join(" "),
     [
       `Poster for ${b.client}. Subject: ${input.topic}`,
+      `Kind: ${kind.label} — ${kind.what}`,
       input.occasion ? `Occasion: ${input.occasion}` : "",
       "",
       "Reply as JSON:",

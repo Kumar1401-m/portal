@@ -5,8 +5,10 @@ import { Sparkles, Loader2, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { POSTER_KINDS } from "@/lib/content-kinds";
 import { draftPosterContentAction, sharePosterWithDesigner } from "./actions";
 
 /**
@@ -32,6 +34,7 @@ export function PosterContentPanel({
   initialBrief: string;
 }) {
   const [topic, setTopic] = useState(title);
+  const [kind, setKind] = useState(POSTER_KINDS[0].key);
   const [brief, setBrief] = useState(initialBrief);
   const [pending, start] = useTransition();
   const toast = useToast();
@@ -55,12 +58,32 @@ export function PosterContentPanel({
             placeholder="Diwali offer on full body check-up"
           />
         </div>
+        {/* An offer poster and a festival greeting are not the same poster
+            with different words on it — and the kind is what the loop later
+            measures the result by. */}
+        <div className="min-w-40 space-y-1">
+          <Label htmlFor={`k-${deliverableId}`} className="text-xs">
+            Kind of poster
+          </Label>
+          <Select
+            id={`k-${deliverableId}`}
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+            className="h-9 text-sm"
+          >
+            {POSTER_KINDS.map((k) => (
+              <option key={k.key} value={k.key}>
+                {k.label}
+              </option>
+            ))}
+          </Select>
+        </div>
         <button
           type="button"
           disabled={pending}
           onClick={() =>
             start(async () => {
-              const res = await draftPosterContentAction(deliverableId, topic);
+              const res = await draftPosterContentAction(deliverableId, topic, kind);
               if (res.ok) setBrief(res.brief);
               else toast({ title: "Not drafted", description: res.error, tone: "error", ack: true });
             })
