@@ -10,7 +10,15 @@ import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
 import { EditVideoModal } from "../../deliverables/edit-video-modal";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
-import { contentStatusLabel, editorStatusLabel, posterStageLabel } from "@/lib/constants";
+import {
+  contentStatusLabel,
+  contentStatusTone,
+  editorStatusLabel,
+  editorStatusTone,
+  posterStageLabel,
+  type BadgeTone,
+} from "@/lib/constants";
+import { Badge } from "@/components/ui/badge";
 import { monthKey } from "@/lib/utils";
 import { buildMonthlyReport, renderReportText } from "@/lib/monthly-report";
 import { MonthlyReportCard } from "./report-card";
@@ -59,24 +67,30 @@ function promoColour(name: string) {
 }
 
 /**
- * Green when the stage is done, amber while it's in flight.
+ * A status, in the portal's own colours.
  *
- * Deliberately allowed to wrap: a nowrap pill can't shrink below its text, and
- * thirteen of those between them pushed the table wider than the page.
+ * This page used to paint every pill one of two colours: green when the work
+ * was finished, amber for everything else. So "Changes requested" — somebody
+ * has rejected the work and it has to be done again — looked exactly like
+ * "Editing", which is the work going normally. The two states it matters most
+ * to tell apart were the two that matched.
+ *
+ * The tones the rest of the portal uses already draw those distinctions:
+ * finished is green, a change request or a rejection is red, work sitting with
+ * a person is violet, work being done right now is blue. Using them here means
+ * one status has one colour wherever it is shown, rather than a colour per
+ * page.
+ *
+ * Allowed to wrap, still: a nowrap pill cannot shrink below its own text, and
+ * a row of those pushed the table wider than the page.
  */
-function StatusPill({ text, done }: { text: string; done: boolean }) {
+function StatusPill({ text, tone }: { text: string; tone: BadgeTone }) {
   return (
-    <span
-      className={`inline-block rounded-full px-2 py-1 text-center text-xs font-medium text-white ${
-        done ? "bg-green-600" : "bg-amber-500"
-      }`}
-    >
+    <Badge tone={tone} className="whitespace-normal text-center">
       {text}
-    </span>
+    </Badge>
   );
 }
-
-const DONE_STATUSES = ["approved", "scheduled", "posted", "completed"];
 
 export default async function ClientReportPage({
   params,
@@ -271,7 +285,6 @@ export default async function ClientReportPage({
               ) : (
                 tasks.map((t, i) => {
                   const svc = SERVICES[serviceOf(t)];
-                  const done = DONE_STATUSES.includes(t.status);
                   // A poster is not filmed and not edited, so it is not
                   // described in those words anywhere on this row.
                   const isPoster = serviceOf(t) === "poster_designing";
@@ -369,7 +382,10 @@ export default async function ClientReportPage({
                         <span className="block truncate">{t.description || "—"}</span>
                       </td>
                       <td className="hidden px-2 py-3 align-top md:table-cell">
-                        <StatusPill text={contentStatusLabel(t.status)} done={done} />
+                        <StatusPill
+                          text={contentStatusLabel(t.status)}
+                          tone={contentStatusTone(t.status)}
+                        />
                       </td>
                       {/* The stage, in the words of the work it describes: a
                           poster handed to its designer read "Awaiting raw"
@@ -377,7 +393,7 @@ export default async function ClientReportPage({
                       <td className="px-2 py-3 align-top">
                         <StatusPill
                           text={isPoster ? posterStageLabel(t.status) : editorStatusLabel(t.status)}
-                          done={done}
+                          tone={editorStatusTone(t.status)}
                         />
                       </td>
                       <td

@@ -110,7 +110,9 @@ export type BadgeTone =
 export function contentStatusTone(status: string): BadgeTone {
   if (["approved", "scheduled", "posted", "completed"].includes(status)) return "success";
   if (["content_review", "review"].includes(status)) return "warning";
-  if (status === "changes_requested") return "danger";
+  // Rejected sat in the grey with "not started yet", so the one outcome that
+  // needs somebody to do something looked like the absence of news.
+  if (["changes_requested", "rejected"].includes(status)) return "danger";
   if (["waiting_for_raw", "raw_uploaded", "editing", "caption_ready", "resolved"].includes(status))
     return "info";
   return "muted";

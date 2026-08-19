@@ -341,5 +341,46 @@ await clean();
   ok("a poster is never asked for a shoot, and never told it is awaiting raw footage");
 }
 
+/* ---------------- one status, one colour, everywhere ---------------- */
+{
+  const { contentStatusTone, editorStatusTone } = await load("lib/constants.ts");
+
+  /*
+   * The report painted every pill one of two colours — green when finished,
+   * amber for everything else — so "Changes requested" and "Editing" were the
+   * same shade. Somebody has rejected the work and it has to be done again,
+   * against the work going along normally: the two states it matters most to
+   * tell apart were the two that matched.
+   */
+  const report = read("app/(app)/reports/[id]/page.tsx");
+  assert.ok(!/bg-amber-500/.test(report), "no page-local amber pill");
+  assert.ok(!/bg-green-600/.test(report), "nor a page-local green one");
+  assert.match(report, /tone=\{contentStatusTone\(t\.status\)\}/, "the tone comes from the status");
+  assert.match(report, /tone=\{editorStatusTone\(t\.status\)\}/);
+
+  // Anything needing somebody to act is red, and never the grey that reads as
+  // "nothing has happened yet".
+  for (const bad of ["changes_requested", "rejected"]) {
+    assert.equal(contentStatusTone(bad), "danger", `${bad} is red on the content track`);
+    assert.equal(editorStatusTone(bad), "danger", `${bad} is red on the work track`);
+  }
+  // And the states that must not look alike, do not.
+  const apart = [
+    ["approved", "changes_requested"],
+    ["editing", "changes_requested"],
+    ["editing", "approved"],
+    ["waiting_for_raw", "editing"],
+    ["pending", "approved"],
+  ];
+  for (const [a, b] of apart) {
+    assert.notEqual(
+      editorStatusTone(a),
+      editorStatusTone(b),
+      `"${a}" and "${b}" are the same colour, which is how one gets read as the other`
+    );
+  }
+  ok("a change request is red, work in progress is not, and no two outcomes share a colour");
+}
+
 await clean();
 await finish(pass);
