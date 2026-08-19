@@ -304,15 +304,37 @@ await clean();
   }
 
   const report = read("app/(app)/reports/[id]/page.tsx");
-  // Three columns that said "—" on every poster are one column that shows
-  // what the row actually has.
-  assert.ok(!/>Shoot Link</.test(report), "no Shoot Link column");
-  assert.ok(!/>Editor Link</.test(report), "no Editor Link column");
   assert.match(report, /const isPoster = serviceOf\(t\) === "poster_designing"/, "the row knows what it is");
-  assert.match(report, /!isPoster && t\.raw_drive_link/, "a shoot link is offered only where there is a shoot");
-  assert.match(report, /isPoster \? "Design" : "Video"/, "and the finished file is named for what it is");
+
+  /*
+   * Shoot and Edited are separate columns — merging them into one "Files"
+   * column saved a column and cost the thing the column is for, since
+   * "has the footage come in" and "is the edit done" are asked by different
+   * people on different days.
+   *
+   * What a poster must never get is a shoot link, because nobody films one.
+   */
+  assert.match(report, />\s*Shoot\s*<\/th>/, "a Shoot column");
+  assert.match(report, />\s*Edited\s*<\/th>/, "and an Edited column beside it");
+  assert.match(
+    report,
+    /isPoster \? \(\s*<span className="text-xs text-muted-foreground">n\/a<\/span>/,
+    "a poster is told the shoot does not apply, never offered one"
+  );
   assert.match(report, /isPoster \? posterStageLabel/, "the stage is said in the right words");
-  assert.match(report, /colSpan=\{11\}/, "the empty state spans the columns that exist");
+
+  // Every row has to have as many cells as there are headings.
+  const head = report.match(/<thead[\s\S]*?<\/thead>/)[0];
+  const headings = (head.match(/<th[\s>]/g) || []).length;
+  assert.equal(headings, 12, "twelve columns");
+  const widths = [...head.matchAll(/width: "(\d+)%"/g)].map((m) => Number(m[1]));
+  assert.equal(widths.length, headings, "every column has a width");
+  assert.equal(
+    widths.reduce((a, b) => a + b, 0),
+    100,
+    `the percentages add to ${widths.reduce((a, b) => a + b, 0)}, not 100`
+  );
+  assert.match(report, new RegExp(`colSpan=\\{${headings}\\}`), "the empty state spans them all");
 
   // The board the designers themselves live on had the same problem.
   assert.match(read("app/(app)/poster/page.tsx"), /posterStageLabel\(p\.status\)/);

@@ -226,20 +226,33 @@ export default async function ClientReportPage({
                   Date
                 </th>
                 <th style={{ width: "18%" }}>Title</th>
-                <th style={{ width: "8%" }} className="hidden xl:table-cell">
+                <th style={{ width: "7%" }} className="hidden xl:table-cell">
                   Promotion
                 </th>
-                <th style={{ width: "7%" }} className="hidden md:table-cell">
-                  Files
+                {/*
+                  Two columns, one word each.
+
+                  Merging them into "Files" saved a column and cost the thing
+                  the column is for: whether the footage has come in is a
+                  different question from whether the edit is done, and they
+                  get asked by different people on different days. So they are
+                  separate again — the poster rows simply have nothing under
+                  Shoot, because nobody films a poster.
+                */}
+                <th style={{ width: "5%" }} className="hidden md:table-cell">
+                  Shoot
                 </th>
-                <th style={{ width: "12%" }} className="hidden lg:table-cell">
+                <th style={{ width: "6%" }} className="hidden md:table-cell">
+                  Edited
+                </th>
+                <th style={{ width: "10%" }} className="hidden lg:table-cell">
                   Brief
                 </th>
                 <th style={{ width: "11%" }} className="hidden md:table-cell">
                   Content status
                 </th>
                 <th style={{ width: "12%" }}>Stage</th>
-                <th style={{ width: "8%" }} className="hidden lg:table-cell">
+                <th style={{ width: "7%" }} className="hidden lg:table-cell">
                   Remarks
                 </th>
                 <th style={{ width: "4%" }} className="text-right">
@@ -250,7 +263,7 @@ export default async function ClientReportPage({
             <tbody>
               {tasks.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-2 py-10 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-2 py-10 text-center text-muted-foreground">
                     No tasks for {client.company_name} this month. Anything you create for them
                     shows up here.
                   </td>
@@ -297,32 +310,44 @@ export default async function ClientReportPage({
                         )}
                       </td>
                       {/*
-                        One column for everything attached to the row, naming
-                        what each link is. A poster has a design and never a
-                        shoot; a video may have all three.
+                        The footage. A poster has none and never will, so the
+                        cell says so rather than offering a link that cannot
+                        exist — this column asked every poster for a shoot.
                       */}
                       <td className="hidden px-2 py-3 align-top md:table-cell">
+                        {isPoster ? (
+                          <span className="text-xs text-muted-foreground">n/a</span>
+                        ) : t.raw_drive_link ? (
+                          <a
+                            href={t.raw_drive_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 underline"
+                          >
+                            View
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* The finished thing: the cut for a video, the artwork
+                          for a poster. Both arrive in the same column, so the
+                          thumbnail sits with it rather than in a column of its
+                          own that was empty on most rows. */}
+                      <td className="hidden px-2 py-3 align-top md:table-cell">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          {!isPoster && t.raw_drive_link ? (
-                            <a
-                              href={t.raw_drive_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-xs text-blue-600 underline"
-                            >
-                              Shoot
-                            </a>
-                          ) : null}
                           {t.edited_link ? (
                             <a
                               href={t.edited_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-xs text-blue-600 underline"
+                              className="text-blue-600 underline"
                             >
-                              {isPoster ? "Design" : "Video"}
+                              View
                             </a>
-                          ) : null}
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                           {t.thumbnail_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -330,9 +355,6 @@ export default async function ClientReportPage({
                               alt=""
                               className="h-8 w-12 rounded object-cover"
                             />
-                          ) : null}
-                          {!t.edited_link && !t.thumbnail_url && (isPoster || !t.raw_drive_link) ? (
-                            <span className="text-muted-foreground">—</span>
                           ) : null}
                         </div>
                       </td>
