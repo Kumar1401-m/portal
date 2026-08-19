@@ -41,6 +41,7 @@ export type EngineKey =
   | "task_assignment"
   | "deadline"
   | "thumbnails"
+  | "posters"
   | "seo"
   | "sentiment"
   | "business_advisor"
@@ -202,6 +203,14 @@ export const ENGINES: Engine[] = [
     key: "thumbnails",
     label: "Thumbnail Assistant",
     purpose: "Title, expression and layout concepts in the brand colours",
+    module: "lib/content-ai.ts",
+    needs: [],
+    built: true,
+  },
+  {
+    key: "posters",
+    label: "Poster Writer",
+    purpose: "What goes on a poster, shaped by the kind of poster it is",
     module: "lib/content-ai.ts",
     needs: [],
     built: true,

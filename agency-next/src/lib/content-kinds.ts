@@ -352,6 +352,25 @@ export const posterKind = (key?: string | null): PosterKind =>
   POSTER_KINDS.find((k) => k.key === key) ?? POSTER_KINDS[0];
 
 /**
+ * One poster worth making, before anybody writes what goes on it.
+ *
+ * The poster half of `Idea`. It carries its kind for the same reason a content
+ * idea carries its type: that is what gets recorded on the task and what the
+ * result is measured by months later.
+ */
+export type PosterIdea = {
+  topic: string;
+  kind: string;
+  kindLabel: string;
+  /** The big line, as it would appear. */
+  headline: string;
+  visual: string;
+  /** The date or event it hangs on, if any. */
+  occasion: string;
+  why: string;
+};
+
+/**
  * Every format key the portal records against a task, reel and poster alike.
  *
  * The loop reads results back by this key, and it is the guard on a column

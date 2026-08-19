@@ -208,5 +208,74 @@ await clean();
   ok("the decision is recorded, read back by known keys, and fed into the next brief");
 }
 
+/* ---------------- posters go round the same loop ---------------- */
+{
+  const ai = await load("lib/content-ai.ts");
+  const clientId = Number(
+    (await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ loop client','active')"))
+      .insertId
+  );
+
+  const id = await ai.posterToTask({
+    clientId,
+    idea: {
+      topic: "ZZ Sankranti greeting",
+      kind: "festival",
+      kindLabel: "Festival greeting",
+      headline: "Bring prosperity home",
+      visual: "Rangoli and a sugarcane border",
+      occasion: "Makar Sankranti",
+      why: "Their strongest month last year",
+    },
+    brief: "HEADLINE: Bring prosperity home",
+    createdBy: 1,
+  });
+  assert.ok(id > 0, "the poster becomes a real task");
+
+  const row = await db.queryOne(
+    "SELECT title, service, content_category, content_type, status, description FROM deliverables WHERE id = ?",
+    [id]
+  );
+  // It has to land in the designer's queue like any other poster, or the
+  // hand-off built for posters does not pick it up.
+  assert.equal(row.service, "poster_designing", "it is poster work");
+  assert.equal(row.content_category, "Poster");
+  assert.equal(row.status, "pending", "ordinary planned work, not something special");
+  assert.equal(row.content_type, "festival", "and the kind is recorded, for the loop to read back");
+  assert.match(row.description, /HEADLINE/, "the brief travels with it");
+  assert.match(row.description, /VISUAL: Rangoli/, "and so does what to draw");
+
+  // An unknown kind must never be stored: it would be recorded and then
+  // ignored by every read, which looks exactly like a kind that never works.
+  const junk = await ai.posterToTask({
+    clientId,
+    idea: { topic: "ZZ junk", kind: "nonsense", kindLabel: "", headline: "", visual: "", occasion: "", why: "" },
+    createdBy: 1,
+  });
+  const j = await db.queryOne("SELECT content_type FROM deliverables WHERE id = ?", [junk]);
+  assert.ok(
+    kinds.ALL_FORMAT_KEYS.includes(j.content_type),
+    `stored "${j.content_type}", which no read will ever match`
+  );
+
+  // And the poster kinds are measured by exactly the same code as the reels.
+  await db.execute(
+    `INSERT INTO post_insights
+       (client_id, deliverable_id, platform, media_id, media_type, published_at, snapshot_date,
+        reach, likes, comments, saves, shares, total_interactions, engagement_rate)
+     VALUES (?,?,'instagram',?,'IMAGE', NOW(), CURDATE(), 1000,0,0,0,0,50,5)`,
+    [clientId, id, "zz-poster-1"]
+  );
+  const l = await L.learned(clientId);
+  assert.ok(
+    l.formats.some((f) => f.key === "festival"),
+    "a poster's result is read back beside the reels"
+  );
+  assert.equal(l.formats.find((f) => f.key === "festival").label, "Festival greeting");
+
+  await db.execute("DELETE FROM post_insights WHERE media_id = 'zz-poster-1'");
+  ok("a poster idea becomes a task, keeps its kind, and comes back through the same loop");
+}
+
 await clean();
 await finish(pass);

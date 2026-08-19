@@ -12,6 +12,7 @@ import {
   Lightbulb,
   FileText,
   ImageIcon,
+  ImagePlus,
   Search,
   CalendarRange,
   Swords,
@@ -47,13 +48,15 @@ import {
   ideaToTaskAction,
 } from "./actions";
 import { RivalsPanel, CommentsPanel } from "./outside";
+import { PostersPanel } from "./posters";
 
-type Tab = "strategy" | "ideas" | "script" | "thumbnail" | "seo" | "rivals" | "comments";
+type Tab = "strategy" | "ideas" | "script" | "poster" | "thumbnail" | "seo" | "rivals" | "comments";
 
 const TABS: { key: Tab; label: string; Icon: typeof Lightbulb }[] = [
   { key: "strategy", label: "Strategy", Icon: CalendarRange },
   { key: "ideas", label: "Ideas", Icon: Lightbulb },
   { key: "script", label: "Script", Icon: FileText },
+  { key: "poster", label: "Poster", Icon: ImagePlus },
   { key: "thumbnail", label: "Thumbnail", Icon: ImageIcon },
   { key: "seo", label: "SEO", Icon: Search },
   { key: "rivals", label: "Rivals", Icon: Swords },
@@ -151,6 +154,7 @@ export function Studio({
       ) : null}
       {tab === "ideas" ? <IdeasPanel clientId={clientId} /> : null}
       {tab === "script" ? <ScriptPanel clientId={clientId} clientName={clientName} /> : null}
+      {tab === "poster" ? <PostersPanel clientId={clientId} /> : null}
       {tab === "thumbnail" ? <ThumbnailPanel clientId={clientId} /> : null}
       {tab === "seo" ? <SeoPanel clientId={clientId} city={city} /> : null}
       {tab === "rivals" ? <RivalsPanel clientId={clientId} /> : null}

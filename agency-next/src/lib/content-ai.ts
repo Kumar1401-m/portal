@@ -51,8 +51,10 @@ import {
   type SeoPack,
   ENGAGEMENT_ASKS,
   CONTENT_TYPES,
+  POSTER_KINDS,
   contentType,
   posterKind,
+  type PosterIdea,
   scriptPlan,
   wordFloor,
   countWords,
@@ -893,6 +895,110 @@ export async function posterContent(
     elements: asList(data.elements),
   };
   return out.headline || out.subtext ? out : null;
+}
+
+/**
+ * What posters to make, before what goes on them.
+ *
+ * The same tool the video side has had all along, and posters needed it more:
+ * a month of posters is where an agency repeats itself fastest, because
+ * "festival poster" writes itself and nothing else gets suggested. Each idea
+ * names its kind, so the one that becomes a task carries it — and the loop
+ * measures which kinds this client's audience actually stops for.
+ */
+export async function posterIdeas(clientId: number, count = 8): Promise<PosterIdea[] | null> {
+  const b = await buildBrief(clientId);
+  if (!b) return null;
+
+  const n = Math.min(15, Math.max(3, count));
+  const data = await generate(
+    b,
+    [
+      "You plan the posters a local business puts out.",
+      "A poster is read across a room in about a second — every idea has to survive that.",
+      "Every idea must be specific to this business. Never one that would fit any shop.",
+      "Spread the kinds: a month of nothing but offers reads as a business in trouble.",
+      "Reply with JSON only.",
+    ].join(" "),
+    [
+      `Give ${n} poster ideas for ${b.client}.`,
+      "",
+      "Every idea names its kind, exactly one of these keys:",
+      POSTER_KINDS.map((k) => `  ${k.key} — ${k.label}: ${k.what}`).join("\n"),
+      "",
+      "Reply as JSON:",
+      '{ "ideas": [{',
+      '  "topic": "what this poster is about, in a few words",',
+      '  "kind": "one of the keys above",',
+      '  "headline": "the big line as it would appear, at most 8 words",',
+      '  "visual": "what the designer draws or photographs",',
+      '  "occasion": "the date or event it hangs on, or empty",',
+      '  "why": "the reason for this one, citing the brief above"',
+      "}] }",
+    ].join("\n")
+  );
+  if (!data || !Array.isArray(data.ideas)) return null;
+
+  return (data.ideas as Record<string, unknown>[]).map((i) => {
+    // Resolved to a known key rather than stored raw: an unrecognised kind
+    // would be recorded and then ignored by every read, which looks exactly
+    // like a kind that never performs.
+    const kind = posterKind(asStr(i.kind));
+    return {
+      topic: asStr(i.topic),
+      kind: kind.key,
+      kindLabel: kind.label,
+      headline: asStr(i.headline),
+      visual: asStr(i.visual),
+      occasion: asStr(i.occasion),
+      why: asStr(i.why),
+    };
+  });
+}
+
+/**
+ * A poster idea, onto the board, with its kind and its copy on it.
+ *
+ * The poster equivalent of `ideaToTask`, and the same reasoning: a list of
+ * ideas with no way out of it is a list somebody retypes into the board, which
+ * is where good ideas stop. It lands as an ordinary poster task in the
+ * designer's service, so the existing hand-off — brief, design, approval —
+ * picks it up unchanged.
+ */
+export async function posterToTask(input: {
+  clientId: number;
+  idea: PosterIdea;
+  brief?: string | null;
+  dueDate?: string | null;
+  createdBy: number;
+  assignedTo?: number | null;
+}): Promise<number> {
+  const res = await execute(
+    `INSERT INTO deliverables
+       (client_id, title, description, platform, service, content_category, content_type,
+        video_type, due_date, priority, status, month_key, created_by, assigned_to)
+     VALUES (?,?,?,'instagram','poster_designing','Poster',?,'Poster',?,'medium','pending',?,?,?)`,
+    [
+      input.clientId,
+      input.idea.topic.slice(0, 255),
+      // The brief travels with the task: a poster that reaches a designer as a
+      // title and a due date is a poster they have to invent the copy for.
+      [
+        input.brief?.trim() || null,
+        input.idea.visual ? `VISUAL: ${input.idea.visual}` : null,
+        input.idea.why ? `WHY: ${input.idea.why}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+        .slice(0, 2000),
+      posterKind(input.idea.kind).key,
+      input.dueDate || null,
+      input.dueDate ? input.dueDate.slice(0, 7) : thisMonthKey(),
+      input.createdBy,
+      input.assignedTo ?? null,
+    ]
+  );
+  return Number(res.insertId) || 0;
 }
 
 /** The poster content as the brief a designer reads on their card. */

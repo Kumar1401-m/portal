@@ -13,7 +13,12 @@ import {
   seoPack,
   saveScript,
   ideaToTask,
+  posterContent,
+  posterIdeas,
+  posterToTask,
+  renderPosterBrief,
   type Idea,
+  type PosterIdea,
   type Script,
   type ScriptInput,
   type ScriptSection,
@@ -153,5 +158,66 @@ export async function ideaToTaskAction(
   const id = await ideaToTask({ clientId, idea, dueDate: dueDate || null, createdBy: user.id });
   revalidatePath("/deliverables");
   revalidatePath(`/clients/${clientId}`);
+  return id ? { ok: true, data: id } : { ok: false, error: "Couldn't create the task." };
+}
+
+
+/* ------------------------------ Posters ------------------------------ */
+
+/**
+ * The poster half of the studio.
+ *
+ * The same two steps the video side has — what to make, then what goes on
+ * it — because a poster brief written on the way to the designer is where
+ * the month's posters all end up saying the same thing.
+ */
+export async function posterIdeasAction(clientId: number, count: number): Promise<Result<unknown>> {
+  const { error } = await allow(clientId, "posters");
+  if (error) return { ok: false, error };
+
+  const data = await posterIdeas(clientId, count).catch(() => null);
+  return data?.length ? { ok: true, data } : { ok: false, error: REFUSED };
+}
+
+export async function posterCopyAction(
+  clientId: number,
+  input: { topic: string; kind?: string; occasion?: string }
+): Promise<Result<unknown>> {
+  const { error } = await allow(clientId, "posters");
+  if (error) return { ok: false, error };
+  if (!input.topic?.trim()) return { ok: false, error: "What is the poster about?" };
+
+  const data = await posterContent(clientId, {
+    topic: input.topic,
+    kind: input.kind,
+    occasion: input.occasion?.trim() || null,
+  }).catch(() => null);
+  return data
+    ? { ok: true, data: { ...data, brief: renderPosterBrief(data) } }
+    : { ok: false, error: REFUSED };
+}
+
+/** A poster idea onto the board, with its kind and its brief on it. */
+export async function posterToTaskAction(
+  clientId: number,
+  idea: PosterIdea,
+  brief?: string,
+  dueDate?: string
+): Promise<Result<number>> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  if (!(await canAccessClient(user, clientId))) {
+    return { ok: false, error: "That client isn't one of yours." };
+  }
+  if (!idea?.topic?.trim()) return { ok: false, error: "That idea has no topic." };
+
+  const id = await posterToTask({
+    clientId,
+    idea,
+    brief: brief || null,
+    dueDate: dueDate || null,
+    createdBy: user.id,
+  });
+  revalidatePath("/poster");
+  revalidatePath("/deliverables");
   return id ? { ok: true, data: id } : { ok: false, error: "Couldn't create the task." };
 }
