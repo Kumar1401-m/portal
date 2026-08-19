@@ -213,15 +213,34 @@ await clean();
     posts: null, audience: [], ads: null,
   };
 
+  /*
+   * A link only where a file cannot follow.
+   *
+   * The send-by-hand path attaches the PDF to the same group a second later,
+   * so its message carries no link — pointing at a document the client already
+   * has is noise in something read on a phone. The scheduled batch goes
+   * through the outbox, which sends text and nothing else, so that one still
+   * needs somewhere to point.
+   */
+  const byHand = read("app/(app)/reports/[id]/actions.ts");
+  assert.match(byHand, /body: renderReportText\(report\),/, "the message sent by hand has no link");
+  assert.match(byHand, /url: reportLink\(clientId, month\)/, "the file is rendered from it instead");
+
+  const batch = read("lib/monthly-report.ts");
+  assert.match(
+    batch,
+    /body: renderReportText\(report, reportLink\(c\.id, month\)\)/,
+    "the queued batch, which cannot attach anything, still carries a link"
+  );
+
   const withLink = report.renderReportText(summary, "https://example.com/report/1?k=abc");
-  assert.match(withLink, /https:\/\/example\.com\/report\/1\?k=abc/, "the message carries the document");
+  assert.match(withLink, /https:\/\/example\.com\/report\/1\?k=abc/, "and it appears when passed");
   assert.match(withLink, /full report/i, "and says what it is");
 
-  // Still fine without one — the batch and the by-hand send both pass a link,
-  // but a caller that doesn't must not print "undefined" to a client.
   const bare = report.renderReportText(summary);
   assert.ok(!/undefined|null/.test(bare), "no link, no debris");
-  assert.ok(!/full report/i.test(bare));
+  assert.ok(!/full report/i.test(bare), "and no empty section where one would have been");
+  assert.ok(!/https?:\/\//.test(bare.replace(/Best performing post.*/g, "")), "nothing to tap at all");
 
   const messages = await load("lib/reminder-messages.ts");
   const one = messages.invoiceText([
@@ -288,7 +307,11 @@ await clean();
   // A failed attachment on a report the client has already received is a
   // partial success, not a failure — and the message still carries the link.
   assert.match(send, /didn't attach/, "an attachment that fails says so without crying wolf");
-  assert.match(send, /ok: true,\s*\n\s*message: `Sent to \$\{group\.label\}, but the PDF/);
+  assert.match(
+    send,
+    /ok: true,\s*\n\s*message: `The message went to/,
+    "and still reports the report as sent, because it was"
+  );
   ok("the PDF is rendered from the client's own link and attached after the message");
 }
 

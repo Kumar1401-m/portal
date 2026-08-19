@@ -40,7 +40,9 @@ export async function sendMonthlyReportAction(clientId: number, month: string): 
     clientId,
     groupId: group.groupId,
     groupLabel: group.label,
-    body: renderReportText(report, reportLink(clientId, month)),
+    // No link in the message: the PDF itself follows it into the same group a
+    // second later, and pointing at a document somebody already has is noise.
+    body: renderReportText(report),
     createdBy: user.id,
     createdByName: user.name,
   });
@@ -62,8 +64,8 @@ export async function sendMonthlyReportAction(clientId: number, month: string): 
    *
    * A failure here is reported as a partial success rather than a failure.
    * "Not sent" about a report the client has just received is worse than no
-   * message at all, and the summary already carries the link, so nothing is
-   * actually lost — only the convenience of the attachment.
+   * message at all — the summary went, which is what the client read every
+   * month before there was a file at all.
    */
   const doc = await sendDocumentToGroup({
     groupId: group.groupId,
@@ -75,7 +77,7 @@ export async function sendMonthlyReportAction(clientId: number, month: string): 
   if (!doc.ok) {
     return {
       ok: true,
-      message: `Sent to ${group.label}, but the PDF didn't attach: ${doc.error} The link in the message still works.`,
+      message: `The message went to ${group.label}, but the PDF didn't attach: ${doc.error}`,
     };
   }
   return { ok: true, message: `Sent to ${group.label}, with the PDF attached.` };

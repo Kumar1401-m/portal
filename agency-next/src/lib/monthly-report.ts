@@ -227,12 +227,13 @@ export function renderReportText(r: MonthlyReport, link?: string | null): string
   }
 
   /*
-   * The document, under the summary.
+   * A link only where a file cannot follow.
    *
-   * The message is the part that gets read in the group; the link is the part
-   * that gets saved, forwarded to a partner, or opened in a review meeting six
-   * weeks later. It carries its own permission (see `doc-link.ts`) because a
-   * link that lands on a login page is a link nobody follows.
+   * The send-by-hand path attaches the PDF to the group straight after this
+   * message, so a link there would be a second way to reach a document the
+   * client already has — noise in a message they read on a phone. The
+   * scheduled batch on the 1st goes through the outbox, which sends text and
+   * nothing else, so that one still needs somewhere to point.
    */
   if (link) {
     lines.push("", `📄 *The full report*, with the charts and everything we made:`, link);
