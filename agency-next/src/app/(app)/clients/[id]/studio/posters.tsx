@@ -8,7 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { POSTER_KINDS, posterKind, type PosterIdea } from "@/lib/content-kinds";
+import {
+  POSTER_KINDS,
+  SCRIPT_LANGUAGES,
+  countWords,
+  posterKind,
+  type PosterIdea,
+} from "@/lib/content-kinds";
 import { posterIdeasAction, posterCopyAction, posterToTaskAction } from "./actions";
 
 type Copy = {
@@ -18,6 +24,9 @@ type Copy = {
   visual: string;
   elements: string[];
   brief: string;
+  altHeadlines: string[];
+  headlineWords: number;
+  long: boolean;
 };
 
 /**
@@ -48,6 +57,7 @@ function PosterWriter({ clientId }: { clientId: number }) {
   const [topic, setTopic] = useState("");
   const [kind, setKind] = useState(POSTER_KINDS[0].key);
   const [occasion, setOccasion] = useState("");
+  const [language, setLanguage] = useState<string>("English");
   const [copy, setCopy] = useState<Copy | null>(null);
   const [pending, start] = useTransition();
   const toast = useToast();
@@ -86,6 +96,18 @@ function PosterWriter({ clientId }: { clientId: number }) {
               placeholder="Diwali, 20 October"
             />
           </div>
+          {/* A poster in a shop window here is read in Telugu far more often
+              than in English, and the scripts have had this all along. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="p-lang">Language</Label>
+            <Select id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)}>
+              {SCRIPT_LANGUAGES.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+          </div>
           {/* What the chosen kind changes, said before it is generated rather
               than after — the picker is the decision, not the topic. */}
           <p className="text-xs text-muted-foreground sm:col-span-2">
@@ -97,7 +119,7 @@ function PosterWriter({ clientId }: { clientId: number }) {
               disabled={pending || !topic.trim()}
               onClick={() =>
                 start(async () => {
-                  const res = await posterCopyAction(clientId, { topic, kind, occasion });
+                  const res = await posterCopyAction(clientId, { topic, kind, occasion, language });
                   if (res.ok) setCopy(res.data as Copy);
                   else toast({ title: "Nothing came back", description: res.error, tone: "error" });
                 })
@@ -116,10 +138,39 @@ function PosterWriter({ clientId }: { clientId: number }) {
         {copy ? (
           <div className="space-y-3 rounded-lg border border-border p-4">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Headline
+                {/* The count, because "read at a glance" is a length, and a
+                    headline nobody counted is the one that runs to nine. */}
+                <span className={`font-normal normal-case tabular-nums ${copy.long ? "text-amber-600 dark:text-amber-400" : ""}`}>
+                  {copy.headlineWords} words
+                </span>
               </p>
               <p className="text-xl font-semibold leading-tight">{copy.headline}</p>
+              {copy.altHeadlines.length ? (
+                <ul className="mt-1.5 space-y-1">
+                  {copy.altHeadlines.map((h, i) => (
+                    <li key={i} className="flex items-start justify-between gap-2 text-sm">
+                      <span className="italic text-muted-foreground">{h}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCopy({
+                            ...copy,
+                            headline: h,
+                            headlineWords: countWords(h),
+                            altHeadlines: [copy.headline, ...copy.altHeadlines.filter((x) => x !== h)].slice(0, 2),
+                            brief: copy.brief.replace(/^HEADLINE: .*/m, `HEADLINE: ${h}`),
+                          })
+                        }
+                        className="shrink-0 text-xs text-primary hover:underline"
+                      >
+                        Use this
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {copy.subtext ? (
               <div>

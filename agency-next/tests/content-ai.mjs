@@ -394,4 +394,54 @@ await clean();
   ok("a short script is detected and rewritten, not shipped short");
 }
 
+/* ---------------- a poster headline is read from across a room ---------------- */
+{
+  const src = read("lib/content-ai.ts");
+  const ai = await load("lib/content-ai.ts");
+
+  /*
+   * What the copy used to come back as: "Save big on your next loan with our
+   * exclusive festive offer" — nine words, three of them adjectives, and not
+   * one fact. Three rules replaced it, and all three are checkable.
+   */
+
+  // 1. Short, and counted rather than requested. Eight words was a sentence
+  //    pretending to be a headline.
+  assert.equal(ai.POSTER_HEADLINE_WORDS, 6, "six words, not eight");
+  assert.match(src, /THE LIMITS, and they are limits rather than guidance/);
+  assert.match(src, /if \(out\.long\)/, "a long headline is measured and asked again");
+  assert.match(
+    src,
+    /if \(shorter\.headline && shorter\.headlineWords < out\.headlineWords\) out = shorter;/,
+    "and a retry that comes back longer does not replace the first"
+  );
+
+  // 2. One concrete thing, in the headline. An adjective standing where a fact
+  //    should be is the poster saying it has nothing to say.
+  assert.match(src, /EVERY POSTER CARRIES ONE CONCRETE THING/);
+  assert.match(src, /never invent a number/i, "and it may not make one up to satisfy the rule");
+
+  // 3. The words that mean nothing, refused by name.
+  for (const word of ["exclusive", "amazing", "save big", "unlock", "don't miss"]) {
+    assert.ok(
+      src.includes(`"${word}"`),
+      `"${word}" is not on the banned list, and it was in a real draft`
+    );
+  }
+  assert.match(src, /No exclamation marks/);
+
+  // Three headlines, deliberately different, because the first line a model
+  // writes is the obvious one and the obvious one is on everybody's poster.
+  assert.match(src, /Give three headlines, not one/);
+  assert.match(src, /alt_headlines/);
+
+  // And in the language the poster will actually be read in — a shop window
+  // here is Telugu far more often than English.
+  assert.match(src, /LANGUAGE_RULE\[language\] \?\? LANGUAGE_RULE\.English/);
+  const panel = read("app/(app)/clients/[id]/studio/posters.tsx");
+  assert.match(panel, /SCRIPT_LANGUAGES\.map/, "and the panel lets somebody choose it");
+  assert.match(panel, /countWords\(h\)/, "the count follows a headline that gets swapped");
+  ok("a poster headline: six words, one fact, no filler, three to choose from");
+}
+
 await finish(pass);

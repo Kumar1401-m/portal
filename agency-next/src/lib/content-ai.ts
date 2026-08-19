@@ -831,7 +831,57 @@ export type PosterContent = {
   visual: string;
   /** Anything else that must appear — logo, phone, offer. */
   elements: string[];
+  /**
+   * Two more headlines, so the best of three gets used.
+   *
+   * The single biggest lever on poster copy, and the cheapest: the first line
+   * a model writes is the obvious one, and the obvious one is what every other
+   * business in town has on its poster. Three to choose between is a decision;
+   * one is something to accept.
+   */
+  altHeadlines: string[];
+  /** Words in the headline, so "read at a glance" is checked, not requested. */
+  headlineWords: number;
+  /** True when the headline is longer than a poster headline should be. */
+  long: boolean;
 };
+
+/**
+ * What a poster headline may run to.
+ *
+ * Six, not eight. A headline is read from across a room in about a second and
+ * every word past that is one the reader does not get to — the previous limit
+ * produced "Save big on your next loan with our exclusive festive offer",
+ * which is a sentence pretending to be a headline.
+ */
+export const POSTER_HEADLINE_WORDS = 6;
+const POSTER_SUBTEXT_WORDS = 14;
+
+/**
+ * The words that make copy sound like an advert and say nothing.
+ *
+ * Every one of these was in a draft this replaced. They are all adjectives
+ * standing where a fact should be: "save big" instead of the amount, "premium
+ * quality" instead of what it is made of. A poster has room for one of the
+ * two, and the fact is the one that gets somebody to stop.
+ */
+const POSTER_FILLER = [
+  "exclusive",
+  "amazing",
+  "incredible",
+  "unbeatable",
+  "best-in-class",
+  "premium quality",
+  "save big",
+  "grab this",
+  "don't miss",
+  "hurry up",
+  "limited time only",
+  "unlock",
+  "elevate",
+  "boost your",
+  "take your ... to the next level",
+];
 
 /**
  * The words that go on a poster, for the designer to lay out.
@@ -847,7 +897,12 @@ export type PosterContent = {
  */
 export async function posterContent(
   clientId: number,
-  input: { topic: string; occasion?: string | null; kind?: string | null }
+  input: {
+    topic: string;
+    occasion?: string | null;
+    kind?: string | null;
+    language?: ScriptLanguage;
+  }
 ): Promise<PosterContent | null> {
   const b = await buildBrief(clientId);
   if (!b) return null;
@@ -856,44 +911,107 @@ export async function posterContent(
   // An offer poster and a festival greeting are not the same poster with
   // different words in it.
   const kind = posterKind(input.kind);
+  const language = (input.language ?? "English") as ScriptLanguage;
 
-  const data = await generate(
-    b,
-    [
-      "You write the copy that goes on a printed or social poster for a business.",
-      "A poster is read at a glance: the headline is at most 8 words, the supporting text at most 20.",
-      `THIS ONE IS A ${kind.label.toUpperCase()} — ${kind.what} ${kind.shape}`,
-      `What it asks of somebody who stops: ${kind.ask}`,
-      "Write in the language and tone the brief describes.",
-      "The call to action must be one the client already uses.",
-      "Reply with JSON only.",
-    ].join(" "),
+  const system = [
+    "You write the copy that goes on a printed or social poster for a local business.",
+    // The one that changed the output most. Everything else here follows from
+    // it: a poster is read from across a room, once, by somebody walking past.
+    "A poster is not an advert to read. It is one line somebody reads from across a room in a second, and everything else is for whoever has already stopped.",
+    LANGUAGE_RULE[language] ?? LANGUAGE_RULE.English,
+    `THIS ONE IS A ${kind.label.toUpperCase()} — ${kind.what} ${kind.shape}`,
+    `What it asks of somebody who stops: ${kind.ask}`,
+    /*
+     * The rule that separates poster copy from advert noise.
+     *
+     * "Save big on your next loan with our exclusive festive offer" was a real
+     * draft: nine words, three of them adjectives, and not one fact. The
+     * amount, the date, the place or the number is what makes somebody stop —
+     * an adjective standing where a fact should be is the poster saying it has
+     * nothing to say.
+     */
+    "EVERY POSTER CARRIES ONE CONCRETE THING: a price, a percentage, a date, a deadline, a place, a count or a name. Put it IN the headline, not the small print.",
+    "If the brief gives you no such fact, say so in `missing` and write the headline around what the business actually does — never invent a number.",
+    `Never use these words, they are what copy says when it has no fact: ${POSTER_FILLER.join(", ")}.`,
+    "No exclamation marks. A poster that has to shout is a poster with nothing to say.",
+    "The call to action must be one the client already uses — their number, their handle, their address.",
+    "Reply with JSON only.",
+  ].join(" ");
+
+  const ask = (extra?: string) =>
     [
       `Poster for ${b.client}. Subject: ${input.topic}`,
       `Kind: ${kind.label} — ${kind.what}`,
       input.occasion ? `Occasion: ${input.occasion}` : "",
       "",
+      `THE LIMITS, and they are limits rather than guidance:`,
+      `- Headline: at most ${POSTER_HEADLINE_WORDS} words. Fewer is better. Count them.`,
+      `- Supporting text: at most ${POSTER_SUBTEXT_WORDS} words, and it must add something the headline does not.`,
+      `- At most 4 things in "elements". A poster with ten things on it has none.`,
+      "",
+      "Give three headlines, not one, and make them genuinely different from each other:",
+      "one that leads with the concrete fact, one that names the reader's problem,",
+      "and one that is the shortest true thing you can say. Put the best first.",
+      extra ?? "",
+      "",
       "Reply as JSON:",
       "{",
-      '  "headline": "the big line, max 8 words",',
-      '  "subtext": "one or two supporting lines, max 20 words",',
-      '  "cta": "the call to action",',
-      '  "visual": "what the designer should draw or photograph",',
-      '  "elements": ["anything else that must appear on it"]',
+      `  "headline": "the big line, at most ${POSTER_HEADLINE_WORDS} words",`,
+      '  "alt_headlines": ["a second", "a third"],',
+      `  "subtext": "what the headline could not fit, at most ${POSTER_SUBTEXT_WORDS} words",`,
+      '  "cta": "the client\'s own call to action",',
+      '  "visual": "what the designer draws or photographs — one image, described plainly",',
+      '  "elements": ["logo", "phone number", "anything else that must appear"],',
+      '  "missing": "the fact this poster needed and the brief did not have, or empty"',
       "}",
     ]
       .filter(Boolean)
-      .join("\n")
-  );
-  if (!data) return null;
+      .join("\n");
 
-  const out: PosterContent = {
-    headline: asStr(data.headline),
-    subtext: asStr(data.subtext),
-    cta: asStr(data.cta),
-    visual: asStr(data.visual),
-    elements: asList(data.elements),
+  const build = (data: Record<string, unknown>): PosterContent => {
+    const headline = asStr(data.headline);
+    const words = countWords(headline);
+    return {
+      headline,
+      subtext: asStr(data.subtext),
+      cta: asStr(data.cta),
+      visual: asStr(data.visual),
+      elements: asList(data.elements).slice(0, 4),
+      altHeadlines: asList(data.alt_headlines).slice(0, 2),
+      headlineWords: words,
+      long: words > POSTER_HEADLINE_WORDS,
+    };
   };
+
+  const first = await generate(b, system, ask());
+  if (!first) return null;
+  let out = build(first);
+
+  /*
+   * Measured, then asked again — the same lesson the scripts taught.
+   *
+   * A word limit that is never checked is a suggestion, and "at most six
+   * words" came back as nine often enough to matter. One retry naming the
+   * count costs a second call on the drafts that need it and nothing on the
+   * ones that don't; a shorter headline that comes back is kept, a longer one
+   * is not.
+   */
+  if (out.long) {
+    const second = await generate(
+      b,
+      system,
+      ask(
+        `\nYour headline was ${out.headlineWords} words: "${out.headline}". ` +
+          `That is too long to read from across a room. Say the same thing in ` +
+          `${POSTER_HEADLINE_WORDS} words or fewer — cut the adjectives first, keep the fact.`
+      )
+    );
+    if (second) {
+      const shorter = build(second);
+      if (shorter.headline && shorter.headlineWords < out.headlineWords) out = shorter;
+    }
+  }
+
   return out.headline || out.subtext ? out : null;
 }
 

@@ -181,7 +181,7 @@ export async function posterIdeasAction(clientId: number, count: number): Promis
 
 export async function posterCopyAction(
   clientId: number,
-  input: { topic: string; kind?: string; occasion?: string }
+  input: { topic: string; kind?: string; occasion?: string; language?: string }
 ): Promise<Result<unknown>> {
   const { error } = await allow(clientId, "posters");
   if (error) return { ok: false, error };
@@ -191,6 +191,7 @@ export async function posterCopyAction(
     topic: input.topic,
     kind: input.kind,
     occasion: input.occasion?.trim() || null,
+    language: input.language as never,
   }).catch(() => null);
   return data
     ? { ok: true, data: { ...data, brief: renderPosterBrief(data) } }
