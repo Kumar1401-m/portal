@@ -9,10 +9,12 @@
  */
 import assert from "node:assert/strict";
 import { finish } from "./finish.mjs";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const SRC = process.env.PORTAL_SRC;
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
+const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
 const r = await load("lib/monthly-report.ts");
 const db = await load("lib/db.ts");
 
@@ -145,6 +147,53 @@ const report = (o = {}) => ({
 
   await clean();
   ok("a month can be claimed once, so the job on the 1st cannot double-send");
+}
+
+/* ---------------- the same month, as a file somebody can send ---------------- */
+{
+  const page = read("app/report/[id]/page.tsx");
+  const button = read("app/report/[id]/print-button.tsx");
+
+  // A document about one client, reachable by its id in the URL — the guard is
+  // the whole security of it, and it is the same pair every client page uses.
+  assert.match(page, /requireUser\(ADMIN_OR_CRM_ROLES\)/, "staff only");
+  assert.match(page, /canAccessClient\(user, clientId\)/, "and only their own clients");
+  assert.match(page, /notFound\(\)/, "a client that is not theirs is not there");
+
+  // The month comes out of a query string. Anything that is not YYYY-MM falls
+  // back to this month rather than reaching the query.
+  assert.match(page, /\/\^\\d\{4\}-\\d\{2\}\$\/\.test/, "the month is validated, not trusted");
+
+  // Only finished work goes on a client's copy. A page that listed everything
+  // in the month would hand the client next week's plan as this month's work.
+  assert.match(page, /DONE_STATUSES\.includes/, "only delivered work is listed");
+  const { DONE_STATUSES } = await load("lib/constants.ts");
+  for (const notDone of ["pending", "review", "changes_requested", "rejected", "cancelled"]) {
+    assert.ok(!DONE_STATUSES.includes(notDone), `${notDone} is not something to show a client`);
+  }
+
+  // Same rule as the message: an empty section is left out, never sent as a
+  // zero. Each one is behind its own guard.
+  for (const guarded of [/\{report\.posts \?/, /\{grew\.length \?/, /\{report\.ads \?/]) {
+    assert.match(page, guarded, "sections with no data are left out");
+  }
+
+  // Without these the "PDF" is a screenshot of a web page: no page size, the
+  // brand colour dropped by the browser's default, and the button printed on
+  // top of the report.
+  assert.match(page, /@page \{ size: A4/, "it is laid out for paper");
+  assert.match(page, /print-color-adjust: exact/, "the colour survives printing");
+  assert.match(page, /print:hidden/, "the controls do not print");
+  assert.match(button, /window\.print\(\)/, "the browser's own dialog writes the PDF");
+
+  // The tab title becomes the suggested filename in the save dialog, so it has
+  // to name the client and the month rather than say "Report".
+  assert.match(page, /report\.client\} — \$\{report\.monthLabel\} report/, "the file names itself");
+
+  // And it is reachable: the card that sends the WhatsApp version links to it.
+  const card = read("app/(app)/reports/[id]/report-card.tsx");
+  assert.match(card, /href=\{`\/report\/\$\{clientId\}\?month=\$\{month\}`\}/, "linked from the report card");
+  ok("the month is also a document: guarded, laid out for paper, and only what was delivered");
 }
 
 await finish(pass);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Send, Loader2, FileText, ChevronDown } from "lucide-react";
+import { Send, Loader2, FileText, FileDown, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -64,6 +64,16 @@ export function MonthlyReportCard({
               Goes to this client&apos;s linked WhatsApp group. Sections with nothing in them are
               left out rather than sent as zero.
             </p>
+            {/* The same month as a document. Its own tab, because the next
+                thing that happens there is a print dialog. */}
+            <a
+              href={`/report/${clientId}?month=${month}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${buttonClasses({ variant: "outline", size: "sm" })} ml-auto`}
+            >
+              <FileDown className="h-4 w-4" /> PDF
+            </a>
             <button
               type="button"
               disabled={pending || sent}
