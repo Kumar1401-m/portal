@@ -635,6 +635,44 @@ class WhatsAppService extends EventEmitter {
     };
   }
 
+  /**
+   * A PDF into a group, as a file the client can save.
+   *
+   * `sendMediaAsDocument` is what makes it arrive as a document rather than as
+   * an image of the first page — a report somebody can only look at is not the
+   * thing that was asked for.
+   *
+   * The caption travels with the file rather than as a separate message, so
+   * the two cannot arrive out of order in a busy group.
+   */
+  async sendDocument({ groupId, buffer, filename, caption, mimeType = 'application/pdf' }) {
+    if (this.state !== STATE.CONNECTED) {
+      const err = new Error(`WhatsApp is not connected (state: ${this.state})`);
+      err.code = 'not_connected';
+      throw err;
+    }
+    if (!groupId?.endsWith('@g.us')) {
+      const err = new Error(`"${groupId}" is not a WhatsApp group id`);
+      err.code = 'bad_group';
+      throw err;
+    }
+    if (buffer.byteLength > config.send.maxMediaBytes) {
+      const err = new Error(
+        `The document is ${(buffer.byteLength / 1048576).toFixed(1)} MB, over WhatsApp's limit`
+      );
+      err.code = 'media_too_large';
+      err.permanent = true;
+      throw err;
+    }
+
+    const media = new MessageMedia(mimeType, buffer.toString('base64'), filename);
+    const sent = await this.client.sendMessage(groupId, media, {
+      caption: caption || undefined,
+      sendMediaAsDocument: true,
+    });
+    return { messageId: sent?.id?._serialized ?? null, bytes: buffer.byteLength };
+  }
+
   /** Plain text into a group — used for acknowledgements. */
   async sendText(groupId, text) {
     if (this.state !== STATE.CONNECTED) {

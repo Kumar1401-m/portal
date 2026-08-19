@@ -15,6 +15,7 @@
 const express = require('express');
 const { config } = require('../config');
 const { createLogger } = require('../lib/logger');
+const { renderPdf } = require('../lib/pdf');
 
 const log = createLogger('routes');
 
@@ -214,6 +215,79 @@ function buildRoutes({ whatsapp, sendQueue }) {
     } catch (err) {
       log.error('send-video failed', { videoCode, error: err.message });
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/send-document
+   *
+   * Render one portal page to a PDF and send it into a group as a file.
+   *
+   * Body: { groupId, url, filename?, caption? }
+   *
+   * The URL is rendered by a browser with no session, so it must carry its own
+   * permission — the portal signs one into the link (see `doc-link.ts` there).
+   * That is the same URL the client gets, which means what lands in the group
+   * is what they would have seen if they had tapped it.
+   *
+   * Deliberately synchronous: the portal shows a button that says "sending",
+   * and a render plus an upload is seconds. Queueing it would mean inventing a
+   * way to tell the portal about a failure that happened after the request.
+   */
+  router.post('/api/send-document', async (req, res) => {
+    const { groupId, url, filename, caption } = req.body || {};
+
+    if (!groupId || !url) {
+      return res.status(400).json({ ok: false, error: 'groupId and url are required.' });
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ ok: false, error: 'url must be an http(s) URL.' });
+    }
+    /*
+     * Only the portal's own pages.
+     *
+     * Without this, anything holding the service key could point a browser
+     * inside this network at any address and have the result posted into a
+     * client's WhatsApp group. The portal URL is already configured, so the
+     * check costs nothing.
+     */
+    if (config.portal.url && !url.startsWith(`${config.portal.url}/`)) {
+      log.warn('refused a document from outside the portal', { url: url.slice(0, 120) });
+      return res.status(400).json({ ok: false, error: 'That URL is not part of the portal.' });
+    }
+    if (!String(groupId).endsWith('@g.us')) {
+      return res
+        .status(400)
+        .json({ ok: false, error: 'groupId must be a WhatsApp group id ending in @g.us.' });
+    }
+    if (!whatsapp.status().connected) {
+      // 503, not 500 — worth trying again later rather than a real refusal.
+      return res.status(503).json({
+        ok: false,
+        error: `WhatsApp is not connected (${whatsapp.status().state}).`,
+        state: whatsapp.status().state,
+      });
+    }
+
+    const name = String(filename || 'document.pdf').replace(/[^\w.\- ]+/g, '').slice(0, 80);
+    try {
+      const buffer = await renderPdf(url);
+      const sent = await whatsapp.sendDocument({
+        groupId,
+        buffer,
+        filename: name.endsWith('.pdf') ? name : `${name}.pdf`,
+        caption: caption ? String(caption).slice(0, 1024) : '',
+      });
+      res.json({ ok: true, ...sent });
+    } catch (err) {
+      log.error('send-document failed', { url: url.slice(0, 120), error: err.message });
+      // 422 for something a retry cannot fix, 502 for anything else — the
+      // portal decides whether to offer "try again" from this.
+      res.status(err.permanent ? 422 : 502).json({
+        ok: false,
+        error: err.message || 'Could not send the document',
+        permanent: Boolean(err.permanent),
+      });
     }
   });
 

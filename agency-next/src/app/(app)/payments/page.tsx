@@ -4,6 +4,7 @@ import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import { getPaymentsSummary, getInvoices, getPayments } from "@/lib/payments";
 import { markPaid } from "./actions";
 import { DeleteRecordButton } from "./delete-button";
+import { SendInvoiceButton } from "./send-invoice-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button, buttonClasses } from "@/components/ui/button";
@@ -133,6 +134,10 @@ export default async function PaymentsPage() {
                             <CheckCircle2 className="h-4 w-4" /> Paid
                           </span>
                         )}
+                        {/* The invoice as a file, into the client's group. The
+                            row already links to the document, so what is about
+                            to be sent can be read first. */}
+                        <SendInvoiceButton invoiceId={inv.id} />
                         {canManage ? (
                           <DeleteRecordButton
                             kind="invoice"

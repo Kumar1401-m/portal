@@ -243,5 +243,54 @@ await clean();
   ok("the message a client receives carries the document, and reads properly without one");
 }
 
+/* ---------------- and the file itself lands in the group ---------------- */
+{
+  const client = read("lib/whatsapp-service-client.ts");
+  assert.match(client, /\/api\/send-document/, "the portal asks the service to render and send");
+  // A render plus an upload is not a text send; the default timeout would cut
+  // it off partway and report a failure for something that went.
+  assert.match(client, /timeoutMs: 120_000/, "and waits long enough for both");
+
+  const service = readFileSync(
+    `${SRC}/../../whatsapp-service/src/routes/index.js`,
+    "utf8"
+  );
+  assert.match(service, /router\.post\('\/api\/send-document'/, "the service has the endpoint");
+  /*
+   * The guard that matters most here. Without it, anything holding the service
+   * key could point a browser inside that network at any address — a cloud
+   * metadata endpoint, an admin page on localhost — and have the rendered
+   * result posted into a client's WhatsApp group.
+   */
+  assert.match(service, /url\.startsWith\(`\$\{config\.portal\.url\}\/`\)/, "only the portal's own pages");
+  assert.match(service, /router\.use\('\/api', requireKey\)/, "and only the portal may ask");
+
+  const pdf = readFileSync(`${SRC}/../../whatsapp-service/src/lib/pdf.js`, "utf8");
+  // Printed, not screenshotted: without this the client's invoice arrives with
+  // a "Save as PDF" button on it.
+  assert.match(pdf, /emulateMediaType\('print'\)/, "the print rules are what is rendered");
+  assert.match(pdf, /printBackground: true/, "the brand rule and the chart slices survive");
+  assert.match(pdf, /preferCSSPageSize: true/, "the page's own @page wins");
+  assert.match(pdf, /networkidle0/, "the logo and fonts have arrived before it prints");
+  // A browser left open is 200 MB the WhatsApp session needs, and two at once
+  // on a 1 vCPU box is how the kernel starts choosing what to kill.
+  assert.match(pdf, /finally \{/, "the browser is closed on every path");
+  assert.match(pdf, /let chain = Promise\.resolve\(\)/, "one render at a time");
+  assert.ok(
+    !/pupBrowser|pupPage/.test(pdf),
+    "it does not borrow the WhatsApp session's browser, which shares one renderer"
+  );
+
+  const send = read("app/(app)/reports/[id]/actions.ts");
+  const markAt = send.indexOf("markReportSent(");
+  const docAt = send.indexOf("sendDocumentToGroup(");
+  assert.ok(markAt > 0 && docAt > markAt, "the month is marked sent before the file is attached");
+  // A failed attachment on a report the client has already received is a
+  // partial success, not a failure — and the message still carries the link.
+  assert.match(send, /didn't attach/, "an attachment that fails says so without crying wolf");
+  assert.match(send, /ok: true,\s*\n\s*message: `Sent to \$\{group\.label\}, but the PDF/);
+  ok("the PDF is rendered from the client's own link and attached after the message");
+}
+
 await clean();
 await finish(pass);

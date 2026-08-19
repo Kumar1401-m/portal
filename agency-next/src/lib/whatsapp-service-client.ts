@@ -142,6 +142,28 @@ export const sendVideoToGroup = (payload: {
     body: JSON.stringify(payload),
   });
 
+/**
+ * A portal page, rendered to a PDF and sent into a group as a file.
+ *
+ * The URL is opened by a browser on the service with no session of its own, so
+ * it has to be one of the signed document links — which means what lands in
+ * the group is exactly what the client would have seen had they tapped it.
+ *
+ * Slower than a text send: a render plus an upload. The default timeout below
+ * covers both with room for a cold browser start.
+ */
+export const sendDocumentToGroup = (payload: {
+  groupId: string;
+  url: string;
+  filename: string;
+  caption?: string;
+}) =>
+  call<{ messageId: string | null; bytes: number }>("/api/send-document", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    timeoutMs: 120_000,
+  });
+
 export const sendTextToGroup = (groupId: string, text: string) =>
   call<{ messageId: string | null }>("/api/send-text", {
     method: "POST",

@@ -61,8 +61,8 @@ export function MonthlyReportCard({
           </pre>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              Goes to this client&apos;s linked WhatsApp group. Sections with nothing in them are
-              left out rather than sent as zero.
+              Goes to this client&apos;s linked WhatsApp group — this message, then the report as a
+              PDF. Sections with nothing in them are left out rather than sent as zero.
             </p>
             {/* The same month as a document. Its own tab, because the next
                 thing that happens there is a print dialog. */}

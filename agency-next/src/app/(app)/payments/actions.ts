@@ -3,10 +3,15 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { queryOne, transaction, type ResultSetHeader } from "@/lib/db";
-import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
+import { requireUser, SUPER_ADMIN_ROLES, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
 import { sendInvoiceEmail, sendPaidInvoiceEmail } from "@/lib/email";
 import { paymentLinkForInvoice } from "@/lib/payment-links";
+import { getInvoiceDocument } from "@/lib/payments";
+import { invoiceLink } from "@/lib/doc-link";
+import { groupForClient } from "@/lib/reminder-outbox";
+import { sendDocumentToGroup } from "@/lib/whatsapp-service-client";
 import { getAgencyInbox } from "@/lib/settings";
 import { money } from "@/lib/utils";
 
@@ -278,4 +283,53 @@ export async function deleteInvoice(invoiceId: number): Promise<DeletePaymentSta
 
   for (const path of ["/payments", "/dashboard", "/reports"]) revalidatePath(path);
   return { ok: true };
+}
+
+/* ------------------------- Send the invoice as a file ------------------------- */
+
+export type SendInvoiceState = { ok: boolean; message: string };
+
+/**
+ * The invoice itself, into the client's WhatsApp group, as a PDF.
+ *
+ * The weekly chase already carries a link to it. This is for the moment
+ * somebody asks for "the invoice" and means a document — one they can forward
+ * to whoever actually pays things, which is rarely the person in the group.
+ *
+ * The service renders it from the same signed link the client would open, so
+ * what arrives as a file is exactly what they would have seen by tapping it.
+ */
+export async function sendInvoicePdf(invoiceId: number): Promise<SendInvoiceState> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+
+  const inv = await getInvoiceDocument(Math.trunc(Number(invoiceId)));
+  if (!inv) return { ok: false, message: "That invoice no longer exists." };
+  if (!(await canAccessClient(user, inv.client_id))) {
+    return { ok: false, message: "That client isn't one of yours." };
+  }
+
+  const group = await groupForClient(inv.client_id);
+  if (!group) {
+    return {
+      ok: false,
+      message: "This client has no WhatsApp group linked — link one on their page first.",
+    };
+  }
+
+  const paid = inv.status === "paid";
+  const amount = `${inv.currency === "INR" ? "\u20b9" : `${inv.currency} `}${Math.round(inv.total).toLocaleString("en-IN")}`;
+
+  const res = await sendDocumentToGroup({
+    groupId: group.groupId,
+    url: invoiceLink(inv.id, inv.invoice_no),
+    // What the file is called in the client's downloads — and what they will
+    // search for in eight months.
+    filename: `${paid ? "Receipt" : "Invoice"} ${inv.invoice_no}.pdf`,
+    caption: paid
+      ? `\ud83e\uddfe Receipt ${inv.invoice_no} \u2014 ${amount}, received with thanks.`
+      : `\ud83e\uddfe Invoice ${inv.invoice_no} \u2014 ${amount}.`,
+  });
+
+  if (!res.ok) return { ok: false, message: res.error };
+  return { ok: true, message: `Sent to ${group.label}.` };
 }
