@@ -151,14 +151,10 @@ const report = (o = {}) => ({
 
 /* ---------------- the same month, as a file somebody can send ---------------- */
 {
+  // The paper chrome, the signed link and the pie are checked in documents.mjs,
+  // which covers both documents. What belongs here is what the *report* must
+  // put on the page.
   const page = read("app/report/[id]/page.tsx");
-  const button = read("app/report/[id]/print-button.tsx");
-
-  // A document about one client, reachable by its id in the URL — the guard is
-  // the whole security of it, and it is the same pair every client page uses.
-  assert.match(page, /requireUser\(ADMIN_OR_CRM_ROLES\)/, "staff only");
-  assert.match(page, /canAccessClient\(user, clientId\)/, "and only their own clients");
-  assert.match(page, /notFound\(\)/, "a client that is not theirs is not there");
 
   // The month comes out of a query string. Anything that is not YYYY-MM falls
   // back to this month rather than reaching the query.
@@ -178,13 +174,10 @@ const report = (o = {}) => ({
     assert.match(page, guarded, "sections with no data are left out");
   }
 
-  // Without these the "PDF" is a screenshot of a web page: no page size, the
-  // brand colour dropped by the browser's default, and the button printed on
-  // top of the report.
-  assert.match(page, /@page \{ size: A4/, "it is laid out for paper");
-  assert.match(page, /print-color-adjust: exact/, "the colour survives printing");
-  assert.match(page, /print:hidden/, "the controls do not print");
-  assert.match(button, /window\.print\(\)/, "the browser's own dialog writes the PDF");
+  // The headline is counted from the very rows listed under it. These
+  // disagreed once — the stat said two and the table listed three, because
+  // "delivered" meant posted and the table meant finished.
+  assert.match(page, /value=\{count\(delivered\.length\)\}/, "the stat counts the rows on the page");
 
   // The tab title becomes the suggested filename in the save dialog, so it has
   // to name the client and the month rather than say "Report".
@@ -193,7 +186,7 @@ const report = (o = {}) => ({
   // And it is reachable: the card that sends the WhatsApp version links to it.
   const card = read("app/(app)/reports/[id]/report-card.tsx");
   assert.match(card, /href=\{`\/report\/\$\{clientId\}\?month=\$\{month\}`\}/, "linked from the report card");
-  ok("the month is also a document: guarded, laid out for paper, and only what was delivered");
+  ok("the month is also a document: only what was delivered, and it names itself");
 }
 
 await finish(pass);

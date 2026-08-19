@@ -8,6 +8,7 @@ import { sendEmail, sendApprovalRequestEmail } from "@/lib/email";
 import { notifyClientById } from "@/lib/notify";
 import { approvalChaseText, invoiceText, composeReminder } from "@/lib/reminder-messages";
 import { paymentLinkForInvoice } from "@/lib/payment-links";
+import { invoiceLink } from "@/lib/doc-link";
 import { sendNow, groupForClient } from "@/lib/reminder-outbox";
 import {
   answerQuestion,
@@ -291,6 +292,7 @@ export async function runAssistantAction(
             due_date: inv.due_date,
             payUrl: link.url,
             payable: link.payable,
+            docUrl: invoiceLink(id, inv.invoice_no),
           },
         ]);
         const res = await sendNow({

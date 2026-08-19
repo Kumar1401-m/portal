@@ -13,6 +13,7 @@ import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import { contentStatusLabel, editorStatusLabel } from "@/lib/constants";
 import { monthKey } from "@/lib/utils";
 import { buildMonthlyReport, renderReportText } from "@/lib/monthly-report";
+import { reportLink } from "@/lib/doc-link";
 import { MonthlyReportCard } from "./report-card";
 
 export const dynamic = "force-dynamic";
@@ -125,7 +126,9 @@ export default async function ClientReportPage({
           clientId={client.id}
           month={month}
           monthLabel={report.monthLabel}
-          text={renderReportText(report)}
+          // The preview has to be the message, link and all — the card exists
+          // so somebody reads exactly what the client will read.
+          text={renderReportText(report, reportLink(client.id, month))}
         />
       ) : null}
 

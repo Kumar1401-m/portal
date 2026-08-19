@@ -20,6 +20,7 @@ import "server-only";
 import { query, queryOne, execute, hasTable } from "./db";
 import { onTheFloor } from "./client-status";
 import { groupForClient, queueMessage, nowUtc } from "./reminder-outbox";
+import { reportLink } from "./doc-link";
 
 const num = (v: unknown) => Number(v ?? 0);
 
@@ -189,7 +190,7 @@ const count = (n: number) => new Intl.NumberFormat("en-IN").format(n);
  * these go out at 9am on the 1st, so it reads as a statement rather than a
  * message pretending to have been typed by a person.
  */
-export function renderReportText(r: MonthlyReport): string {
+export function renderReportText(r: MonthlyReport, link?: string | null): string {
   const lines: string[] = [`*${r.client} — ${r.monthLabel}*`, ""];
 
   lines.push(`📦 *Content*`);
@@ -223,6 +224,18 @@ export function renderReportText(r: MonthlyReport): string {
       `${inr(r.ads.spend, r.ads.currency)} spent, ${count(r.ads.impressions)} impressions` +
         (r.ads.leads ? `, ${count(r.ads.leads)} leads at ${cpl} each.` : ".")
     );
+  }
+
+  /*
+   * The document, under the summary.
+   *
+   * The message is the part that gets read in the group; the link is the part
+   * that gets saved, forwarded to a partner, or opened in a review meeting six
+   * weeks later. It carries its own permission (see `doc-link.ts`) because a
+   * link that lands on a login page is a link nobody follows.
+   */
+  if (link) {
+    lines.push("", `📄 *The full report*, with the charts and everything we made:`, link);
   }
 
   lines.push("", "Happy to walk through any of this — just say the word. 🙏");
@@ -345,7 +358,7 @@ export async function queueMonthlyReports(
       clientId: c.id,
       groupId: group.groupId,
       groupLabel: group.label,
-      body: renderReportText(report),
+      body: renderReportText(report, reportLink(c.id, month)),
       sendAt: sendAt || nowUtc(),
       createdBy: by?.id ?? null,
       createdByName: by?.name ?? "Monthly report",

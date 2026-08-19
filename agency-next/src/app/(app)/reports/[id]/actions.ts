@@ -4,6 +4,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { buildMonthlyReport, renderReportText, markReportSent } from "@/lib/monthly-report";
 import { groupForClient, sendNow } from "@/lib/reminder-outbox";
+import { reportLink } from "@/lib/doc-link";
 
 export type SendState = { ok: boolean; message: string };
 
@@ -38,7 +39,7 @@ export async function sendMonthlyReportAction(clientId: number, month: string): 
     clientId,
     groupId: group.groupId,
     groupLabel: group.label,
-    body: renderReportText(report),
+    body: renderReportText(report, reportLink(clientId, month)),
     createdBy: user.id,
     createdByName: user.name,
   });

@@ -24,6 +24,7 @@ import { notifyAdmins } from "./notify";
 import { expensesNeedingNotice } from "./expenses";
 import { money } from "./utils";
 import { paymentLinkForInvoice } from "./payment-links";
+import { invoiceLink } from "./doc-link";
 import {
   approvalChaseText,
   footageText,
@@ -552,6 +553,7 @@ async function remindInvoices(): Promise<{ sent: number; failed: number }> {
         due_date: r.due_date,
         payUrl: link.url,
         payable: link.payable,
+        docUrl: invoiceLink(r.id, r.invoice_no),
       },
     ]);
     if (await deliver("invoice_due", key, r.group_id, text)) sent++;

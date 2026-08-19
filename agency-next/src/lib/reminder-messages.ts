@@ -202,6 +202,8 @@ export type InvoiceItem = {
   /** Where they pay. A Razorpay link when there is one, the portal otherwise. */
   payUrl: string;
   payable: boolean;
+  /** The invoice itself, as a document they can save or hand to an accountant. */
+  docUrl?: string | null;
 };
 
 /**
@@ -222,6 +224,9 @@ export function invoiceText(items: InvoiceItem[]): string {
       (i.payable
         ? `Whenever convenient, you can pay it here — it opens straight into UPI, card or net banking:\n${i.payUrl}`
         : `Whenever convenient, you can view and pay it in your portal:\n${i.payUrl}`) +
+      // The paying and the paperwork are two different needs: the person who
+      // taps the link is rarely the one who files the invoice.
+      (i.docUrl ? `\n\n📄 The invoice itself, to save or print:\n${i.docUrl}` : "") +
       `\n\nIf anything looks wrong, please do let us know and we'll sort it out. Thank you! 🙏`
     );
   }

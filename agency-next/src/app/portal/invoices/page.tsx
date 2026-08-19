@@ -1,4 +1,5 @@
-import { FileText, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { FileText, FileDown, CheckCircle2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getPortalInvoices, getPortalClientInfo } from "@/lib/portal";
 import { isRazorpayEnabled } from "@/lib/razorpay";
@@ -54,6 +55,16 @@ export default async function PortalInvoicesPage() {
                     <Badge tone={invoiceStatusTone(inv.status)}>{invoiceStatusLabel(inv.status)}</Badge>
                   </TD>
                   <TD className="text-right">
+                    {/* Their own copy, to save or hand to an accountant. A row
+                        in a table is enough to pay from and no use at all as a
+                        document, which is what "send me the invoice" means. */}
+                    <Link
+                      href={`/invoice/${inv.id}`}
+                      target="_blank"
+                      className="mr-3 inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                    >
+                      <FileDown className="h-4 w-4" /> PDF
+                    </Link>
                     {inv.status === "paid" ? (
                       <span className="inline-flex items-center gap-1 text-sm text-success">
                         <CheckCircle2 className="h-4 w-4" /> Paid

@@ -78,7 +78,17 @@ export default async function PaymentsPage() {
               <TBody>
                 {invoices.map((inv) => (
                   <TR key={inv.id}>
-                    <TD className="font-medium">{inv.invoice_no}</TD>
+                    {/* The number is the way to the document — an invoice is a
+                        thing you open, not a string you read off a row. */}
+                    <TD className="font-medium">
+                      <Link
+                        href={`/invoice/${inv.id}`}
+                        target="_blank"
+                        className="text-primary hover:underline"
+                      >
+                        {inv.invoice_no}
+                      </Link>
+                    </TD>
                     <TD>{inv.company_name}</TD>
                     <TD className="tabular-nums">{money(inv.total)}</TD>
                     <TD>
