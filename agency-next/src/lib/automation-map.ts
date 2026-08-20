@@ -168,6 +168,12 @@ export const JOBS: { key: string; label: string; hint: string; everyMinutes: num
     everyMinutes: 60 * 24,
   },
   {
+    key: "ai_decisions",
+    label: "Night shift",
+    hint: "Decides what needs you tomorrow and puts it in the bell",
+    everyMinutes: 60 * 24,
+  },
+  {
     key: "monthly_reports",
     label: "Monthly reports",
     hint: "Queues each client's month on the 1st",

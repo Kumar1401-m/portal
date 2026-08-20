@@ -19,6 +19,7 @@ export type JobName =
   | "ads_sync"
   | "insights_sync"
   | "ai_insights"
+  | "ai_decisions"
   | "monthly_reports";
 
 export type JobRun = {

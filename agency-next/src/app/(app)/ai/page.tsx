@@ -22,7 +22,7 @@ import type { Severity } from "@/lib/brain";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { prettyLocal } from "@/lib/posting";
-import { RefreshInsights, AskBrain, EngineList, type EngineRow } from "./panels";
+import { RefreshInsights, AskBrain, EngineList, NightShift, type EngineRow } from "./panels";
 import { BusinessAdvisor } from "./advisor";
 
 export const metadata = { title: "AI · NVK Hub" };
@@ -124,12 +124,36 @@ export default async function AiPage() {
   const opportunities = insights.filter((i) => i.severity === "opportunity").length;
   const atRisk = health.filter((h) => h.band !== "healthy").length;
   const lastRun = insights[0]?.generatedAt ?? null;
+  const isAdmin = ADMIN_ROLES.includes(user.role);
 
   return (
     <div className="space-y-5">
       <Header>
         <RefreshInsights />
       </Header>
+
+      {/*
+        The part that comes and finds you.
+        
+        Everything else on this page waits to be opened. This decides what
+        actually needs somebody and puts it in the notification bell, so the
+        answer to "is anything wrong" arrives without the question being asked.
+      */}
+      {isAdmin ? (
+        <Card>
+          <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">The night shift</p>
+              <p className="text-sm text-muted-foreground">
+                Once a night it reads the money, the board, the Brain&apos;s findings and what the
+                loop has proven, decides the few things that need you, and puts them in your
+                notifications. Run it now to see what it would send.
+              </p>
+            </div>
+            <NightShift />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!modelConfigured() ? (
         <Card className="border-amber-500/40 bg-amber-500/5">

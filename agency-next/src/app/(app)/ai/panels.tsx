@@ -2,13 +2,18 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Sparkles, Loader2, RefreshCw, Send, ChevronDown } from "lucide-react";
+import { Sparkles, Loader2, RefreshCw, Send, ChevronDown, BellRing } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { buttonClasses } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { refreshInsightsAction, askBrainAction, setEngineAction } from "./actions";
+import {
+  refreshInsightsAction,
+  askBrainAction,
+  setEngineAction,
+  decideNowAction,
+} from "./actions";
 import type { EngineKey } from "@/lib/ai-engines";
 
 export function RefreshInsights() {
@@ -233,5 +238,57 @@ export function EngineList({ engines, canToggle }: { engines: EngineRow[]; canTo
         </div>
       ) : null}
     </Card>
+  );
+}
+
+
+/**
+ * The night shift, run now.
+ *
+ * It normally runs on a schedule and nobody sees it happen — which is fine
+ * for a thing that works and useless for one nobody has watched work. This
+ * runs it on demand and shows exactly what it decided to send, so the first
+ * question about it ("what would it even tell me?") has an answer that is not
+ * a paragraph of documentation.
+ */
+export function NightShift() {
+  const [sent, setSent] = useState<string[] | null>(null);
+  const [pending, start] = useTransition();
+  const toast = useToast();
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() =>
+          start(async () => {
+            const res = await decideNowAction();
+            setSent(res.sent);
+            toast({
+              title: res.ok ? "Night shift ran" : "Could not run",
+              description: res.message,
+              tone: res.ok ? undefined : "error",
+              ack: !res.ok,
+            });
+          })
+        }
+        className={buttonClasses({ variant: "outline", size: "sm" })}
+      >
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+        {pending ? "Deciding…" : "Decide now"}
+      </button>
+
+      {sent?.length ? (
+        <ul className="space-y-1 text-sm">
+          {sent.map((t, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <BellRing className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }

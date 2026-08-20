@@ -8,6 +8,7 @@ import { ask } from "@/lib/brain";
 import { setEngine, isEngineOn, type EngineKey } from "@/lib/ai-engines";
 import { recordRun } from "@/lib/automation-runs";
 import { advise } from "@/lib/business-advisor";
+import { runDecisions } from "@/lib/decisions";
 
 export type RefreshState = { ok: boolean; message: string };
 
@@ -82,4 +83,44 @@ export async function adviseAction(): Promise<AdviseState> {
   }
   const advice = await advise().catch(() => null);
   return advice ? { ok: true, data: advice } : { ok: false, error: "Couldn't read this month's figures." };
+}
+
+
+export type DecideState = { ok: boolean; message: string; sent: string[] };
+
+/**
+ * Run the night shift now, rather than waiting for the night.
+ *
+ * Super admin only, and deliberately: it writes to every admin's
+ * notification bell, so it is not something a crm should be able to fire at
+ * the whole office from a page they were browsing.
+ */
+export async function decideNowAction(): Promise<DecideState> {
+  await requireUser(ADMIN_ROLES);
+
+  const r = await runDecisions();
+  await recordRun(
+    "ai_decisions",
+    true,
+    `${r.sent.length} sent of ${r.considered} considered`
+  ).catch(() => {});
+
+  revalidatePath("/ai");
+  if (!r.considered) {
+    return { ok: true, message: "Nothing needs anybody today — every board is clear.", sent: [] };
+  }
+  if (!r.sent.length) {
+    return {
+      ok: true,
+      message: `Looked at ${r.considered}, and all of it has already been said this week.`,
+      sent: [],
+    };
+  }
+  return {
+    ok: true,
+    message:
+      `${r.sent.length} sent to the bell, out of ${r.considered} considered` +
+      (r.skipped ? `, ${r.skipped} already said.` : "."),
+    sent: r.sent.map((d) => d.title),
+  };
 }
