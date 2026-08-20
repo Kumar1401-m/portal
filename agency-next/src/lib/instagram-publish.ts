@@ -344,15 +344,37 @@ export async function publishNow(
   if (info.instagramStatus === "posted") return { ok: false, error: "This is already on Instagram." };
 
   /*
+   * Asked before anything is claimed, so a missing token costs nothing.
+   *
+   * Otherwise this ends in publishClaimed marking the video permanently
+   * failed for a setting nobody has filled in — and the person who pressed the
+   * button gets a failure that reads like the video was rejected.
+   */
+  const { publishingReadiness } = await import("./instagram");
+  const readiness = await publishingReadiness();
+  if (!readiness.ready) return { ok: false, error: readiness.reason ?? "Publishing isn't set up." };
+
+  /*
    * Only the blockers a person cannot overrule from here.
    *
    * "Auto-publishing is off" and "no posting time is set" both stop the
    * unattended run and neither should stop this one — pressing the button is
-   * the missing consent and the missing time. The rest are real: without an
-   * account or a video there is nothing to send.
+   * the missing consent and the missing time.
+   *
+   * So is a closed window, and that one was a contradiction: the blocker text
+   * ends "Move the date to the next day, or use Post now", and using Post now
+   * returned that same sentence back as the reason it would not. The window
+   * exists to stop the *unattended* publisher going out at 3am. A person
+   * pressing this at 3am has decided otherwise, which is what the button is.
+   *
+   * The rest are real: without an account or a video there is nothing to send.
    */
   const fatal = info.blockers.filter(
-    (b) => !/^Auto-publishing is off/.test(b) && !/^No posting time is set/.test(b) && !/^It has used all/.test(b)
+    (b) =>
+      !/^Auto-publishing is off/.test(b) &&
+      !/^No posting time is set/.test(b) &&
+      !/^Its window /.test(b) &&
+      !/^It has used all/.test(b)
   );
   if (fatal.length) return { ok: false, error: fatal[0] };
 

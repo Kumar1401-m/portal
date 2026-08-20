@@ -183,6 +183,43 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("with no Meta token the run reports itself unready instead of failing every video");
 }
 
+/* ---------------- Post now means post now ---------------- */
+{
+  /*
+   * The contradiction this closes.
+   *
+   * A video past its window carries the blocker "Its window (…) closed … Move
+   * the date to the next day, or use Post now" — and pressing Post now handed
+   * that same sentence straight back as the reason it would not. The one
+   * escape hatch the message names was the one thing it refused.
+   *
+   * The window exists to stop the *unattended* publisher going out at 3am. A
+   * person pressing the button has decided otherwise; that is the button.
+   */
+  const src = read("lib/instagram-publish.ts");
+  const at = src.indexOf("const fatal = info.blockers.filter");
+  const filter = src.slice(at, at + 400);
+  for (const [pattern, why] of [
+    [/\^Auto-publishing is off/, "pressing it is the missing consent"],
+    [/\^No posting time is set/, "and the missing time"],
+    [/\^Its window /, "and the decision to post outside the window"],
+    [/\^It has used all/, "and to spend another attempt"],
+  ]) {
+    assert.match(filter, pattern, `overruled by a person: ${why}`);
+  }
+
+  // The ones a person cannot overrule: there is nothing to send without them.
+  const ig = read("lib/instagram.ts");
+  assert.match(ig, /No Instagram account is linked/, "an account is still required");
+  assert.match(ig, /There is no finished video/, "and so is a video");
+
+  // And readiness is asked before the claim, so a missing token does not get
+  // recorded against the video as a permanent failure.
+  const readyAt = src.indexOf("publishingReadiness()");
+  assert.ok(readyAt > 0 && readyAt < at, "readiness is checked before anything is claimed");
+  ok("Post now overrules the window it tells you to use it for");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");
