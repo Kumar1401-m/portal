@@ -242,7 +242,17 @@ export function ClientForm({
               it. It was not; there was simply nothing on the page willing to
               say so.
             */}
-            <Field label="Page access token (optional)" name="ig_access_token">
+            {/*
+              One name for it, everywhere.
+
+              This field said "Page access token", the errors said "Meta access
+              token", and the setting behind it is META_ACCESS_TOKEN. Three
+              names for one credential is enough to make somebody paste it in
+              and still wonder whether it was the right box — which is exactly
+              what happened. Meta's own screens call it a Page access token, so
+              that stays, but as the explanation rather than the label.
+            */}
+            <Field label="Meta access token (optional)" name="ig_access_token">
               <Input
                 id="ig_access_token"
                 name="ig_access_token"
@@ -261,8 +271,10 @@ export function ClientForm({
             </p>
           ) : (
             <p className="-mt-1 text-xs text-muted-foreground">
-              Only needed when this account sits outside your own Business Manager. Blank means the
-              automation uses the agency-wide token.
+              This is the <b>Page access token</b> for the Facebook Page behind their Instagram
+              account — the same credential as the site-wide <code className="rounded bg-muted px-1 py-0.5 font-mono">META_ACCESS_TOKEN</code>,
+              but for this client only. Only needed when their account sits outside your own
+              Business Manager; blank means the automation uses the agency-wide one.
             </p>
           )}
 

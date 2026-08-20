@@ -263,7 +263,7 @@ export async function checkPageConnection(clientId: number): Promise<PageConnect
     // per-client field is the answer rather than the fallback.
     return {
       state: "broken",
-      reason: "No Meta access token — paste this client's Page access token on their edit page.",
+      reason: "No Meta access token — paste this client's on their edit page, under Instagram automation.",
     };
   }
 

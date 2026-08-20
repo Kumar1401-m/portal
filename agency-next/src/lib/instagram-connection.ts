@@ -67,8 +67,8 @@ export async function checkInstagramConnection(clientId: number): Promise<Instag
     return {
       state: "broken",
       reason:
-        "No Meta access token. Set META_ACCESS_TOKEN, or paste this client's token on their edit page. " +
-        "Nothing publishes until one exists.",
+        "No Meta access token. Set META_ACCESS_TOKEN, or paste this client's on their edit page, " +
+        "under Instagram automation. Nothing publishes until one exists.",
     };
   }
 

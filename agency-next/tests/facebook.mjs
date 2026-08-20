@@ -198,7 +198,10 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 
   // The commonest cause by far, so it names where to fix it rather than
   // stating a fact about configuration.
-  has(lib, "paste this client's Page access token on their edit page", "a missing token says what to do");
+  // Named the same way the field is, and the field is named the same way the
+  // env var is. It used to say "Page access token" while the box said one
+  // thing and META_ACCESS_TOKEN said another.
+  has(lib, "paste this client's on their edit page, under Instagram automation", "a missing token says what to do");
 
   // It runs beside the plan queries, not after them: it is a network call to
   // Meta on a page somebody is waiting for.

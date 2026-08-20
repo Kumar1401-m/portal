@@ -280,6 +280,23 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   // The way out, since a blank field means "leave it alone" and not "clear it".
   assert.match(form, /to remove it/, "and says how to remove one");
 
+  /*
+   * And one name for it, everywhere.
+   *
+   * The field said "Page access token", every error said "Meta access token",
+   * and the setting behind it is META_ACCESS_TOKEN. Three names for one
+   * credential is enough to make somebody paste it into the right box and
+   * still ask whether it was the right box.
+   */
+  assert.ok(
+    !/label="Page access token/.test(form),
+    "the field is named the same as the errors that mention it"
+  );
+  assert.match(form, /label="Meta access token \(optional\)"/);
+  // Meta's own screens do call it a Page token, so that survives as the
+  // explanation rather than as a second name for the field.
+  assert.match(form, /<b>Page access token<\/b>/, "and says which token Meta means");
+
   const edit = read("app/(app)/clients/[id]/edit/page.tsx");
   assert.match(edit, /has_ig_token: Boolean\(client\.ig_access_token\)/, "a boolean, not the value");
   assert.match(edit, /ig_access_token: ""/, "the value itself stays empty");
