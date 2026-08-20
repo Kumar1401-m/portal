@@ -116,9 +116,16 @@ export default async function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/*
+              This line used to guess at the cause, and named Zapier — which
+              this portal stopped using; posting runs through n8n and the
+              portal's own publisher now. Every condition the queue drops a row
+              on is knowable from the row, so each one says its own reason and
+              this line only has to say what the list is.
+            */}
             <p className="mb-3 text-sm text-muted-foreground">
-              These were scheduled to go live and the time has passed, but they still
-              haven&apos;t posted. Usually the Zap is off, or Instagram rejected the video.
+              Their posting time came and went and they are still not on Instagram. The
+              reason is on each row.
             </p>
             <Table>
               <THead>
@@ -129,7 +136,11 @@ export default async function DashboardPage() {
                   <th className="hidden md:table-cell">Client</th>
                   <th className="hidden lg:table-cell">Scheduled for</th>
                   <th className="text-center">How late</th>
-                  <th className="hidden sm:table-cell">Instagram</th>
+                  {/* The Instagram status column said "Scheduled" on every row,
+                      which is what makes the card confusing rather than what
+                      explains it — of course it is scheduled, that is why it
+                      is here. Replaced by the reason it did not go out. */}
+                  <th className="hidden sm:table-cell">Why not</th>
                 </tr>
               </THead>
               <TBody>
@@ -144,12 +155,20 @@ export default async function DashboardPage() {
                       </Link>
                       <span className="mt-0.5 block text-xs text-muted-foreground md:hidden">
                         {m.company_name}
-                        <span className="lg:hidden"> · {fmtDate(m.scheduled_at)}</span>
+                        <span className="lg:hidden"> · {m.scheduled_label ?? fmtDate(m.scheduled_at)}</span>
+                      </span>
+                      {/* The reason follows the title on a phone, where its
+                          own column is gone — it is the point of the row. */}
+                      <span className="mt-0.5 block text-xs text-destructive sm:hidden">
+                        {m.reason}
                       </span>
                     </TD>
                     <TD className="hidden text-muted-foreground md:table-cell">{m.company_name}</TD>
-                    <TD className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">
-                      {fmtDate(m.scheduled_at)}
+                    {/* The slot, not just the day: "20 Aug 2026" beside "1h
+                        late" cannot be reconciled without the time on it —
+                        and for an overseas client, whose time. */}
+                    <TD className="hidden text-muted-foreground lg:table-cell">
+                      {m.scheduled_label ?? fmtDate(m.scheduled_at)}
                     </TD>
                     <TD className="text-center">
                       <Badge tone="danger">
@@ -160,9 +179,7 @@ export default async function DashboardPage() {
                             : `${m.late_minutes}m`}
                       </Badge>
                     </TD>
-                    <TD className="hidden text-muted-foreground sm:table-cell">
-                      {label(m.instagram_status)}
-                    </TD>
+                    <TD className="hidden text-muted-foreground sm:table-cell">{m.reason}</TD>
                   </TR>
                 ))}
               </TBody>

@@ -6,7 +6,8 @@
 import "server-only";
 import { onTheFloor } from "./client-status";
 import { query, queryOne, hasColumn } from "./db";
-import { nowUtc } from "./posting";
+import { nowUtc, bothClocks, AUTO_SCHEDULE_CATEGORIES } from "./posting";
+import { countryOf, MAX_POST_ATTEMPTS } from "./instagram";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -447,9 +448,56 @@ export type MissedPost = {
   title: string;
   company_name: string;
   scheduled_at: string;
+  /** The slot in the client's clock, then ours. */
+  scheduled_label: string | null;
   late_minutes: number;
   instagram_status: string;
+  /**
+   * Why the publisher passed it over, in words.
+   *
+   * The card used to say "usually the Zap is off" — a guess, and by then a
+   * guess about software this portal no longer uses. Every condition the queue
+   * silently drops a row on is knowable from the row itself, so it is said
+   * rather than left for somebody to work out from an empty feed.
+   */
+  reason: string;
 };
+
+/**
+ * The queue's own conditions, restated as the first thing that is wrong.
+ *
+ * Same order as the publish panel's blockers, so a card and a task page never
+ * disagree about why one video is stuck. Ordered the way somebody would fix
+ * them: the client's settings, then the task's, then the publisher itself.
+ */
+function missedReason(r: {
+  auto_publish: unknown;
+  ig_user_id: unknown;
+  content_category: unknown;
+  has_video: unknown;
+  post_attempts: unknown;
+  post_error: unknown;
+  instagram_status: unknown;
+}): string {
+  if (!r.ig_user_id) return "No Instagram account on this client";
+  if (Number(r.auto_publish) !== 1) return "Auto-publishing is off for this client";
+  if (!Number(r.has_video)) return "No finished video on the task";
+  if (r.content_category !== AUTO_SCHEDULE_CATEGORIES[0]) {
+    return `Only ${AUTO_SCHEDULE_CATEGORIES[0]}s post automatically`;
+  }
+  if (r.post_error) return String(r.post_error).slice(0, 120);
+  if (Number(r.post_attempts) >= MAX_POST_ATTEMPTS) return "Out of retries — reset it on the task";
+  if (r.instagram_status === "processing") return "A publish run took it and never came back";
+  /*
+   * Nothing is wrong with the row, which means nothing came to collect it.
+   *
+   * The publisher is not a background thread in this app — it is an n8n
+   * schedule calling the queue endpoint every fifteen minutes. If that
+   * schedule is off, every video in the portal is exactly this: correct,
+   * due, and untouched.
+   */
+  return "Nothing collected it — check the publishing schedule is running";
+}
 
 /**
  * Videos whose posting slot has come and gone while they're still sitting in
@@ -462,9 +510,19 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
   const ids = clientIds?.map((v) => Math.trunc(Number(v))).filter(Number.isFinite) ?? null;
   const scope = ids && ids.length ? `AND d.client_id IN (${ids.join(",")})` : "";
 
+  // The video column arrived after this table did; an unmigrated database
+  // must still get a dashboard rather than an "Unknown column".
+  const cloud = (await hasColumn("deliverables", "cloud_video_key"))
+    ? "d.cloud_video_key"
+    : "NULL";
+
   const rows = await query<Record<string, unknown>>(
     `SELECT d.id, d.title, c.company_name, d.scheduled_at, d.instagram_status,
-            TIMESTAMPDIFF(MINUTE, d.scheduled_at, ?) AS late_minutes
+            TIMESTAMPDIFF(MINUTE, d.scheduled_at, ?) AS late_minutes,
+            c.auto_publish, c.ig_user_id, c.placeholder_values,
+            d.content_category, d.post_attempts, d.post_error,
+            (${cloud} IS NOT NULL
+              OR (d.edited_link IS NOT NULL AND d.edited_link <> '')) AS has_video
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
       WHERE d.status = 'scheduled'
@@ -489,7 +547,20 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
     title: String(r.title),
     company_name: String(r.company_name),
     scheduled_at: String(r.scheduled_at),
+    // The slot itself, in the client's clock and then ours. A bare date was
+    // the one fact this card was missing: "20 Aug" and "1h late" cannot be
+    // reconciled without knowing what time on the 20th it was meant to go.
+    scheduled_label: bothClocks(String(r.scheduled_at), countryOf(r.placeholder_values)),
     late_minutes: n(r.late_minutes),
     instagram_status: String(r.instagram_status ?? "not_posted"),
+    reason: missedReason({
+      auto_publish: r.auto_publish,
+      ig_user_id: r.ig_user_id,
+      content_category: r.content_category,
+      has_video: r.has_video,
+      post_attempts: r.post_attempts,
+      post_error: r.post_error,
+      instagram_status: r.instagram_status,
+    }),
   }));
 }
