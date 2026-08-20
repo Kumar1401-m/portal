@@ -215,6 +215,35 @@ export async function publishingReadiness(): Promise<{ ready: boolean; reason?: 
         "Publishing columns are missing. Run database/migrate.js, or apply them from Settings → Database.",
     };
   }
+
+  /*
+   * No token means no publish, and asked here so it does not cost a video.
+   *
+   * Without one, `publishClaimed` fails each video it is handed with
+   * `permanent: true` — which is correct for a genuinely bad video and exactly
+   * wrong for a missing setting. A daily run would burn the whole queue, one
+   * permanent failure each, for a configuration nobody had noticed was absent.
+   * Checked before anything is claimed, so an unconfigured portal reports
+   * "not set up" and leaves the queue where it is.
+   *
+   * A per-client token still overrides it; this only covers the agency-wide
+   * fallback, which is what a portal with no per-client tokens relies on.
+   */
+  if (!env.meta.accessToken) {
+    const anyClientToken = await queryOne<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM clients
+        WHERE ig_access_token IS NOT NULL AND ig_access_token <> ''`
+    );
+    if (!Number(anyClientToken?.n)) {
+      return {
+        ready: false,
+        reason:
+          "No Meta access token. Nothing can be published until META_ACCESS_TOKEN is set, " +
+          "or a token is saved on the client.",
+      };
+    }
+  }
+
   return { ready: true };
 }
 

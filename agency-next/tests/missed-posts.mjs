@@ -142,6 +142,47 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("the missed slot is shown as a time, in both clocks");
 }
 
+/* ---------------- a missing token costs nothing ---------------- */
+{
+  /*
+   * The expensive version of "not set up".
+   *
+   * With no Meta token, publishClaimed fails every video it is handed with
+   * permanent: true — right for a genuinely bad video, exactly wrong for an
+   * absent setting. One daily run would have burned the entire queue, one
+   * permanent failure each, for a config nobody knew was missing. So it is
+   * asked before anything is claimed and the run reports itself unready
+   * instead, leaving the queue untouched.
+   */
+  const ig = await load("lib/instagram.ts");
+  const readiness = await ig.publishingReadiness();
+  const hasToken =
+    Boolean(process.env.META_ACCESS_TOKEN) ||
+    Number(
+      (await db.queryOne(
+        "SELECT COUNT(*) AS n FROM clients WHERE ig_access_token IS NOT NULL AND ig_access_token <> ''"
+      )).n
+    ) > 0;
+
+  if (hasToken) {
+    assert.equal(readiness.ready, true, "a token is configured, so publishing is ready");
+  } else {
+    assert.equal(readiness.ready, false, "no token anywhere means not ready");
+    assert.match(readiness.reason, /No Meta access token/);
+  }
+
+  // Whichever way this machine is configured, the check must be the thing that
+  // decides — not a comment claiming it does.
+  const src = read("lib/instagram.ts");
+  assert.match(src, /if \(!env\.meta\.accessToken\)/, "readiness asks about the token");
+  assert.match(
+    src,
+    /const \{ ready \} = await publishingReadiness\(\)/,
+    "and the queue asks readiness before returning anything to claim"
+  );
+  ok("with no Meta token the run reports itself unready instead of failing every video");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");
