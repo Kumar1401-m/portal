@@ -37,6 +37,14 @@ export type ClientFull = {
   ig_user_id: string | null;
   /** The Page the same post also goes to. Null means Instagram only. */
   fb_page_id: string | null;
+  /**
+   * This client's own Meta token, overriding the agency-wide one.
+   *
+   * A live credential. Read only to ask *whether* one is stored — the edit
+   * form shows a saved/not-saved line and never the value, because a password
+   * input still ships whatever is in it to the browser.
+   */
+  ig_access_token: string | null;
   ig_username: string | null;
   whatsapp_number: string | null;
   /** Opt-in to unattended posting. Off unless someone deliberately ticks it. */

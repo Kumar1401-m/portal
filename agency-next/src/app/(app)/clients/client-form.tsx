@@ -43,6 +43,8 @@ export type ClientDefaults = Partial<{
   fb_page_id: string;
   ig_username: string;
   ig_access_token: string;
+  /** Whether one is stored. The value itself never reaches the browser. */
+  has_ig_token: boolean;
   whatsapp_number: string;
   auto_publish: boolean;
   youtube_enabled: boolean;
@@ -230,20 +232,39 @@ export function ClientForm({
                 defaultValue={d.whatsapp_number}
               />
             </Field>
+            {/*
+              Never shows what is stored, and now says whether anything is.
+
+              A password input still ships its value to the browser, so this
+              field is deliberately empty every time the page loads — and that
+              looked exactly like the save had failed. People re-typed the
+              token, saw it vanish again, and concluded the portal was losing
+              it. It was not; there was simply nothing on the page willing to
+              say so.
+            */}
             <Field label="Page access token (optional)" name="ig_access_token">
               <Input
                 id="ig_access_token"
                 name="ig_access_token"
                 type="password"
-                placeholder="leave blank to use the agency token"
-                defaultValue={d.ig_access_token}
+                placeholder={
+                  d.has_ig_token ? "a token is saved — type to replace it" : "leave blank to use the agency token"
+                }
               />
             </Field>
           </div>
-          <p className="-mt-1 text-xs text-muted-foreground">
-            The token is only needed when this account sits outside your own Business Manager.
-            Leave it blank and the automation uses the agency-wide token.
-          </p>
+          {d.has_ig_token ? (
+            <p className="-mt-1 text-xs text-success">
+              A token is saved for this client and is used instead of the agency one. It is never
+              shown again — leave this blank to keep it, type a new one to replace it, or type{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono">none</code> to remove it.
+            </p>
+          ) : (
+            <p className="-mt-1 text-xs text-muted-foreground">
+              Only needed when this account sits outside your own Business Manager. Blank means the
+              automation uses the agency-wide token.
+            </p>
+          )}
 
           {/*
             Auto-publishing is off unless someone deliberately turns it on. The

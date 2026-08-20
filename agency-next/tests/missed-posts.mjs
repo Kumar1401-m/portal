@@ -254,6 +254,43 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("the Instagram badge is earned from Meta, not from somebody having typed a number");
 }
 
+/* ---------------- a saved token says it is saved ---------------- */
+{
+  /*
+   * "meta access token echina tharavatha disappear avuthundi."
+   *
+   * It was not disappearing. The field is a password input, and a password
+   * input still ships its value to the browser, so it is deliberately never
+   * populated — which looks exactly like a save that failed. People re-typed
+   * the token, watched it vanish again, and concluded the portal was losing
+   * it. Nothing on the page was willing to say otherwise.
+   *
+   * Two things have to hold at once: the value never reaches the browser, and
+   * the page says whether one is stored.
+   */
+  const form = read("app/(app)/clients/client-form.tsx");
+  const at = form.indexOf('name="ig_access_token"');
+  const field = form.slice(at - 400, at + 500);
+  assert.ok(
+    !/defaultValue=\{d\.ig_access_token\}/.test(field),
+    "the stored token is never rendered into the input"
+  );
+  assert.match(field, /d\.has_ig_token/, "but whether one exists is");
+  assert.match(form, /A token is saved for this client/, "and says so in words");
+  // The way out, since a blank field means "leave it alone" and not "clear it".
+  assert.match(form, /to remove it/, "and says how to remove one");
+
+  const edit = read("app/(app)/clients/[id]/edit/page.tsx");
+  assert.match(edit, /has_ig_token: Boolean\(client\.ig_access_token\)/, "a boolean, not the value");
+  assert.match(edit, /ig_access_token: ""/, "the value itself stays empty");
+
+  // And blank still means unchanged on save, which is what made the silence
+  // safe rather than destructive in the first place.
+  const actions = read("app/(app)/clients/actions.ts");
+  assert.match(actions, /if \(token\) columns\.ig_access_token =/, "blank leaves the stored one alone");
+  ok("a saved token is invisible but not silent");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");

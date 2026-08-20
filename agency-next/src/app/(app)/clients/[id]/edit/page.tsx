@@ -88,6 +88,8 @@ export default async function EditClientPage({
     // password input still ships its value to the browser. Blank means
     // "unchanged" on save (see parseClient).
     ig_access_token: "",
+    // Whether one exists, never which one — so the form can say it saved.
+    has_ig_token: Boolean(client.ig_access_token),
     is_personal: Boolean(client.is_personal),
     crm_user_ids: assignedCrmIds,
   };
