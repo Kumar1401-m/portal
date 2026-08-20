@@ -13,9 +13,7 @@
  * use these to replace that placeholder — and only ever a placeholder.
  */
 import { callJSON } from "./ai";
-
-export const isPlaceholderTitle = (title: string): boolean =>
-  /^(video|poster|reel|post)\s*\d+$/i.test(String(title || "").trim());
+import { isGeneratedTitle } from "./title";
 
 /**
  * A short title for a piece, from the copy that was just written for it.
@@ -53,6 +51,6 @@ export async function suggestTitle(
   // firmly they are asked not to, and a stray one ends up on the board.
   const title = raw.replace(/^["'“”\s]+|["'“”.\s]+$/g, "").slice(0, 120);
   // A model that echoes the placeholder back has told us nothing.
-  if (!title || isPlaceholderTitle(title)) return null;
+  if (!title || isGeneratedTitle(title)) return null;
   return title;
 }

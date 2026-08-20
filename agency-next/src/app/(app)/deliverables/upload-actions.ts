@@ -14,7 +14,8 @@ import {
   isStorageConfigured,
 } from "@/lib/storage";
 import { buildVideoPermalink } from "@/lib/video-link";
-import { suggestTitle, isPlaceholderTitle } from "@/lib/content";
+import { suggestTitle } from "@/lib/content";
+import { isGeneratedTitle } from "@/lib/title";
 import { startAnalysisAfterUpload } from "../editor/actions";
 
 export type PresignResult =
@@ -156,7 +157,7 @@ export async function attachUploadedVideo(
       [deliverableId]
     );
     const source = (t?.description ?? "").trim() || (t?.caption ?? "").trim();
-    if (t && source && isPlaceholderTitle(t.title)) {
+    if (t && source && isGeneratedTitle(t.title)) {
       const named = await suggestTitle(source, t.company_name);
       if (named) await execute("UPDATE deliverables SET title = ? WHERE id = ?", [named, deliverableId]);
     }

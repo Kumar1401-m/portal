@@ -13,7 +13,6 @@ import { pathToFileURL } from "node:url";
 const SRC = process.env.PORTAL_SRC;
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
 const c = await load("lib/constants.ts");
-const content = await load("lib/content.ts");
 const ai_mod = await load("lib/whatsapp-ai.ts");
 
 let pass = 0;
@@ -72,17 +71,9 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 }
 
 /* ---------------- a placeholder title is not a name ---------------- */
-{
-  // What generateMonthTasks calls things before anybody writes a word.
-  for (const t of ["Video 6", "Poster 2", "video 12", "  Reel 3 ", "Post 1"]) {
-    assert.ok(content.isPlaceholderTitle(t), `${JSON.stringify(t)} is a placeholder`);
-  }
-  // Anything a person chose is theirs, and must survive untouched.
-  for (const t of ["Diwali reel", "Video walkthrough", "Poster for the launch", "3 BHK tour", "", "Video"]) {
-    assert.ok(!content.isPlaceholderTitle(t), `${JSON.stringify(t)} is a real title`);
-  }
-  ok("a generated name is told apart from one somebody chose");
-}
+// Moved to auto-title.mjs, along with the rest of it. There were two of these
+// rules, one here and one in video-ai, disagreeing about whether an empty
+// title counted — they are one function now and tested in one place.
 
 /* ---------------- and it is findable, in exactly one place ---------------- */
 {
@@ -153,7 +144,7 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   const up = readFileSync(`${SRC}/app/(app)/deliverables/upload-actions.ts`, "utf8");
   // Same rule as the content desk — only over a placeholder, never over a
   // title somebody typed.
-  has(up, "isPlaceholderTitle(t.title)", "a named task keeps its name");
+  has(up, "isGeneratedTitle(t.title)", "a named task keeps its name");
   has(up, "(t?.description ?? \"\").trim() || (t?.caption ?? \"\").trim()", "named from the brief, then the caption");
   // The analysis has not finished at upload time and the file is VID_2026.mp4,
   // so neither is a source.

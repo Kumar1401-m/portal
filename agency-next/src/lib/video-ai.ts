@@ -20,6 +20,7 @@ import "server-only";
 import { query, queryOne, execute, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
+import { isGeneratedTitle, titleFromTopic } from "./title";
 import {
   getClientContext,
   renderContext,
@@ -799,7 +800,35 @@ async function generate(
     ]
   );
 
+  /*
+   * Name it here, the moment we know what it is.
+   *
+   * This used to happen only in `applyCaption`, which is a button somebody
+   * has to press — so a video could be uploaded, analysed, sent and approved
+   * while the board still called it "Video 7". The topic is the one thing the
+   * analysis is certain about by now (it had to be, to write the caption),
+   * and waiting for a click to spend it was the whole bug.
+   */
+  await nameFromTopic(deliverableId, s(parsed.topic));
+
   return { ok: true, state: "done", caption: checked.caption, more: false };
+}
+
+/**
+ * Replace a portal-written title with what the footage turned out to be about.
+ *
+ * Safe to call twice — the second call sees a real title and leaves it alone,
+ * which is also what protects a name somebody typed.
+ */
+async function nameFromTopic(deliverableId: number, topic: string | null): Promise<void> {
+  const fresh = titleFromTopic(topic);
+  if (!fresh) return;
+  const current = await queryOne<{ title: string }>(
+    "SELECT title FROM deliverables WHERE id = ?",
+    [deliverableId]
+  );
+  if (!current || !isGeneratedTitle(current.title)) return;
+  await execute("UPDATE deliverables SET title = ? WHERE id = ?", [fresh, deliverableId]);
 }
 
 /* -------------------------------- Applying it -------------------------------- */
@@ -811,44 +840,6 @@ async function generate(
  * and never touches `deliverables.caption` on its own — otherwise a rewrite
  * would silently discard whatever a human had edited since.
  */
-/**
- * Titles the portal wrote itself, which the AI may replace.
- *
- * Two shapes, both from `task-plan` and `autoTaskTitle`: the numbered
- * placeholder a generated month gets ("Video 12", "Poster 3"), and the
- * category-and-date one a task with no typed name gets ("Instagram Reel ·
- * 11 Aug"). Neither says anything about the video.
- *
- * Anything else was typed by a person, and a person's title is a decision.
- * Overwriting it because a model watched the footage would be the portal
- * arguing with the brief.
- */
-function isGeneratedTitle(title: string): boolean {
-  const t = title.trim();
-  if (!t) return true;
-  if (/^(video|poster|reel|post)\s+\d+$/i.test(t)) return true;
-  // "Instagram Reel · 11 Aug" — a category, then a day.
-  if (/·\s*\d{1,2}\s+\w{3,}/.test(t)) return true;
-  return false;
-}
-
-/**
- * A task title from what the video turned out to be about.
- *
- * `topic` is asked for as "the subject in 3-6 words", which is what a title
- * is. Trimmed of the trailing punctuation models like to add, capped to
- * something that fits a table cell, and never allowed to be blank.
- */
-function titleFromTopic(topic: string | null): string | null {
-  const t = String(topic || "")
-    .replace(/["'`]/g, "")
-    .replace(/[.\s]+$/, "")
-    .trim();
-  if (t.length < 3) return null;
-  const capped = t.length > 90 ? `${t.slice(0, 87).trimEnd()}…` : t;
-  return capped.charAt(0).toUpperCase() + capped.slice(1);
-}
-
 export async function applyCaption(deliverableId: number): Promise<{ ok: boolean; error?: string }> {
   const a = await getAnalysis(deliverableId);
   if (!a || a.state !== "done" || !a.caption) {
@@ -860,25 +851,17 @@ export async function applyCaption(deliverableId: number): Promise<{ ok: boolean
    *
    * A generated month arrives as "Video 1" through "Video 20", which tells a
    * board nothing and makes two clients' work indistinguishable at a glance.
-   * The analysis already knows what the footage is about — it had to, to write
-   * the caption — so the title comes from the same look.
-   *
-   * Only over a title the portal wrote. Someone who typed a name has said what
-   * this piece is, and that outranks anything read off the footage.
+   * Normally the analysis has already done this on finishing; this covers a
+   * row analysed before it did, and costs one query to find out.
    */
-  const current = await queryOne<{ title: string }>(
-    "SELECT title FROM deliverables WHERE id = ?",
-    [deliverableId]
-  );
-  const fresh = current && isGeneratedTitle(current.title) ? titleFromTopic(a.topic) : null;
+  await nameFromTopic(deliverableId, a.topic);
 
   const withTags = a.hashtags ? `${a.caption}\n\n${a.hashtags}` : a.caption;
-  await execute(
-    `UPDATE deliverables SET caption = ?, hashtags = ?${fresh ? ", title = ?" : ""} WHERE id = ?`,
-    fresh
-      ? [withTags, a.hashtags, fresh, deliverableId]
-      : [withTags, a.hashtags, deliverableId]
-  );
+  await execute("UPDATE deliverables SET caption = ?, hashtags = ? WHERE id = ?", [
+    withTags,
+    a.hashtags,
+    deliverableId,
+  ]);
   return { ok: true };
 }
 

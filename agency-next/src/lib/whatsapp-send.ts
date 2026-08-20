@@ -129,18 +129,20 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
 /** One sentence describing what the client received, for the UI to echo back. */
 export function describeDelivery(r: Extract<DeliveryResult, { ok: true }>): string {
   /*
-   * Preparing, not sent.
+   * Accepted, not yet in the group.
    *
-   * A 300 MB file is downloaded and re-encoded before WhatsApp will take it,
-   * which is minutes rather than seconds. Telling somebody it has gone and
-   * having the group stay empty for four minutes is how a working feature gets
-   * reported as broken.
+   * The service answers the moment it takes the job and does the sending
+   * afterwards, so nobody waits on a spinner for a download, a re-encode and
+   * an upload. That means this sentence cannot claim it has arrived — saying
+   * "sent" and having the group stay empty for four minutes is how a working
+   * feature gets reported as broken. The approvals board carries the truth
+   * from there; it updates itself as the service reports each attempt.
    */
   if (r.queued) {
     return (
-      `${r.videoCode} is being prepared for WhatsApp — it is a large file, so it is being ` +
-      `compressed first. It will reach ${r.clientName}'s group in a few minutes, with the ` +
-      `question straight after it. The approvals board will show it as sent when it lands.`
+      `${r.videoCode} is on its way to ${r.clientName}'s group, with the question straight ` +
+      `after it. A large file is compressed first, so give it a few minutes — the approvals ` +
+      `board shows it as sent when it lands, or says why if it doesn't.`
     );
   }
 

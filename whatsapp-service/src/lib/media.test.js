@@ -231,6 +231,39 @@ function fileOf(bytes) {
     assert.match(queue, /followUpsSent/, 'and says so, so the portal does not repeat them');
   });
 
+  await check('the button does not wait for the sending', () => {
+    /*
+     * Pressing "send for approval" answers now, and the download, the
+     * re-encode and the upload happen after. It used to race the job against
+     * a 25-second clock, which meant a small video held the request open for
+     * as long as it took and a big one held it for 25 — a spinner either way,
+     * on a page where nothing else could be done meanwhile.
+     *
+     * What is refused synchronously stays refused synchronously: the fields,
+     * the URL, the group id and whether WhatsApp is connected at all are all
+     * checked before the job is submitted. Everything after that can only be
+     * known later, and the queue already reports it.
+     */
+    const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'index.js'), 'utf8');
+    const at = src.indexOf("router.post('/api/send-video'");
+    const end = src.indexOf("router.post('/api/send-document'", at);
+    const route = src.slice(at, end);
+
+    assert.ok(!/await\s+job\b|Promise\.race/.test(route), 'nothing waits on the job');
+    assert.ok(route.indexOf('job.catch(') > 0, 'and its failure cannot take the process down');
+    assert.ok(
+      route.indexOf('queued: true') > route.indexOf('sendQueue.submit'),
+      'the reply says it is queued, not that it is sent'
+    );
+    // The cheap refusals are still made before anything is queued.
+    for (const guard of ['must be an http(s) URL', '@g.us', 'is not connected']) {
+      assert.ok(
+        route.indexOf(guard) < route.indexOf('sendQueue.submit'),
+        `"${guard}" is still answered in the request`
+      );
+    }
+  });
+
   console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}\n`);
   process.exit(failed ? 1 : 0);
 })();

@@ -153,9 +153,10 @@ function buildRoutes({ whatsapp, sendQueue }) {
   /**
    * POST /api/send-video
    *
-   * Queues one approval video. Returns as soon as the send resolves — the
-   * portal wants to know whether it went, and a video send is seconds, not
-   * minutes. Retries happen inside the queue before this resolves.
+   * Queues one approval video and answers immediately. The download, the
+   * re-encode, the upload and the retries all happen after the response; the
+   * queue reports each attempt back to the portal, so the approvals board
+   * shows what actually happened rather than this reply guessing at it.
    *
    * Body: { videoCode, deliverableId, groupId, videoUrl, caption?, filename? }
    */
@@ -207,49 +208,27 @@ function buildRoutes({ whatsapp, sendQueue }) {
       });
 
       /*
-       * Answer quickly, finish however long it takes.
+       * Answer the moment the job is accepted, never when it finishes.
        *
-       * A small video is sent in a few seconds and the portal gets its "sent"
-       * in the same request, which is what somebody pressing the button
-       * expects. A 300 MB one has to be downloaded and re-encoded first, and
-       * holding an HTTP request open for four minutes only guarantees the
-       * portal gives up on a send that is going to succeed.
+       * Sending is a download, sometimes a re-encode, then an upload through a
+       * browser — seconds for a small clip and minutes for a 300 MB reel, and
+       * the person who pressed the button should not be watching a spinner for
+       * either. Everything worth refusing has been refused above: the fields,
+       * the URL, the group id, and whether WhatsApp is connected at all. What
+       * is left can only be reported after the fact, and it already is — the
+       * queue posts every attempt back to the portal, which is where the
+       * approvals board and the send log come from, live.
        *
-       * So the job is raced against a short clock. It keeps running either
-       * way, and the queue reports every attempt to the portal — which is
-       * where the send log comes from, not from this response.
+       * Not awaited on purpose, and `catch` is not optional: an unhandled
+       * rejection here would take the process down with it.
        */
-      const SETTLE_MS = 25_000;
-      let timer;
-      const result = await Promise.race([
-        job,
-        new Promise((resolve) => {
-          timer = setTimeout(() => resolve({ ok: true, queued: true }), SETTLE_MS);
-        }),
-      ]).finally(() => clearTimeout(timer));
-
-      if (result.queued) {
-        log.info('still working — answering now and finishing in the background', { videoCode });
-        // Not awaited: the point is to answer. Failures are reported by the
-        // queue, and an unhandled rejection here would take the process down.
-        job.catch(() => {});
-        return res.json({
-          ok: true,
-          queued: true,
-          note: 'The video is being prepared and will go to the group shortly.',
-        });
-      }
-
-      if (!result.ok) {
-        return res.status(result.permanent ? 422 : 502).json({
-          ok: false,
-          error: result.error,
-          permanent: Boolean(result.permanent),
-          attempts: result.attempts,
-        });
-      }
-
-      res.json({ ok: true, ...result });
+      job.catch(() => {});
+      log.info('accepted — sending in the background', { videoCode });
+      res.json({
+        ok: true,
+        queued: true,
+        note: 'The video is being prepared and will go to the group shortly.',
+      });
     } catch (err) {
       log.error('send-video failed', { videoCode, error: err.message });
       res.status(500).json({ ok: false, error: err.message });
