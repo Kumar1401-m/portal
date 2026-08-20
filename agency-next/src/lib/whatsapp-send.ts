@@ -126,33 +126,24 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
   };
 }
 
-/** One sentence describing what the client received, for the UI to echo back. */
+/**
+ * What the screen says after the button.
+ *
+ * Kept to a few words on purpose. This is a confirmation, not a report: the
+ * paragraph that used to be here explained transcoding, follow-up messages and
+ * where to look next, all of which is true and none of which anybody reads
+ * while sending the next video. The approvals board is where a send is
+ * actually followed — it shows every one of them and updates itself.
+ *
+ * The exception is the one case worth interrupting somebody for: the video
+ * arrived and the question asking them to approve it did not, so the client is
+ * holding a video and does not know what is wanted. That one still says so,
+ * and says what to do.
+ */
 export function describeDelivery(r: Extract<DeliveryResult, { ok: true }>): string {
-  /*
-   * Accepted, not yet in the group.
-   *
-   * The service answers the moment it takes the job and does the sending
-   * afterwards, so nobody waits on a spinner for a download, a re-encode and
-   * an upload. That means this sentence cannot claim it has arrived — saying
-   * "sent" and having the group stay empty for four minutes is how a working
-   * feature gets reported as broken. The approvals board carries the truth
-   * from there; it updates itself as the service reports each attempt.
-   */
-  if (r.queued) {
-    return (
-      `${r.videoCode} is on its way to ${r.clientName}'s group, with the question straight ` +
-      `after it. A large file is compressed first, so give it a few minutes — the approvals ` +
-      `board shows it as sent when it lands, or says why if it doesn't.`
-    );
+  if (!r.asked) {
+    return `${r.videoCode} sent — but the review question didn't go. Send it by hand.`;
   }
-
-  const what = r.sentAsLink
-    ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got a link to watch it, then the caption.`
-    : `${r.videoCode} sent to ${r.clientName} on WhatsApp, followed by the caption.`;
-
-  // Said plainly, because it is the one case where the client has the video
-  // and does not know what is being asked of them.
-  return r.asked
-    ? `${what} They can reply OK to approve, or CHANGE with what to adjust.`
-    : `${what} The "please review" message did not go through — send it by hand, or press send again once WhatsApp is back.`;
+  const how = r.sentAsLink ? " as a link" : "";
+  return `${r.videoCode} sent to ${r.clientName}${how} ✓`;
 }

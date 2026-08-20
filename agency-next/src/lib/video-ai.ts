@@ -877,3 +877,39 @@ export async function getPendingAnalyses(limit = 20): Promise<
       ORDER BY v.updated_at DESC LIMIT ${Number(limit) || 20}`
   );
 }
+
+/**
+ * Name the ones that were analysed before anybody thought to name them.
+ *
+ * The rename now happens as the analysis finishes, but every video analysed
+ * before that is still called "Video 7" and never will be — its analysis is
+ * done, so nothing runs over it again. Those are exactly the videos on the
+ * board today, which makes this worth draining rather than leaving as a
+ * footnote.
+ *
+ * No model and no network: the topic was written months ago and is sitting in
+ * the row. Bounded because this runs on a page visit, and after the backlog
+ * clears it matches nothing and costs one indexed query.
+ */
+export async function nameAnalysedVideos(limit = 25): Promise<number> {
+  if (!(await hasColumn("video_analysis", "state"))) return 0;
+
+  const rows = await query<{ id: number; title: string; topic: string | null }>(
+    `SELECT d.id, d.title, v.topic
+       FROM video_analysis v JOIN deliverables d ON d.id = v.deliverable_id
+      WHERE v.state = 'done' AND v.topic IS NOT NULL AND v.topic <> ''
+      ORDER BY v.updated_at DESC LIMIT ${Number(limit) || 25}`
+  );
+
+  let named = 0;
+  for (const r of rows) {
+    // Filtered here rather than in SQL: "is this a title somebody typed" is a
+    // rule with three shapes to it, and it is already written down once.
+    if (!isGeneratedTitle(r.title)) continue;
+    const fresh = titleFromTopic(r.topic);
+    if (!fresh) continue;
+    await execute("UPDATE deliverables SET title = ? WHERE id = ?", [fresh, r.id]);
+    named++;
+  }
+  return named;
+}

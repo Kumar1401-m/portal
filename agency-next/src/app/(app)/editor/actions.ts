@@ -10,6 +10,7 @@ import {
   applyCaption,
   getAnalysis,
   getPendingAnalyses,
+  nameAnalysedVideos,
 } from "@/lib/video-ai";
 
 export type AnalyseState = {
@@ -167,6 +168,12 @@ export async function advanceStalledAnalyses(): Promise<{ advanced: number }> {
       const r = await runAnalysis(job.deliverable_id);
       if (r.state !== before) advanced++;
     }
+
+    // And name anything analysed before the analysis started doing it itself.
+    // No model, no network — the topic is already in the row — and once the
+    // backlog is drained this matches nothing.
+    advanced += await nameAnalysedVideos();
+
     if (advanced) {
       revalidatePath("/editor");
       revalidatePath("/deliverables");

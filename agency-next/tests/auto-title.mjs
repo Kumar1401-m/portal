@@ -97,4 +97,26 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   ok("applying a caption by hand names it as well, for anything analysed earlier");
 }
 
+/* ---------------- the ones already on the board ---------------- */
+{
+  // Everything analysed before the rename existed is still called "Video 7"
+  // and never would be otherwise: its analysis is done, so nothing runs over
+  // it again. Those are the videos actually on the board today.
+  const src = read("lib/video-ai.ts");
+  const at = src.indexOf("export async function nameAnalysedVideos");
+  assert.ok(at > 0, "there is a backfill");
+  const fn = src.slice(at, at + 1400);
+  assert.ok(fn.includes("v.state = 'done'"), "it looks at finished analyses");
+  assert.ok(fn.includes("isGeneratedTitle(r.title)"), "and still refuses to touch a typed title");
+  assert.ok(fn.includes("LIMIT "), "bounded, because it runs on a page visit");
+  assert.ok(!/callJSON|fetch\(/.test(fn), "and spends nothing — the topic is already in the row");
+
+  const actions = read("app/(app)/editor/actions.ts");
+  assert.ok(
+    actions.indexOf("nameAnalysedVideos()") > actions.indexOf("advanceStalledAnalyses"),
+    "and it is drained by the queue everyone already opens"
+  );
+  ok("videos analysed before this get named too, without re-analysing anything");
+}
+
 await finish(pass);
