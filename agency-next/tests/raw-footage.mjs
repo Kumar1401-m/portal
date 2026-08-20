@@ -51,7 +51,6 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   for (const [file, why] of [
     ["app/portal/actions.ts", "the client's own upload"],
     ["app/api/whatsapp/footage/route.ts", "a link shared in the group"],
-    ["app/(app)/deliverables/actions.ts", "the agency's form"],
   ]) {
     const src = readFileSync(`${SRC}/${file}`, "utf8");
     has(src, "rawUploadStatus(", `${why} asks before advancing`);
@@ -61,12 +60,22 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
     );
   }
 
-  // The dialog is a client component and `lib/portal.ts` is server-only, which
-  // is why the rules moved to a module of their own.
+  /*
+   * The agency's own form was the third, and is gone.
+   *
+   * It lived inside Update Task Details — a dialog for a task's fields, with
+   * one form in it that changed the task's status instead. Footage now comes
+   * in the two ways it actually arrives: the client's own upload, and a link
+   * they share in the group. Both still ask `rawUploadStatus` first, which is
+   * the rule this file exists to protect.
+   */
   const modal = readFileSync(`${SRC}/app/(app)/deliverables/edit-video-modal.tsx`, "utf8");
-  has(modal, 'from "@/lib/raw-footage"', "the dialog reads the pure module");
-  assert.ok(!/from "@\/lib\/portal"/.test(modal), "and not the server-only one");
-  has(modal, "acceptsRaw(d.status)", "so the form shows on both statuses");
+  assert.ok(!/acceptsRaw|submitRawOrReference/.test(modal), "the dialog no longer takes footage");
+  const staff = readFileSync(`${SRC}/app/(app)/deliverables/actions.ts`, "utf8");
+  assert.ok(
+    !/submitRawOrReference/.test(staff),
+    "and the action behind it is gone rather than left as an unreachable endpoint"
+  );
 
   const pure = readFileSync(`${SRC}/lib/raw-footage.ts`, "utf8");
   assert.ok(

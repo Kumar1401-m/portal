@@ -29,7 +29,6 @@ import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/servic
 import { monthKey, autoTaskTitle } from "@/lib/utils";
 import { localTimeToUtc, scheduleDateToUtc } from "@/lib/posting";
 import { retryPublish, publishHandoff } from "@/lib/instagram";
-import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/raw-footage";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
@@ -816,77 +815,6 @@ export async function quickStatus(formData: FormData): Promise<void> {
     undefined
   );
 }
-
-/* --------------------- Raw footage / reference links (staff-side) --------------------- */
-
-export type RawFootageState = { ok: boolean; error?: string; message?: string };
-
-/**
- * Staff-side equivalent of the client portal's raw-footage form — for when
- * the client sent footage outside the portal (WhatsApp, email) and staff/crm
- * enter the link on their behalf. If there's no raw footage at all, reference
- * links can be provided instead so editing can still start.
- */
-export async function submitRawOrReference(
-  _prev: RawFootageState,
-  formData: FormData
-): Promise<RawFootageState> {
-  const user = await requireUser(ADMIN_OR_CRM_ROLES);
-  const id = Number(formData.get("deliverable_id"));
-  if (!id) return { ok: false, error: "Missing task." };
-
-  const d = await queryOne<{ id: number; client_id: number; status: string; title: string }>(
-    "SELECT id, client_id, status, title FROM deliverables WHERE id = ?",
-    [id]
-  );
-  if (!d) return { ok: false, error: "Task not found." };
-  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
-  /*
-   * A slot nobody has written yet takes footage too.
-   *
-   * The client portal and the WhatsApp handler have always accepted both —
-   * a client who already has the footage should not have to wait to be asked
-   * for it. The agency's own form was the one place that refused, so a link a
-   * client had sent by any other route could not be pasted in here.
-   */
-  if (!(ACCEPTS_RAW as readonly string[]).includes(d.status)) {
-    return { ok: false, error: "This task isn't waiting for raw footage." };
-  }
-
-  const rawLink = String(formData.get("raw_drive_link") || "").trim();
-  const referenceLinks = String(formData.get("reference_links") || "").trim();
-  if (!rawLink && !referenceLinks) {
-    return { ok: false, error: "Add a raw footage link, or at least one reference link." };
-  }
-  if (rawLink && !/^https?:\/\/.+/i.test(rawLink)) {
-    return { ok: false, error: "Raw footage link must be a valid URL." };
-  }
-
-  // Ready to edit only if we had asked for it. Footage against a brief nobody
-  // has written keeps its place in the content queue — see rawUploadStatus.
-  const next = rawUploadStatus(d.status);
-  const updates: Record<string, string | null> = next ? { status: next } : {};
-  if (rawLink) updates.raw_drive_link = rawLink;
-  if (referenceLinks) updates.reference_links = referenceLinks;
-
-  const keys = Object.keys(updates);
-  await execute(`UPDATE deliverables SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [
-    ...keys.map((k) => updates[k]),
-    id,
-  ]);
-
-  revalidatePath("/deliverables");
-  revalidatePath(`/deliverables/${id}`);
-  revalidatePath("/today");
-
-  const what = rawLink ? "Raw footage added" : "Reference links added";
-  return {
-    ok: true,
-    message: next ? `${what} — ready to edit.` : `${what}. The content still needs writing.`,
-  };
-}
-
-/* --------------------- Retry a failed Instagram post --------------------- */
 
 export type RetryState = { ok: boolean; error?: string };
 

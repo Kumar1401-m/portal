@@ -1,16 +1,13 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
-import { Pencil, Loader2, Send, Wand2, UploadCloud, Trash2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Pencil, Loader2, Send, Wand2, Trash2 } from "lucide-react";
 import {
   updateVideoDetails,
   generateCaptionAction,
-  submitRawOrReference,
   type VideoDetailsState,
-  type RawFootageState,
 } from "./actions";
 import type { DeliverableListRow } from "@/lib/deliverables";
-import { acceptsRaw } from "@/lib/raw-footage";
 import { serviceOf, type ServiceKey } from "@/lib/services";
 import { Modal } from "@/components/ui/modal";
 import { VideoUpload, CaptionLine, type CaptionNote } from "./video-upload";
@@ -44,10 +41,6 @@ export function EditVideoModal({
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<VideoDetailsState>({ ok: false });
   const [pending, startSave] = useTransition();
-  const [rawState, rawAction, rawPending] = useActionState<RawFootageState, FormData>(
-    submitRawOrReference,
-    { ok: false }
-  );
 
   const [caption, setCaption] = useState(d.caption ?? "");
   const [editedLink, setEditedLink] = useState(d.edited_link ?? "");
@@ -174,43 +167,17 @@ export function EditVideoModal({
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Update Task Details">
-        {acceptsRaw(d.status) ? (
-          <form action={rawAction} className="shrink-0 space-y-3 border-b border-border bg-amber-500/5 p-6">
-            <input type="hidden" name="deliverable_id" value={d.id} />
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <UploadCloud className="h-4 w-4 text-amber-600" />
-              {d.status === "waiting_for_raw" ? "Waiting for raw footage" : "Raw footage"}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Add the client&apos;s raw footage link, or — if none was provided — paste
-              reference / inspiration links so editing can start anyway.
-            </p>
-            <div className="space-y-1.5">
-              <Label htmlFor={`rf-${d.id}`}>Raw footage link (Drive, etc.)</Label>
-              <Input id={`rf-${d.id}`} name="raw_drive_link" placeholder="https://drive.google.com/…" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`rl-${d.id}`}>Reference / inspiration links</Label>
-              <Textarea
-                id={`rl-${d.id}`}
-                name="reference_links"
-                rows={2}
-                placeholder="One or more links, if no raw footage was sent"
-              />
-            </div>
-            {rawState.error ? <p className="text-sm text-destructive">{rawState.error}</p> : null}
-            {rawState.ok && rawState.message ? (
-              <p className="text-sm text-emerald-600">{rawState.message}</p>
-            ) : null}
-            <div className="flex justify-end">
-              <button type="submit" disabled={rawPending} className={buttonClasses({ size: "sm" })}>
-                {rawPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                Submit &amp; move to editing
-              </button>
-            </div>
-          </form>
-        ) : null}
+        {/*
+          The raw-footage form used to sit here, above the details.
 
+          Taking it out of this modal does not remove the stage: footage still
+          arrives from the client's WhatsApp group, the chase reminders still
+          go out, and a task is still moved on from the workflow controls on
+          the task page. What is gone is a second, quieter place to do it —
+          this modal is for a task's details, and a form that changed the
+          task's status from inside it was a different job wearing the same
+          button.
+        */}
         <form action={save} className="flex min-h-0 flex-1 flex-col">
           <input type="hidden" name="deliverable_id" value={d.id} />
 
