@@ -23,7 +23,14 @@ import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { env } from "./env";
 import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
-import { nowUtc, AUTO_SCHEDULE_CATEGORIES, prettyLocal } from "./posting";
+import {
+  nowUtc,
+  AUTO_SCHEDULE_CATEGORIES,
+  bothClocks,
+  windowHoursFor,
+  postingTimeLabel,
+  MAX_WINDOW_HOURS,
+} from "./posting";
 
 /** How many times a single deliverable may be attempted before giving up. */
 export const MAX_POST_ATTEMPTS = 4;
@@ -38,19 +45,23 @@ export const MAX_POST_ATTEMPTS = 4;
 export const CLAIM_LEASE_MINUTES = 20;
 
 /**
- * How long after its slot a post may still go out on its own.
+ * How long after its slot a post may still go out on its own — at the outside.
  *
- * The posting window is two hours wide (see POSTING_WINDOW in posting.ts), and
- * a post belongs to its window. Past that it is not "late", it is missed: the
+ * A post belongs to its window. Past that it is not "late", it is missed: the
  * evening it was written for has gone, and publishing it at midnight puts a
  * reel in front of nobody and leaves an odd timestamp on a client's account
- * for ever.
+ * for ever. So the publisher stops offering it, the missed-posts board picks
+ * it up, and a person moves it to the next day — a decision, made by someone
+ * who can see whether it is still worth posting at all.
  *
- * So the publisher stops offering it, the missed-posts board picks it up, and
- * a person moves it to the next day — a decision, made by someone who can see
- * whether it is still worth posting at all.
+ * The window is the client's, not one number for the roster: India posts 5–7
+ * PM and Australia 7–8 PM, in their own clocks. This is the widest of them,
+ * and it exists because the SQL below cannot read a country out of a JSON
+ * column per row. It prefilters on the widest and each row is then checked
+ * against its own window in `missedItsWindow`. Over-selecting and narrowing is
+ * safe; the reverse would drop a post that was still due.
  */
-export const PUBLISH_WINDOW_HOURS = 2;
+export const PUBLISH_WINDOW_HOURS = MAX_WINDOW_HOURS;
 
 /** Content categories eligible for unattended posting. */
 export const AUTO_POST_CATEGORIES = ["Instagram Reel", "Instagram Post"];
@@ -240,6 +251,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
     ig_user_id: string;
     ig_access_token: string | null;
     fb_page_id: string | null;
+    placeholder_values: unknown;
     email: string | null;
     whatsapp_number: string | null;
     phone: string | null;
@@ -249,7 +261,7 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
             d.content_category, d.campaign,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
             d.scheduled_at, d.post_attempts,
-            c.ig_user_id, c.ig_access_token, c.fb_page_id,
+            c.ig_user_id, c.ig_access_token, c.fb_page_id, c.placeholder_values,
             c.email, c.whatsapp_number, c.phone, c.contact_person
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id
@@ -321,6 +333,16 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
         r.edited_link ||
         "";
       if (!videoUrl) return null; // storage not configured — skip rather than fail the run
+
+      /*
+       * The SQL above kept anything inside the widest window on the roster;
+       * this row only belongs in the queue if it is inside its own.
+       *
+       * Without it an Australian reel set for 7 PM Sydney would still be
+       * handed out at 9 — inside India's two hours, an hour past the window
+       * their client was told about, and dark by then where it is being read.
+       */
+      if (missedItsWindow(String(r.scheduled_at), countryOf(r.placeholder_values))) return null;
 
       return {
         deliverable_id: r.id,
@@ -877,11 +899,33 @@ export type DeliverablePublishInfo = {
   nextLook: string | null;
 };
 
-/** True once a post's slot is far enough past that the publisher has let it go. */
-function missedItsWindow(scheduledAt: string): boolean {
+/**
+ * True once a post's slot is far enough past that the publisher has let it go.
+ *
+ * Measured in the client's window, not one number for everybody. India posts
+ * 5–7 PM and Australia 7–8 PM local, so "an hour late" ends the Australian
+ * window and is still inside the Indian one. Judging both by the widest would
+ * put a Sydney reel out at 9 PM their time; by the narrowest, it would drop an
+ * Indian post that was still perfectly due.
+ */
+function missedItsWindow(scheduledAt: string, country: string | null | undefined): boolean {
   const due = Date.parse(`${scheduledAt.replace(" ", "T")}Z`);
   if (Number.isNaN(due)) return false;
-  return Date.now() - due > PUBLISH_WINDOW_HOURS * 3_600_000;
+  return Date.now() - due > windowHoursFor(country) * 3_600_000;
+}
+
+/**
+ * The client's country, out of the JSON blob it is stored in.
+ *
+ * Same field the caption studio localises from, so a client set up once is
+ * right in both places rather than being told twice where they are.
+ */
+export function countryOf(placeholderValues: unknown): string | null {
+  const ph =
+    placeholderValues && typeof placeholderValues === "object"
+      ? (placeholderValues as Record<string, unknown>)
+      : {};
+  return typeof ph.country === "string" && ph.country.trim() ? ph.country.trim() : null;
 }
 
 
@@ -926,6 +970,7 @@ export async function getPublishInfo(
     auto_publish: number | null;
     ig_user_id: string | null;
     fb_page_id: string | null;
+    placeholder_values: unknown;
     facebook_status: string | null;
     facebook_post_id: string | null;
     facebook_error: string | null;
@@ -937,7 +982,8 @@ export async function getPublishInfo(
     `SELECT d.instagram_status, d.instagram_media_id, d.instagram_permalink,
             d.instagram_posted_at, d.posted_at, d.scheduled_at,
             d.post_attempts, d.post_error, d.content_category, d.edited_link,
-            ${cloud}, c.auto_publish, c.ig_user_id, c.fb_page_id, c.status AS client_status,
+            ${cloud}, c.auto_publish, c.ig_user_id, c.fb_page_id, c.placeholder_values,
+            c.status AS client_status,
             ${fbCols}
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
@@ -947,6 +993,9 @@ export async function getPublishInfo(
 
   const status = row.instagram_status || "not_posted";
   const attempts = Number(row.post_attempts ?? 0);
+  // Every time on this panel is in the client's clock first and ours second,
+  // and the window it is judged against is theirs too.
+  const country = countryOf(row.placeholder_values);
 
   /*
    * Why the publisher would pass this video over.
@@ -986,11 +1035,12 @@ export async function getPublishInfo(
     }
     if (!row.scheduled_at) {
       blockers.push("No posting time is set, so it is never due. Approve it, or press Schedule.");
-    } else if (missedItsWindow(row.scheduled_at)) {
+    } else if (missedItsWindow(row.scheduled_at, country)) {
+      const hours = windowHoursFor(country);
       blockers.push(
-        `Its slot passed more than ${PUBLISH_WINDOW_HOURS} hours ago, so it won't go out on its ` +
-          `own — a reel posted in the middle of the night reaches nobody. Move the date to the ` +
-          `next day, or use Post now.`
+        `Its window (${postingTimeLabel(country)}) closed more than ${hours} hour` +
+          `${hours === 1 ? "" : "s"} ago, so it won't go out on its own — a reel posted in the ` +
+          `middle of the night reaches nobody. Move the date to the next day, or use Post now.`
       );
     }
     if (attempts >= MAX_POST_ATTEMPTS || status === "failed") {
@@ -1021,11 +1071,11 @@ export async function getPublishInfo(
     instagramStatus: status,
     mediaId: row.instagram_media_id,
     permalink: row.instagram_permalink,
-    postedAt: prettyLocal(row.instagram_posted_at || row.posted_at),
+    postedAt: bothClocks(row.instagram_posted_at || row.posted_at, country),
     // In the client's own clock, not the UTC it is stored in. Printed raw, a
     // reel set for 6pm read "12:30:00" on the page — the right instant, shown
     // as the wrong time, on the panel someone opens to ask when it posts.
-    scheduledAt: prettyLocal(row.scheduled_at),
+    scheduledAt: bothClocks(row.scheduled_at, country),
     attempts,
     maxAttempts: MAX_POST_ATTEMPTS,
     error: row.post_error,

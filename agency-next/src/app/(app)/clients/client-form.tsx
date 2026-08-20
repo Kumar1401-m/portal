@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { postingTimeLabel } from "@/lib/posting";
 import { Input } from "@/components/ui/input";
 import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
@@ -521,12 +522,25 @@ export function ClientForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>AI caption localization</CardTitle>
+          <CardTitle>Language, place and posting time</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">
-            These drive the AI Caption Studio — set the city &amp; country so captions
-            localize (e.g. an Australian café gets Sydney-area hashtags).
+            Captions localize from the city &amp; country — an Australian café gets
+            Sydney-area hashtags.{" "}
+            {/*
+              Said here because it is not guessable from anywhere else.
+
+              The country used to be a caption setting. It also decides which
+              evening a client's posts go out in, and an unset country quietly
+              means India — so an Australian client's reel would go out at 5 PM
+              Hyderabad, which is half past midnight where their audience is,
+              with nothing on any screen having claimed otherwise.
+            */}
+            <strong className="text-foreground">
+              The country also sets when their posts go out
+            </strong>{" "}
+            — in their own clock, not ours.
           </p>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Caption language" name="caption_language">
@@ -551,6 +565,18 @@ export function ClientForm({
             </Field>
             <Field label="Country" name="loc_country">
               <Input id="loc_country" name="loc_country" placeholder="e.g. Australia" defaultValue={d.loc_country} />
+              {/*
+                The consequence of the field, next to the field.
+
+                Blank reads as India, which is a real choice being made for you
+                rather than an absence — so it says so rather than showing
+                nothing and letting the default pass unnoticed.
+              */}
+              <p className="text-xs text-muted-foreground">
+                {d.loc_country ? "Posts go out" : "No country set, so posts go out"}{" "}
+                {postingTimeLabel(d.loc_country || "india")}
+                {d.loc_country ? "" : " — India's slot"}.
+              </p>
             </Field>
             <Field label="WhatsApp" name="loc_whatsapp">
               <Input id="loc_whatsapp" name="loc_whatsapp" defaultValue={d.loc_whatsapp} />
