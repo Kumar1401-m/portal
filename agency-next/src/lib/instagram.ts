@@ -55,7 +55,7 @@ export const CLAIM_LEASE_MINUTES = 20;
  * who can see whether it is still worth posting at all.
  *
  * The window is the client's, not one number for the roster: India posts 5–7
- * PM and Australia 7–8 PM, in their own clocks. This is the widest of them,
+ * PM and Australia 6–7 PM, in their own clocks. This is the widest of them,
  * and it exists because the SQL below cannot read a country out of a JSON
  * column per row. It prefilters on the widest and each row is then checked
  * against its own window in `missedItsWindow`. Over-selecting and narrowing is
@@ -338,8 +338,8 @@ export async function getPublishQueue(limit = 10): Promise<PublishQueueItem[]> {
        * The SQL above kept anything inside the widest window on the roster;
        * this row only belongs in the queue if it is inside its own.
        *
-       * Without it an Australian reel set for 7 PM Sydney would still be
-       * handed out at 9 — inside India's two hours, an hour past the window
+       * Without it an Australian reel set for 6 PM Sydney would still be
+       * handed out at 8 — inside India's two hours, an hour past the window
        * their client was told about, and dark by then where it is being read.
        */
       if (missedItsWindow(String(r.scheduled_at), countryOf(r.placeholder_values))) return null;
@@ -903,7 +903,7 @@ export type DeliverablePublishInfo = {
  * True once a post's slot is far enough past that the publisher has let it go.
  *
  * Measured in the client's window, not one number for everybody. India posts
- * 5–7 PM and Australia 7–8 PM local, so "an hour late" ends the Australian
+ * 5–7 PM and Australia 6–7 PM local, so "an hour late" ends the Australian
  * window and is still inside the Indian one. Judging both by the widest would
  * put a Sydney reel out at 9 PM their time; by the narrowest, it would drop an
  * Indian post that was still perfectly due.

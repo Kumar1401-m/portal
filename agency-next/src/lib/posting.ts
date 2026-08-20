@@ -53,7 +53,7 @@ export function nowUtc(): string {
  * The window used to be one number for the whole portal — 5 to 7 PM, which is
  * India's — with a note saying a genuinely multi-country roster would want it
  * per country and would notice the day it did. An Australian client is that
- * day. Their reel goes out at 7 PM Sydney and stops being due at 8, and being
+ * day. Their reel goes out at 6 PM Sydney and stops being due at 7, and being
  * an hour late in Sydney is not the same event as being an hour late in
  * Hyderabad.
  *
@@ -70,18 +70,18 @@ type PostTiming = {
 
 const COUNTRY_BEST_TIME: Record<string, PostTiming> = {
   india: { utcOffsetMinutes: 330, hour: 17, untilHour: 19, zone: "IST" }, // 5–7 PM
-  usa: { utcOffsetMinutes: -300, hour: 19, untilHour: 20, zone: "ET" }, // 7–8 PM
-  unitedstates: { utcOffsetMinutes: -300, hour: 19, untilHour: 20, zone: "ET" },
-  america: { utcOffsetMinutes: -300, hour: 19, untilHour: 20, zone: "ET" },
-  canada: { utcOffsetMinutes: -300, hour: 19, untilHour: 20, zone: "ET" },
-  uk: { utcOffsetMinutes: 0, hour: 19, untilHour: 20, zone: "GMT" },
-  unitedkingdom: { utcOffsetMinutes: 0, hour: 19, untilHour: 20, zone: "GMT" },
-  britain: { utcOffsetMinutes: 0, hour: 19, untilHour: 20, zone: "GMT" },
-  australia: { utcOffsetMinutes: 600, hour: 19, untilHour: 20, zone: "AEST" }, // 7–8 PM
-  uae: { utcOffsetMinutes: 240, hour: 20, untilHour: 21, zone: "GST" },
+  usa: { utcOffsetMinutes: -300, hour: 18, untilHour: 19, zone: "ET" }, // 6–7 PM
+  unitedstates: { utcOffsetMinutes: -300, hour: 18, untilHour: 19, zone: "ET" },
+  america: { utcOffsetMinutes: -300, hour: 18, untilHour: 19, zone: "ET" },
+  canada: { utcOffsetMinutes: -300, hour: 18, untilHour: 19, zone: "ET" },
+  uk: { utcOffsetMinutes: 0, hour: 18, untilHour: 19, zone: "GMT" },
+  unitedkingdom: { utcOffsetMinutes: 0, hour: 18, untilHour: 19, zone: "GMT" },
+  britain: { utcOffsetMinutes: 0, hour: 18, untilHour: 19, zone: "GMT" },
+  australia: { utcOffsetMinutes: 600, hour: 18, untilHour: 19, zone: "AEST" }, // 6–7 PM
+  uae: { utcOffsetMinutes: 240, hour: 20, untilHour: 21, zone: "GST" }, // 8–9 PM, Gulf evening
   dubai: { utcOffsetMinutes: 240, hour: 20, untilHour: 21, zone: "GST" },
   emirates: { utcOffsetMinutes: 240, hour: 20, untilHour: 21, zone: "GST" },
-  singapore: { utcOffsetMinutes: 480, hour: 19, untilHour: 20, zone: "SGT" },
+  singapore: { utcOffsetMinutes: 480, hour: 18, untilHour: 19, zone: "SGT" },
 };
 
 /** India is both the primary market and the user's explicit default. */
@@ -118,16 +118,33 @@ export function nextBestPostTime(country: string | null | undefined): string {
   return target.toISOString().slice(0, 19).replace("T", " ");
 }
 
-/** Countries offered when scheduling by hand, with their best-time default. */
+/**
+ * Countries offered when scheduling by hand.
+ *
+ * Read off the table above rather than written out again. It was a second copy
+ * with its own hours, and it had already drifted — every country still said 7
+ * PM after the table moved to 6. A list of countries is a name and a label;
+ * the hour is one fact and lives in one place.
+ */
 export const POST_COUNTRIES: { key: string; label: string; offsetMinutes: number; hour: number }[] =
-  [
-    { key: "india", label: "India (IST)", offsetMinutes: 330, hour: 17 },
-    { key: "usa", label: "United States (ET)", offsetMinutes: -300, hour: 19 },
-    { key: "uk", label: "United Kingdom (GMT)", offsetMinutes: 0, hour: 19 },
-    { key: "uae", label: "UAE / Dubai (GST)", offsetMinutes: 240, hour: 20 },
-    { key: "singapore", label: "Singapore (SGT)", offsetMinutes: 480, hour: 19 },
-    { key: "australia", label: "Australia (AEST)", offsetMinutes: 600, hour: 19 },
-  ];
+  (
+    [
+      ["india", "India"],
+      ["usa", "United States"],
+      ["uk", "United Kingdom"],
+      ["uae", "UAE / Dubai"],
+      ["singapore", "Singapore"],
+      ["australia", "Australia"],
+    ] as const
+  ).map(([key, name]) => {
+    const t = COUNTRY_BEST_TIME[key];
+    return {
+      key,
+      label: `${name} (${t.zone})`,
+      offsetMinutes: t.utcOffsetMinutes,
+      hour: t.hour,
+    };
+  });
 
 const offsetForCountry = (country: string | null | undefined) =>
   bestPostingTimeFor(country).utcOffsetMinutes;
@@ -155,7 +172,7 @@ export function localTimeToUtc(localValue: string, country: string | null | unde
  * belongs to its window, and one that misses it waits for a person rather than
  * going out at midnight to an audience that is asleep.
  *
- * India is 5 to 7 PM; everywhere else on the roster is an hour, 7 to 8 PM
+ * India is 5 to 7 PM; everywhere else on the roster is an hour, 6 to 7 PM
  * local. Both halves come from the same row, so a window cannot be widened on
  * one side only and quietly let posts drift outside what the agency told the
  * client.

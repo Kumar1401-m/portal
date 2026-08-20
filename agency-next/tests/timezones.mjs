@@ -4,12 +4,12 @@
  * The portal was written for a roster that was entirely Indian, so one window
  * — 5 to 7 PM — and one clock served everybody, and the country a client is in
  * was a caption setting. An Australian client breaks all three at once: their
- * reel has to go out at 7 PM in Sydney, which is half past two in the
+ * reel has to go out at 6 PM in Sydney, which is half past one in the
  * afternoon here, and the people who have to notice if it fails are here.
  *
  * So every posting time now has two readings and both must be right. Telling
- * the client 2:30 would be telling them the wrong thing about their own
- * account; showing 7:00 to the agency and nothing else would leave somebody
+ * the client 1:30 would be telling them the wrong thing about their own
+ * account; showing 6:00 to the agency and nothing else would leave somebody
  * working out the conversion at the moment they least want to.
  */
 import assert from "node:assert/strict";
@@ -26,9 +26,9 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 
 /* ---------------- the evening belongs to the client ---------------- */
 {
-  // 7 PM Sydney is 09:00 UTC. Not 7 PM here, and not 7 PM UTC.
+  // 6 PM Sydney is 08:00 UTC. Not 6 PM here, and not 6 PM UTC.
   const au = p.scheduleDateToUtc("2026-08-21", "Australia");
-  assert.equal(au, "2026-08-21 09:00:00", "7 PM AEST is 09:00 UTC");
+  assert.equal(au, "2026-08-21 08:00:00", "6 PM AEST is 08:00 UTC");
 
   // 5 PM IST is 11:30 UTC — the Indian slot, unchanged.
   assert.equal(p.scheduleDateToUtc("2026-08-21", "India"), "2026-08-21 11:30:00");
@@ -42,11 +42,11 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 /* ---------------- and is read back in both clocks ---------------- */
 {
   // The same instant, said twice: theirs first, because the post is for them.
-  const both = p.bothClocks("2026-08-21 09:00:00", "Australia");
-  assert.match(both, /7:00 pm AEST/, "the client's own evening");
-  assert.match(both, /2:30 pm IST/, "and what that is here");
+  const both = p.bothClocks("2026-08-21 08:00:00", "Australia");
+  assert.match(both, /6:00 pm AEST/, "the client's own evening");
+  assert.match(both, /1:30 pm IST/, "and what that is here");
   assert.match(both, /21 Aug 2026/, "with the date said once");
-  ok("an Australian post reads 7:00 pm AEST · 2:30 pm IST");
+  ok("an Australian post reads 6:00 pm AEST · 1:30 pm IST");
 }
 
 {
@@ -65,9 +65,9 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 
 /* ---------------- the window is the client's too ---------------- */
 {
-  assert.deepEqual(p.postingWindowFor("Australia"), { fromHour: 19, toHour: 20, zone: "AEST" });
+  assert.deepEqual(p.postingWindowFor("Australia"), { fromHour: 18, toHour: 19, zone: "AEST" });
   assert.deepEqual(p.postingWindowFor("India"), { fromHour: 17, toHour: 19, zone: "IST" });
-  assert.equal(p.windowHoursFor("Australia"), 1, "7 to 8, so one hour");
+  assert.equal(p.windowHoursFor("Australia"), 1, "6 to 7, so one hour");
   assert.equal(p.windowHoursFor("India"), 2, "5 to 7, so two");
   ok("each country's window comes from its own row, not from one number");
 }
@@ -80,7 +80,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
    * because a country lives in a JSON column and cannot be read per row there.
    * If a row were not then checked against its OWN window, an Australian reel
    * an hour and a half late would still be handed out — inside India's two
-   * hours, past the eight o'clock the client was told about, and dark in
+   * hours, past the seven o'clock the client was told about, and dark in
    * Sydney by then.
    */
   assert.equal(p.MAX_WINDOW_HOURS, 2, "the widest window is India's two hours");
@@ -112,7 +112,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 }
 
 {
-  assert.equal(p.postingTimeLabel("Australia"), "7:00 – 8:00 PM AEST");
+  assert.equal(p.postingTimeLabel("Australia"), "6:00 – 7:00 PM AEST");
   assert.equal(p.postingTimeLabel("India"), "5:00 – 7:00 PM IST");
   assert.equal(p.postingTimeLabel("UAE"), "8:00 – 9:00 PM GST");
   ok("the window is written the way somebody would say it out loud");
