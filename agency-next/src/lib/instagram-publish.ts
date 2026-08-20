@@ -32,7 +32,8 @@ import {
   type PublishQueueItem,
 } from "./instagram";
 import { sendTextToGroup } from "./whatsapp-service-client";
-import { publishToPage } from "./facebook";
+import { notifyAdmins } from "./notify";
+import { publishToPage, facebookPermalink } from "./facebook";
 
 const GRAPH = "https://graph.facebook.com";
 
@@ -283,9 +284,25 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
     // Said once, in the run's own log. The row carries the reason, and the
     // task page shows it — this is for whoever is reading why a run was noisy.
     console.warn(`[publish] ${item.deliverable_id} is live on Instagram but not on Facebook:`, fb.error);
+
+    /*
+     * And told to somebody, because half-posted appears on no board.
+     *
+     * "Not posted" lists what never reached Instagram; this reached Instagram
+     * and stopped. The task page shows it, but nobody opens the task page of a
+     * video that published successfully — so without this the client's Page
+     * quietly runs a month behind their feed and the first to notice is the
+     * client.
+     */
+    await notifyAdmins(
+      "publish_partial",
+      `${item.client_name}: on Instagram, not on Facebook`,
+      `"${item.title}" published to Instagram but the Page refused it — ${fb.error}`,
+      `/deliverables/${item.deliverable_id}`
+    ).catch(() => {});
   }
 
-  await tellTheClient(item, permalink, fb.ok);
+  await tellTheClient(item, permalink, fb.ok ? fb.postId : null);
 
   return { ok: true, deliverableId: item.deliverable_id, mediaId: published.id, permalink };
 }
@@ -300,18 +317,39 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
 async function tellTheClient(
   item: PublishQueueItem,
   permalink: string | null,
-  /** Whether it also reached their Page — the client is told what is true. */
-  onFacebook: boolean
+  /**
+   * The Page post's id, or null when it did not go there.
+   *
+   * The message used to carry the Instagram link alone while claiming the post
+   * was live "on Instagram and Facebook" — so a client told about two posts
+   * was handed one address and left to find the other themselves, on the
+   * account they pay us to run. Both links or neither claim.
+   */
+  facebookPostId: string | null
 ): Promise<void> {
   if (!item.wa_chat_id) return;
   try {
     const who = item.contact_person || item.client_name;
-    // Named only when it worked. Telling a client it is on Facebook when the
-    // Page refused it is the one version of this message worth avoiding.
-    const where = onFacebook ? "Instagram and Facebook" : "Instagram";
+    const fbLink = facebookPermalink(facebookPostId);
+
+    /*
+     * One line per place, each with its own address.
+     *
+     * Labelled rather than run together: two bare URLs in a row is the shape
+     * of a forwarded advert, and a client scanning their group needs to know
+     * which is which without opening both. Facebook is named only when it
+     * actually went — telling somebody their post is on a Page that refused
+     * it is the one version of this message worth never sending.
+     */
+    const lines = [
+      permalink ? `Instagram: ${permalink}` : null,
+      fbLink ? `Facebook: ${fbLink}` : null,
+    ].filter(Boolean);
+
+    const where = facebookPostId ? "Instagram and Facebook" : "Instagram";
     const text =
       `Hi ${who},\n\nYour post "${item.title}" is now live on ${where}. 🎉` +
-      (permalink ? `\n\n${permalink}` : "");
+      (lines.length ? `\n\n${lines.join("\n")}` : "");
     await sendTextToGroup(item.wa_chat_id, text);
   } catch (err) {
     console.warn("[publish] could not tell the client:", err instanceof Error ? err.message : err);

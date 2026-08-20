@@ -291,6 +291,51 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("a saved token is invisible but not silent");
 }
 
+/* ---------------- the group gets both links, or neither claim ---------------- */
+{
+  /*
+   * The message said "live on Instagram and Facebook" and carried one link.
+   *
+   * A client told about two posts was handed one address and left to find the
+   * other themselves, on an account they pay us to run. Both links now, one
+   * labelled line each — two bare URLs in a row is the shape of a forwarded
+   * advert, and somebody scanning their group should not have to open both to
+   * learn which is which.
+   */
+  const pub = read("lib/instagram-publish.ts");
+  assert.match(pub, /`Instagram: \$\{permalink\}`/, "the Instagram link is labelled");
+  assert.match(pub, /`Facebook: \$\{fbLink\}`/, "and so is the Facebook one");
+  assert.match(pub, /facebookPermalink\(facebookPostId\)/, "built from the Page post's id");
+
+  // Facebook is claimed only when it actually went. Telling a client their
+  // post is on a Page that refused it is the one version worth never sending.
+  assert.match(pub, /facebookPostId \? "Instagram and Facebook" : "Instagram"/);
+  assert.match(pub, /tellTheClient\(item, permalink, fb\.ok \? fb\.postId : null\)/);
+  ok("the group is sent both links, and Facebook is named only when it went");
+}
+
+{
+  /*
+   * Half-posted appears on no board.
+   *
+   * "Not posted" lists what never reached Instagram. This reached Instagram
+   * and stopped — and nobody opens the task page of a video that published
+   * successfully, so the client's Page would quietly run a month behind their
+   * feed with the client the first to notice.
+   */
+  const pub = read("lib/instagram-publish.ts");
+  const at = pub.indexOf("is live on Instagram but not on Facebook");
+  assert.ok(at > 0, "the partial failure is detected");
+  const branch = pub.slice(at, at + 1400);
+  assert.match(branch, /notifyAdmins\(/, "and somebody is told about it");
+  assert.match(branch, /publish_partial/, "under its own type, not mixed in with failures");
+  assert.match(branch, /\/deliverables\/\$\{item\.deliverable_id\}/, "with a link to the task");
+
+  // Never able to fail the publish: the reel is live by this point.
+  assert.match(branch, /\.catch\(\(\) => \{\}\)/, "and it cannot break a successful publish");
+  ok("a post that reached Instagram but not Facebook tells somebody");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");

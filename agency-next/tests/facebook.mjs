@@ -109,8 +109,10 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 /* ---------------- the client is told only what is true ---------------- */
 {
   const pub = readFileSync(`${SRC}/lib/instagram-publish.ts`, "utf8");
-  has(pub, 'onFacebook ? "Instagram and Facebook" : "Instagram"', "the message names Facebook only when it worked");
-  has(pub, "await tellTheClient(item, permalink, fb.ok);", "using the outcome, not the intent");
+  // The id, not a boolean — the message carries the Page link now, and a link
+  // that exists is the same evidence as a flag saying it worked.
+  has(pub, 'facebookPostId ? "Instagram and Facebook" : "Instagram"', "the message names Facebook only when it worked");
+  has(pub, "await tellTheClient(item, permalink, fb.ok ? fb.postId : null);", "using the outcome, not the intent");
 
   const panel = readFileSync(`${SRC}/app/(app)/deliverables/[id]/publish-status.tsx`, "utf8");
   has(panel, "info.facebook ?", "the panel shows it only for a client who uses it");
