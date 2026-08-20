@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Gauge, TriangleAlert, Users, ListChecks, Briefcase, BarChart3 } from "lucide-react";
 import { requireUser, SUPER_ADMIN_ROLES } from "@/lib/auth";
-import { teamEfficiency } from "@/lib/effectiveness";
+import { teamEfficiency, reportToday } from "@/lib/effectiveness";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
@@ -13,8 +13,6 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Team efficiency · NVK Hub" };
 export const dynamic = "force-dynamic";
 
-/** ISO date, this process's clock only for defaulting the form. */
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 const looksLikeDate = (s?: string) => Boolean(s && /^\d{4}-\d{2}-\d{2}$/.test(s));
 
 /**
@@ -53,9 +51,16 @@ export default async function TeamPage({
   await requireUser(SUPER_ADMIN_ROLES);
   const sp = await searchParams;
 
-  const now = new Date();
-  const defaultFrom = iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
-  const defaultTo = iso(now);
+  /*
+   * Defaulted from the database's clock, not this function's.
+   *
+   * The rows are stamped by MySQL on Indian time and Vercel runs on UTC, so
+   * defaulting "to" from `new Date()` asked for a date that was already
+   * yesterday in the database from half past six every evening — and an
+   * evening's work simply did not appear. Nothing about the report said why.
+   */
+  const defaultTo = await reportToday();
+  const defaultFrom = `${defaultTo.slice(0, 7)}-01`;
   const rawFrom = looksLikeDate(sp.from) ? sp.from! : defaultFrom;
   const rawTo = looksLikeDate(sp.to) ? sp.to! : defaultTo;
   // Backwards dates are swapped rather than refused: it is obvious what was
@@ -86,6 +91,35 @@ export default async function TeamPage({
       </div>
 
       <DateFilter from={from} to={to} />
+
+      {/*
+        Why the numbers below might not match the board.
+
+        A task nobody is assigned to counts for nobody — the join is on the
+        assignee — so work done on unassigned tasks makes every percentage on
+        this page read low, with nothing on screen to say so. Uploading now
+        claims an unassigned task for whoever uploaded it, which stops this
+        growing; anything already on the board is said out loud instead.
+      */}
+      {data.ready && data.totals.unassigned > 0 ? (
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4 text-sm">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <p className="text-muted-foreground">
+              <strong className="text-foreground">
+                {data.totals.unassigned} {data.totals.unassigned === 1 ? "task" : "tasks"}
+              </strong>{" "}
+              moved forward in this period with nobody assigned, so {" "}
+              {data.totals.unassigned === 1 ? "it counts" : "they count"} towards no one&apos;s
+              figure below.{" "}
+              <Link href="/deliverables" className="text-primary hover:underline">
+                Assign {data.totals.unassigned === 1 ? "it" : "them"} on Tasks
+              </Link>{" "}
+              and this report will pick {data.totals.unassigned === 1 ? "it" : "them"} up.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!data.ready ? (
         <Card>

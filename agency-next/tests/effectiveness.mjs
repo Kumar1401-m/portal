@@ -237,4 +237,95 @@ await clean();
   ok("efficiency shows what it divided by, and rounds rather than floors");
 }
 
+/* ---------------- today, on the clock that stamped the rows ---------------- */
+{
+  /*
+   * The report read 0% for somebody who had uploaded two videos that day.
+   *
+   * `updated_at` is stamped by MySQL, and this database runs on Indian time
+   * while the server rendering the page runs on UTC. Defaulting the range from
+   * the server's clock meant that from half past six every evening the report
+   * asked for a date the database had already left — so an evening's work
+   * counted for nobody, every evening, and nothing on the page said why.
+   */
+  const today = await eff.reportToday();
+  const dbToday = (await db.queryOne("SELECT DATE_FORMAT(CURDATE(),'%Y-%m-%d') AS d")).d;
+  assert.equal(today, dbToday, "the default range is built from the database's own date");
+
+  const page = read("app/(app)/team/page.tsx");
+  assert.match(page, /const defaultTo = await reportToday\(\)/, "the page asks the database");
+  // The old default, which is the whole bug: Date.UTC on the render server.
+  assert.ok(!/Date\.UTC\(/.test(page), "and no longer builds the range from its own UTC clock");
+  ok("the report's idea of today matches the clock that stamps the work");
+}
+
+// The block above this one ends with a clean(), which takes the client with
+// it. These need their own.
+const cid = Number(
+  (await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ-EFF client','active')"))
+    .insertId
+);
+
+/* ---------------- the exact complaint: 2 uploads, capacity 1, not 0% ------------- */
+{
+  const uid = await mk("evening", "super_admin", 1);
+  const today = await eff.reportToday();
+  // Late enough that the server's UTC date is still yesterday.
+  await db.execute(
+    `INSERT INTO deliverables
+       (client_id, title, status, month_key, assigned_to, instagram_status, updated_at)
+     VALUES (?, 'ZZ-EFF evening 0', 'caption_ready', ?, ?, 'none', ?),
+            (?, 'ZZ-EFF evening 1', 'caption_ready', ?, ?, 'none', ?)`,
+    [cid, month, uid, `${today} 23:30:00`, cid, month, uid, `${today} 23:30:00`]
+  );
+
+  const r = await eff.teamEfficiency(today, today);
+  const me = r.members.find((m) => m.id === uid);
+  assert.equal(me.deliveries, 2, "both videos counted");
+  assert.equal(me.capacity, 1, "against one day at one a day");
+  assert.equal(me.efficiency, 200, "which is 200%, not 0");
+  ok("two videos uploaded today against a capacity of one reads 200%");
+}
+
+/* ---------------- work with nobody's name on it is said out loud ---------------- */
+{
+  const today = await eff.reportToday();
+  await db.execute(
+    `INSERT INTO deliverables
+       (client_id, title, status, month_key, assigned_to, instagram_status, updated_at)
+     VALUES (?, 'ZZ-EFF orphan 0', 'caption_ready', ?, NULL, 'none', ?)`,
+    [cid, month, `${today} 10:00:00`]
+  );
+
+  const r = await eff.teamEfficiency(today, today);
+  assert.equal(r.totals.unassigned, 1, "the unassigned delivery is counted");
+  assert.ok(
+    !r.members.some((m) => m.name === "orphan"),
+    "it belongs to nobody, so it is in no one's row"
+  );
+
+  // And the page says so, rather than leaving a low percentage unexplained.
+  const page = read("app/(app)/team/page.tsx");
+  assert.match(page, /totals\.unassigned > 0/, "the page shows the warning when there is one");
+  ok("work nobody was assigned is reported, instead of quietly making everyone look slow");
+}
+
+/* ---------------- so the pile stops growing ---------------- */
+{
+  // The root of it: uploading a video never put anybody's name on the task, so
+  // a one-person team scored zero for everything they did.
+  const up = read("app/(app)/deliverables/upload-actions.ts");
+  assert.match(
+    up,
+    /SET assigned_to = \? WHERE id = \? AND assigned_to IS NULL/,
+    "uploading claims an unassigned task for the uploader"
+  );
+  assert.ok(
+    up.indexOf("assigned_to IS NULL") > 0,
+    "and the guard is in the WHERE, so an existing assignee is never replaced"
+  );
+  ok("uploading a video credits whoever uploaded it, unless somebody else already owns it");
+}
+
+await clean();
 await finish(pass);

@@ -126,6 +126,24 @@ export async function attachUploadedVideo(
   }
 
   /*
+   * Whoever uploaded it did the work on it.
+   *
+   * The efficiency report joins deliverables to people on `assigned_to`, so a
+   * task nobody was assigned credits nobody — somebody could upload two videos
+   * in a day and still read as 0%, which is what happens on a small team where
+   * the person doing the work is also the person who never bothered assigning
+   * anything to themselves.
+   *
+   * Only over an empty assignee, which the WHERE enforces rather than a
+   * read-then-write: an admin uploading on an editor's behalf must not take
+   * the editor's name off it.
+   */
+  await execute("UPDATE deliverables SET assigned_to = ? WHERE id = ? AND assigned_to IS NULL", [
+    user.id,
+    deliverableId,
+  ]);
+
+  /*
    * Start the AI on it straight away.
    *
    * Awaited rather than fired and forgotten: a serverless function is frozen

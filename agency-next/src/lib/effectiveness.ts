@@ -22,8 +22,26 @@
  * percentage, because a red 0% for having been forgotten is a lie about them.
  */
 import "server-only";
-import { query, hasColumn } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 import { ASSIGNABLE_ROLES, sqlRoleList } from "./roles";
+
+/**
+ * Today, by the clock that stamps the rows being counted.
+ *
+ * `updated_at` is written by MySQL, and this database runs on Indian time,
+ * while a Vercel function's own clock is UTC. Defaulting the range from the
+ * server meant that from half past six every evening the report asked for
+ * dates that were already yesterday in the database — so an afternoon of work
+ * counted, and everything after it silently did not. Every other date-aware
+ * query in the portal uses CURDATE() for exactly this reason.
+ *
+ * Dates typed into the filter are left alone: somebody choosing "1st to 20th"
+ * means the dates on the rows, which are these ones.
+ */
+export async function reportToday(): Promise<string> {
+  const r = await queryOne<{ d: string }>("SELECT DATE_FORMAT(CURDATE(),'%Y-%m-%d') AS d");
+  return r?.d || new Date().toISOString().slice(0, 10);
+}
 
 /** Statuses that mean the person's own part of a task is finished. */
 const DELIVERED =
@@ -60,6 +78,15 @@ export type TeamEfficiency = {
     capacityPerDay: number;
     capacity: number;
     efficiency: number | null;
+    /**
+     * Work that moved forward in the range with nobody assigned to it.
+     *
+     * Counted and shown rather than quietly dropped. It is the difference
+     * between the board and this report, and without it a person who did the
+     * work on unassigned tasks reads as having done none — which is how a
+     * report like this loses the room.
+     */
+    unassigned: number;
   };
   ready: boolean;
 };
@@ -77,6 +104,7 @@ const EMPTY = (from: string, to: string): TeamEfficiency => ({
     capacityPerDay: 0,
     capacity: 0,
     efficiency: null,
+    unassigned: 0,
   },
   ready: false,
 });
@@ -161,6 +189,23 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
   const capacity = measured.reduce((s, m) => s + m.capacity, 0);
   const deliveriesMeasured = measured.reduce((s, m) => s + m.deliveries, 0);
 
+  /*
+   * And what moved with nobody's name on it.
+   *
+   * The join above is on `assigned_to`, so a task nobody was assigned counts
+   * for nobody — the work exists, the row moved, and every percentage on the
+   * page reads as though it never happened. Uploading now claims an
+   * unassigned task for the uploader, which stops this growing; this counts
+   * what is already there, so a zero can be explained instead of argued with.
+   */
+  const orphaned = await queryOne<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM deliverables
+      WHERE assigned_to IS NULL
+        AND status IN ${DELIVERED}
+        AND DATE(updated_at) BETWEEN ? AND ?`,
+    [from, to]
+  );
+
   return {
     from,
     to,
@@ -174,6 +219,7 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
       capacityPerDay: measured.reduce((s, m) => s + m.capacityPerDay, 0),
       capacity,
       efficiency: pct(deliveriesMeasured, capacity),
+      unassigned: Number(orphaned?.n) || 0,
     },
     ready: true,
   };
