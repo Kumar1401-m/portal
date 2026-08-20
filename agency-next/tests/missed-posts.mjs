@@ -220,6 +220,40 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("Post now overrules the window it tells you to use it for");
 }
 
+/* ---------------- "Connected" has to mean connected ---------------- */
+{
+  /*
+   * The badge that caused this whole afternoon.
+   *
+   * The Instagram row on a client's page went green whenever `ig_user_id` was
+   * a non-empty string — a check that somebody had typed a number. So a client
+   * with no working token, or with a Facebook Page id in the Instagram field,
+   * showed exactly the same green "Connected" as one publishing every evening.
+   * It answered the most important question on the page wrongly, which is
+   * worse than leaving it open: nobody goes looking for a problem the portal
+   * says they do not have.
+   *
+   * The Facebook row beside it already earned its badge with a Graph call, and
+   * its own comment names this row as the counter-example. Both now mean the
+   * same thing by the same method.
+   */
+  const page = read("app/(app)/clients/[id]/page.tsx");
+  assert.ok(
+    !/tone=\{c\.ig_user_id \? "success" : "muted"\}/.test(page),
+    "the badge is no longer read off the column"
+  );
+  assert.match(page, /checkInstagramConnection\(c\.id\)/, "it asks Meta");
+  assert.match(page, /ig\.state === "broken"/, "and has somewhere to put the reason");
+
+  const lib = read("lib/instagram-connection.ts");
+  // Asking for `username` is the whole trick: a Page id answers 200 with no
+  // username, which is the silent mix-up this is here to catch.
+  assert.match(lib, /fields=username/, "it asks for the one field a Page does not have");
+  assert.match(lib, /if \(!json\.username\)/, "and treats a 200 without one as broken");
+  assert.match(lib, /row\?\.ig_access_token \|\| env\.meta\.accessToken/, "same token order as the publisher");
+  ok("the Instagram badge is earned from Meta, not from somebody having typed a number");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");

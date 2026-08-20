@@ -16,6 +16,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { getClientDetail } from "@/lib/clients";
 import { canAccessClient } from "@/lib/crm";
 import { checkPageConnection } from "@/lib/facebook";
+import { checkInstagramConnection } from "@/lib/instagram-connection";
 import { checkYouTubeConnection } from "@/lib/youtube";
 import { getKnowledge, completeness } from "@/lib/knowledge";
 import { KnowledgeCard } from "./knowledge-card";
@@ -58,9 +59,10 @@ export default async function ClientDetailPage({
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
   // Alongside the plan queries, not after them: the Facebook check is a call
   // to Meta, and it is the slowest thing on this page by a distance.
-  const [plan, planTasks, fb, yt, knowledge] = await Promise.all([
+  const [plan, planTasks, ig, fb, yt, knowledge] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
+    checkInstagramConnection(c.id),
     checkPageConnection(c.id),
     checkYouTubeConnection(c.id),
     getKnowledge(c.id),
@@ -204,23 +206,44 @@ export default async function ClientDetailPage({
                 </div>
               )}
               <div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+                {/* Asked of Meta, exactly like the Facebook row below. This
+                    used to go green on `ig_user_id` being non-empty — a check
+                    that somebody typed a number — so a client with a dead
+                    token, or with a Page id in the Instagram field, looked
+                    identical to one publishing every evening. It is the most
+                    important question on this page and it was being answered
+                    wrongly rather than left open. */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted-foreground">Instagram</span>
-                  <Badge tone={c.ig_user_id ? "success" : "muted"}>
-                    {c.ig_user_id ? "Connected" : "Not set up"}
+                  <Badge
+                    tone={
+                      ig.state === "connected"
+                        ? "success"
+                        : ig.state === "broken"
+                          ? "danger"
+                          : "muted"
+                    }
+                  >
+                    {ig.state === "connected"
+                      ? "Connected"
+                      : ig.state === "broken"
+                        ? "Not connected"
+                        : "Not set up"}
                   </Badge>
-                  {c.ig_username ? (
+                  {ig.state === "connected" && (ig.username || c.ig_username) ? (
                     <a
-                      href={`https://instagram.com/${c.ig_username}`}
+                      href={`https://instagram.com/${ig.username || c.ig_username}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-primary hover:underline"
                     >
-                      @{c.ig_username}
+                      @{ig.username || c.ig_username}
                     </a>
                   ) : null}
                 </div>
-                {!c.ig_user_id ? (
+                {ig.state === "broken" ? (
+                  <p className="text-xs text-rose-600 dark:text-rose-400">{ig.reason}</p>
+                ) : ig.state === "off" ? (
                   <p className="text-xs text-muted-foreground">
                     Add the Instagram Business account id on the{" "}
                     <Link href={`/clients/${c.id}/edit`} className="text-primary hover:underline">
