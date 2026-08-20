@@ -99,6 +99,37 @@ export async function resolveVideoUrl(
 }
 
 /**
+ * A link the WhatsApp box can actually download bytes from.
+ *
+ * An editor pastes whatever the tool gave them, and a Google Drive share URL
+ * does not serve a file — it serves an HTML page with a player on it. Handed
+ * to WhatsApp that arrives as a broken attachment or as nothing, which is why
+ * approvals were going out as a link with the video left behind.
+ *
+ * Drive has a direct-download address for the same file, so the id is lifted
+ * out of whichever share form was pasted and rebuilt into it. Everything else
+ * passes through untouched: an R2 signed URL, a plain https file, a link from
+ * a host we know nothing about — this only rewrites what it recognises, and
+ * never guesses.
+ *
+ * A file Drive has not been asked to share publicly still fails, and it fails
+ * as an unreadable page rather than a video. That is caught where the bytes
+ * are read, not here.
+ */
+export function directDownloadUrl(link: string | null | undefined): string | null {
+  const url = String(link ?? "").trim();
+  if (!url) return null;
+
+  // /file/d/<id>/view, /open?id=<id>, /uc?id=<id> — the three forms people paste.
+  const id =
+    url.match(/drive\.google\.com\/file\/d\/([\w-]{10,})/)?.[1] ??
+    (/drive\.google\.com/.test(url) ? url.match(/[?&]id=([\w-]{10,})/)?.[1] : undefined);
+
+  if (id) return `https://drive.google.com/uc?export=download&id=${id}`;
+  return url;
+}
+
+/**
  * Stable, collision-safe object key for a task's delivered video.
  *
  * Deliberately restricted to `[a-z0-9/._-]`: the uploader's filename is never

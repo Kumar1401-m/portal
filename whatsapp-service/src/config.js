@@ -69,6 +69,20 @@ const config = {
      * with an unhelpful error, so it's caught here instead.
      */
     maxMediaBytes: int(process.env.SEND_MAX_MEDIA_BYTES, 16 * 1024 * 1024),
+    /**
+     * The bigger ceiling, for video sent as a file rather than played inline.
+     *
+     * WhatsApp will not play a video over about 16 MB in the chat, and most
+     * finished reels are bigger than that — so every one of them used to go
+     * out as a link with the video left behind. As a document the same file
+     * arrives and the client downloads it, which is what they wanted.
+     *
+     * 48 MB and not WhatsApp's own limit: the bytes are held in memory and
+     * base64 adds a third on top, on a box with 2 GB shared between Chromium,
+     * the session and this. Raise it with SEND_MAX_DOCUMENT_BYTES on a bigger
+     * machine.
+     */
+    maxDocumentBytes: int(process.env.SEND_MAX_DOCUMENT_BYTES, 48 * 1024 * 1024),
     /** Gap between consecutive sends — WhatsApp rate-limits aggressively. */
     throttleMs: int(process.env.SEND_THROTTLE_MS, 3000),
   },

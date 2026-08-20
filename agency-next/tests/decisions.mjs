@@ -170,5 +170,46 @@ await clean();
   ok("what gets sent is decided by arithmetic; the model only writes the sentence");
 }
 
+/* ---------------- the video itself, not a link to it ---------------- */
+{
+  const { directDownloadUrl } = await load("lib/storage.ts");
+
+  /*
+   * An editor pastes whatever the tool gave them, and a Drive share URL does
+   * not serve a file — it serves a page with a player on it. Handed to
+   * WhatsApp that arrived as a broken attachment, so approvals went out as a
+   * link with the video left behind.
+   */
+  const direct = "https://drive.google.com/uc?export=download&id=";
+  for (const pasted of [
+    "https://drive.google.com/file/d/1AbCdEfGhIjKlMnO/view?usp=sharing",
+    "https://drive.google.com/file/d/1AbCdEfGhIjKlMnO/view",
+    "https://drive.google.com/open?id=1AbCdEfGhIjKlMnO",
+    "https://drive.google.com/uc?id=1AbCdEfGhIjKlMnO",
+  ]) {
+    assert.equal(directDownloadUrl(pasted), direct + "1AbCdEfGhIjKlMnO", pasted);
+  }
+
+  // Everything else passes through untouched. This rewrites what it
+  // recognises and never guesses at a host it does not know.
+  for (const other of [
+    "https://pub-123.r2.dev/videos/v1.mp4?X-Amz-Signature=abc",
+    "https://cdn.example.com/a.mp4",
+    "https://www.youtube.com/watch?v=abc",
+  ]) {
+    assert.equal(directDownloadUrl(other), other, other);
+  }
+  assert.equal(directDownloadUrl(null), null);
+  assert.equal(directDownloadUrl("   "), null);
+
+  // And the approval send uses it, or none of the above happens.
+  const approvals = read("lib/whatsapp-approvals.ts");
+  assert.ok(
+    approvals.includes("directDownloadUrl(d.edited_link)"),
+    "the approval send converts the pasted link before WhatsApp is asked to fetch it"
+  );
+  ok("a Drive link becomes a downloadable file, and anything else is left alone");
+}
+
 await clean();
 await finish(pass);

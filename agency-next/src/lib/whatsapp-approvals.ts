@@ -18,7 +18,7 @@
 import "server-only";
 import { query, queryOne, execute, transaction, hasColumn } from "./db";
 import { notifyAdmins, notifyUser } from "./notify";
-import { resolveVideoUrl } from "./storage";
+import { resolveVideoUrl, directDownloadUrl } from "./storage";
 import { composeCaption } from "./instagram";
 import { buildVideoPermalink } from "./video-link";
 
@@ -307,10 +307,18 @@ export async function prepareSend(
     };
   }
 
-  // WhatsApp fetches the bytes itself, so this must be a real, reachable file.
-  // A signed R2 link is fine; a Drive share link serves an HTML page.
+  /*
+   * The bytes, not a page about them.
+   *
+   * WhatsApp is handed a URL and downloads it, so it has to be a real file. A
+   * signed R2 link is one. A Google Drive share link is not — it serves an
+   * HTML page with a player on it, which is why an approval with no uploaded
+   * video went out as a link and the client never got the file. Drive's own
+   * direct-download address for the same file is what goes instead.
+   */
   const videoUrl =
-    (await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url, 6 * 60 * 60)) || d.edited_link;
+    (await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url, 6 * 60 * 60)) ||
+    directDownloadUrl(d.edited_link);
   if (!videoUrl) {
     return {
       ok: false,

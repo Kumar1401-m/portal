@@ -584,11 +584,18 @@ class WhatsAppService extends EventEmitter {
       };
     }
 
-    log.info('sending', { groupId, bytes: media.bytes, ms: Date.now() - started });
+    log.info('sending', {
+      groupId,
+      bytes: media.bytes,
+      as: media.asDocument ? 'document' : 'video',
+      ms: Date.now() - started,
+    });
 
     const sent = await this.client.sendMessage(groupId, media.media, {
       caption,
-      sendMediaAsDocument: false,
+      // Inline where WhatsApp will play it, as a file where it will not. The
+      // client gets the video either way, which is the whole point.
+      sendMediaAsDocument: media.asDocument === true,
     });
 
     return {
@@ -598,7 +605,20 @@ class WhatsAppService extends EventEmitter {
     };
   }
 
-  /** Download to a MessageMedia, refusing anything WhatsApp would reject. */
+  /**
+   * Download to a MessageMedia, refusing anything WhatsApp would reject.
+   *
+   * Two ceilings, not one. WhatsApp plays a video inline up to about 16 MB and
+   * accepts a far bigger file as a document — and a client would much rather
+   * download a 40 MB reel than be sent a link to it, which is what happened
+   * to every video over the inline limit before. So anything past the inline
+   * ceiling is still sent, as a document, and only past the document ceiling
+   * does the link come back.
+   *
+   * The document ceiling is deliberately well under WhatsApp's own: the bytes
+   * are held in memory and base64 adds a third on top, and the box this runs
+   * on has 2 GB for Chromium, the session and this.
+   */
   async fetchMedia(url, filename) {
     const res = await fetch(url);
     if (!res.ok) {
@@ -607,19 +627,38 @@ class WhatsAppService extends EventEmitter {
       throw err;
     }
 
+    const ceiling = Math.max(config.send.maxMediaBytes, config.send.maxDocumentBytes);
     const declared = Number(res.headers.get('content-length') || 0);
-    if (declared && declared > config.send.maxMediaBytes) {
+    if (declared && declared > ceiling) {
       const err = new Error(
-        `Video is ${(declared / 1048576).toFixed(1)} MB; WhatsApp's limit here is ` +
-          `${(config.send.maxMediaBytes / 1048576).toFixed(0)} MB`
+        `Video is ${(declared / 1048576).toFixed(1)} MB; the most we can send here is ` +
+          `${(ceiling / 1048576).toFixed(0)} MB`
       );
       err.code = 'media_too_large';
       err.permanent = true; // a bigger file will not get smaller on retry
       throw err;
     }
 
+    const type = (res.headers.get('content-type') || '').toLowerCase();
+    /*
+     * A page, not a file.
+     *
+     * A Google Drive link that has not been shared publicly answers 200 with
+     * an HTML sign-in page, and without this that page was sent to the client
+     * as a video: a broken attachment, and nobody able to say why. It is a
+     * permanent failure — retrying fetches the same page.
+     */
+    if (type.startsWith('text/html')) {
+      const err = new Error(
+        'That link returns a web page rather than a file — check it is shared publicly, or upload the video to the portal instead.'
+      );
+      err.code = 'not_a_file';
+      err.permanent = true;
+      throw err;
+    }
+
     const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength > config.send.maxMediaBytes) {
+    if (buffer.byteLength > ceiling) {
       const err = new Error(
         `Video is ${(buffer.byteLength / 1048576).toFixed(1)} MB, over the limit`
       );
@@ -628,10 +667,12 @@ class WhatsAppService extends EventEmitter {
       throw err;
     }
 
-    const mimeType = res.headers.get('content-type') || 'video/mp4';
+    const mimeType = type || 'video/mp4';
     return {
       media: new MessageMedia(mimeType, buffer.toString('base64'), filename || 'video.mp4'),
       bytes: buffer.byteLength,
+      // Too big to play in the chat, small enough to send as a file.
+      asDocument: buffer.byteLength > config.send.maxMediaBytes,
     };
   }
 
