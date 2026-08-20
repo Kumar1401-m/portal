@@ -137,6 +137,19 @@ export const EDGES: FlowEdge[] = [
 
 /** The scheduled jobs, what each is for, and how often it should run. */
 export const JOBS: { key: string; label: string; hint: string; everyMinutes: number }[] = [
+  /*
+   * First, because it is the one everything else leads up to — and it was
+   * missing from this list entirely. The portal could not answer "is posting
+   * working?" at all: the publisher left no trace of having run, so a
+   * schedule that had never been wired looked exactly like one that ran every
+   * quarter hour and had nothing to do.
+   */
+  {
+    key: "publishing",
+    label: "Publishing",
+    hint: "Puts approved reels on Instagram and Facebook when their slot arrives",
+    everyMinutes: 15,
+  },
   {
     key: "whatsapp_reminders",
     label: "WhatsApp reminders",

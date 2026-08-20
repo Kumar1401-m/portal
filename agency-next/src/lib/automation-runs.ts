@@ -20,7 +20,9 @@ export type JobName =
   | "insights_sync"
   | "ai_insights"
   | "ai_decisions"
-  | "monthly_reports";
+  | "monthly_reports"
+  /* The one everything else exists to lead up to. */
+  | "publishing";
 
 export type JobRun = {
   job: string;

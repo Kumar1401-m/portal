@@ -353,6 +353,34 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   ok("a post that reached Instagram but not Facebook tells somebody");
 }
 
+/* ---------------- "is posting working?" has an answer now ---------------- */
+{
+  /*
+   * The publisher left no trace of having run.
+   *
+   * Which made two very different situations identical from every screen in
+   * the portal: a schedule nobody had wired, and one running every quarter
+   * hour with nothing due. The first is why a client's feed goes quiet for a
+   * week, and it was invisible — the Automations page listed seven jobs and
+   * not the one everything else leads up to.
+   */
+  const map = await load("lib/automation-map.ts");
+  const publishing = map.JOBS.find((j) => j.key === "publishing");
+  assert.ok(publishing, "publishing is a job the portal watches");
+  assert.equal(publishing.everyMinutes, 15, "and is expected on the same cadence as the queue");
+  assert.equal(map.JOBS[0].key, "publishing", "listed first — it is the point of the rest");
+
+  const route = read("app/api/automation/publish/run/route.ts");
+  assert.match(route, /recordRun\(\s*"publishing",/, "and every run leaves a heartbeat");
+  // Not set up is a failed run, not silence — a portal that cannot publish
+  // should say so rather than looking idle.
+  assert.match(route, /recordRun\("publishing", false, readiness\.reason/);
+  // And a run with nothing due is a success. Most runs have nothing to do.
+  assert.match(route, /summary\.failed === 0/, "failure means it tried and could not");
+  assert.match(route, /Nothing was due\./);
+  ok("the Automations page can finally say whether posting is running");
+}
+
 /* ---------------- and the card no longer guesses ---------------- */
 {
   const page = read("app/(app)/dashboard/page.tsx");

@@ -20,6 +20,7 @@ import { isAuthorizedCronRequest, unauthorized } from "@/lib/api-auth";
 import { ok } from "@/lib/automation-api";
 import { publishingReadiness } from "@/lib/instagram";
 import { runPublisher } from "@/lib/instagram-publish";
+import { recordRun } from "@/lib/automation-runs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -32,9 +33,31 @@ export async function GET(request: Request) {
   // silent for as long as nobody checks.
   const readiness = await publishingReadiness();
   if (!readiness.ready) {
+    // Recorded as a failed run, not skipped silently. A portal that cannot
+    // publish should say so on the Automations page rather than looking idle.
+    await recordRun("publishing", false, readiness.reason ?? "Not set up.");
     return ok({ posted: 0, skipped: readiness.reason });
   }
 
   const summary = await runPublisher(3);
+
+  /*
+   * A heartbeat, so the question "is posting working?" has an answer.
+   *
+   * The publisher left no trace of having run, which made two very different
+   * situations identical from every screen in the portal: a schedule nobody
+   * had wired, and one running every quarter hour with nothing due. The first
+   * is the reason a client's feed goes quiet for a week, and it was invisible.
+   *
+   * "Ran and posted nothing" is a success — most runs have nothing to do.
+   * Failure is reserved for a run that tried and could not.
+   */
+  await recordRun(
+    "publishing",
+    summary.failed === 0,
+    summary.considered === 0
+      ? "Nothing was due."
+      : `${summary.posted} posted, ${summary.pending} still encoding, ${summary.failed} failed.`
+  );
   return ok(summary);
 }
