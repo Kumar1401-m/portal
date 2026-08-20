@@ -310,21 +310,63 @@ const cid = Number(
   ok("work nobody was assigned is reported, instead of quietly making everyone look slow");
 }
 
+/* ---------------- the upload counts for whoever did it ---------------- */
+{
+  // "every upload chesthe valle count ravali" — the person who uploads gets
+  // the count, even when the task belongs to somebody else. Assignment is a
+  // plan; the upload is a fact about who did the work.
+  const owner = await mk("owner", "video_editor", 1);
+  const uploader = await mk("uploader", "admin", 1);
+  const today = await eff.reportToday();
+
+  const id = Number(
+    (await db.execute(
+      `INSERT INTO deliverables
+         (client_id, title, status, month_key, assigned_to, uploaded_by, instagram_status, updated_at)
+       VALUES (?, 'ZZ-EFF credited 0', 'caption_ready', ?, ?, ?, 'none', ?)`,
+      [cid, month, owner, uploader, `${today} 09:00:00`]
+    )).insertId
+  );
+
+  const r = await eff.teamEfficiency(today, today);
+  assert.equal(r.members.find((m) => m.id === uploader).deliveries, 1, "the uploader is counted");
+  assert.equal(r.members.find((m) => m.id === owner).deliveries, 0, "not the assignee");
+
+  // And the task is still theirs — crediting somebody must not move work off
+  // another person's plate.
+  const row = await db.queryOne("SELECT assigned_to FROM deliverables WHERE id = ?", [id]);
+  assert.equal(Number(row.assigned_to), owner, "the assignee is untouched");
+  ok("the upload counts for whoever uploaded it, without taking the task off its owner");
+}
+
+{
+  // Everything nobody uploaded still counts for its assignee — a poster, or a
+  // task moved along by hand.
+  const solo = await mk("solo", "poster_designer", 1);
+  const today = await eff.reportToday();
+  await db.execute(
+    `INSERT INTO deliverables
+       (client_id, title, status, month_key, assigned_to, uploaded_by, instagram_status, updated_at)
+     VALUES (?, 'ZZ-EFF credited 1', 'approved', ?, ?, NULL, 'none', ?)`,
+    [cid, month, solo, `${today} 09:00:00`]
+  );
+  const r = await eff.teamEfficiency(today, today);
+  assert.equal(r.members.find((m) => m.id === solo).deliveries, 1, "counted for the assignee");
+  ok("work with no upload behind it still counts for the person it is assigned to");
+}
+
 /* ---------------- so the pile stops growing ---------------- */
 {
   // The root of it: uploading a video never put anybody's name on the task, so
   // a one-person team scored zero for everything they did.
   const up = read("app/(app)/deliverables/upload-actions.ts");
+  assert.match(up, /SET uploaded_by = \? WHERE id = \?/, "uploading records who uploaded");
   assert.match(
     up,
     /SET assigned_to = \? WHERE id = \? AND assigned_to IS NULL/,
-    "uploading claims an unassigned task for the uploader"
+    "and claims the task only when nobody owns it"
   );
-  assert.ok(
-    up.indexOf("assigned_to IS NULL") > 0,
-    "and the guard is in the WHERE, so an existing assignee is never replaced"
-  );
-  ok("uploading a video credits whoever uploaded it, unless somebody else already owns it");
+  ok("uploading a video records the uploader, and claims the task only if it is unowned");
 }
 
 await clean();

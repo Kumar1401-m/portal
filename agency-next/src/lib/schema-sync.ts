@@ -78,6 +78,13 @@ const EXPECTED: ColumnSpec[] = [
     definition: "cloud_video_key VARCHAR(400) DEFAULT NULL",
     purpose: "Object key of an uploaded video — what signed links are built from.",
   },
+  {
+    table: "deliverables",
+    column: "uploaded_by",
+    definition: "uploaded_by BIGINT UNSIGNED DEFAULT NULL",
+    purpose:
+      "Who uploaded the finished video. The efficiency report counts the person who did the work, which is not always the person the task is assigned to.",
+  },
 
   /* --- Instagram auto-publishing (the n8n workflow's handshake) --- */
   {

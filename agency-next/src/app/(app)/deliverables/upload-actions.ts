@@ -126,18 +126,23 @@ export async function attachUploadedVideo(
   }
 
   /*
-   * Whoever uploaded it did the work on it.
+   * Who did the work, recorded apart from who the task belongs to.
    *
-   * The efficiency report joins deliverables to people on `assigned_to`, so a
-   * task nobody was assigned credits nobody — somebody could upload two videos
-   * in a day and still read as 0%, which is what happens on a small team where
-   * the person doing the work is also the person who never bothered assigning
-   * anything to themselves.
+   * The efficiency report used to count on `assigned_to` alone, so somebody
+   * could upload two videos in a day and read as 0% — the tasks were assigned
+   * to nobody, and work assigned to nobody counts for nobody. Assignment is a
+   * plan, though, and this is a fact: an admin uploading on an editor's behalf
+   * did that upload, and the editor still owns the task. Conflating the two
+   * would mean crediting the wrong person or silently moving work off
+   * somebody's plate, so they are two columns.
    *
-   * Only over an empty assignee, which the WHERE enforces rather than a
-   * read-then-write: an admin uploading on an editor's behalf must not take
-   * the editor's name off it.
+   * `assigned_to` is still claimed, but only when it is empty — an unassigned
+   * task somebody has now worked on is theirs, and nobody else's name is ever
+   * replaced.
    */
+  if (await hasColumn("deliverables", "uploaded_by")) {
+    await execute("UPDATE deliverables SET uploaded_by = ? WHERE id = ?", [user.id, deliverableId]);
+  }
   await execute("UPDATE deliverables SET assigned_to = ? WHERE id = ? AND assigned_to IS NULL", [
     user.id,
     deliverableId,

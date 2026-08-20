@@ -150,6 +150,22 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
   const days = daysBetween(from, to);
   if (days === 0) return { ...EMPTY(from, to), ready: true };
 
+  /*
+   * Credited to whoever did it, falling back to whoever it belongs to.
+   *
+   * Assignment is a plan and the upload is a fact: an admin who uploads on an
+   * editor's behalf did that upload, while the task stays the editor's. So the
+   * report counts `uploaded_by` where there is one, and `assigned_to` for
+   * everything nobody has uploaded — a poster, a task moved along by hand.
+   *
+   * Falls back to the old join when the column has not been added yet, so the
+   * page keeps working on a database that has not had the migration applied
+   * rather than failing on "Unknown column".
+   */
+  const credited = (await hasColumn("deliverables", "uploaded_by"))
+    ? "COALESCE(d.uploaded_by, d.assigned_to)"
+    : "d.assigned_to";
+
   const rows = await query<{
     id: number;
     name: string;
@@ -163,7 +179,7 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
               AND DATE(d.updated_at) BETWEEN ? AND ?
             ), 0) AS deliveries
        FROM users u
-       LEFT JOIN deliverables d ON d.assigned_to = u.id
+       LEFT JOIN deliverables d ON ${credited} = u.id
       WHERE u.is_active = 1 AND u.role IN (${sqlRoleList(ASSIGNABLE_ROLES)})
       GROUP BY u.id, u.name, u.role, u.daily_target
       ORDER BY u.daily_target = 0, u.name`,
@@ -199,10 +215,10 @@ export async function teamEfficiency(from: string, to: string): Promise<TeamEffi
    * what is already there, so a zero can be explained instead of argued with.
    */
   const orphaned = await queryOne<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM deliverables
-      WHERE assigned_to IS NULL
-        AND status IN ${DELIVERED}
-        AND DATE(updated_at) BETWEEN ? AND ?`,
+    `SELECT COUNT(*) AS n FROM deliverables d
+      WHERE ${credited} IS NULL
+        AND d.status IN ${DELIVERED}
+        AND DATE(d.updated_at) BETWEEN ? AND ?`,
     [from, to]
   );
 
