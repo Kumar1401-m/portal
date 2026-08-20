@@ -118,6 +118,53 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   ok("the window is written the way somebody would say it out loud");
 }
 
+/* ---------------- approving does not mean "post right now" ---------------- */
+{
+  /*
+   * Where the window was actually being lost.
+   *
+   * Sending a video for approval clears `scheduled_at`. So by the time the
+   * approval came back there was never a time, and the handoff filled it with
+   * *now* — meaning every approved video was scheduled for the minute somebody
+   * approved it. An Australian client's reel approved at a quarter to one in
+   * the afternoon our time went out at 5:15 in the afternoon theirs: not a
+   * choice anybody made, just when a button was pressed in Hyderabad. Every
+   * country and every window in this file was being bypassed by that one line.
+   */
+  const ig = await import(pathToFileURL(`${SRC}/lib/instagram.ts`).href);
+
+  const au = ig.publishHandoff({
+    instagram_status: "not_posted",
+    scheduled_at: null,
+    placeholder_values: { country: "Australia" },
+  });
+  // 6 PM Sydney is 08:00 UTC, whatever time it is here when this runs.
+  assert.match(au.scheduled_at, /08:00:00$/, `${au.scheduled_at} is not Sydney's evening`);
+  assert.equal(au.instagram_status, "scheduled");
+
+  const inr = ig.publishHandoff({ instagram_status: "not_posted", scheduled_at: null });
+  assert.match(inr.scheduled_at, /11:30:00$/, "and no country still means India's 5 PM");
+  ok("approving schedules the client's next evening, not the moment of approval");
+}
+
+{
+  // A time somebody chose is theirs. The handoff only ever fills a blank.
+  const kept = (await import(pathToFileURL(`${SRC}/lib/instagram.ts`).href)).publishHandoff({
+    instagram_status: "not_posted",
+    scheduled_at: "2026-08-21 08:00:00",
+    placeholder_values: { country: "Australia" },
+  });
+  assert.equal(kept.scheduled_at, undefined, "an existing time is never overwritten");
+
+  // And a posted video is history, not a queue entry.
+  const done = (await import(pathToFileURL(`${SRC}/lib/instagram.ts`).href)).publishHandoff({
+    instagram_status: "posted",
+    scheduled_at: null,
+  });
+  assert.deepEqual(done, {}, "nothing is rescheduled once it has gone out");
+  ok("a chosen time survives, and a published post is left alone");
+}
+
 /* ---------------- the panel that answers "when does this post?" ---------------- */
 {
   const ig = read("lib/instagram.ts");

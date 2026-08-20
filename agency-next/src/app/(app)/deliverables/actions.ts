@@ -520,6 +520,8 @@ type WfRow = {
   /** Both are conditions the publish queue insists on — see applyStatus. */
   auto_publish: number | null;
   ig_user_id: string | null;
+  /** Whose evening the post belongs to — see publishHandoff. */
+  placeholder_values: unknown;
   /** The YouTube half of the same handoff. Null on a database without it. */
   youtube_enabled: number | null;
   youtube_status: string | null;
@@ -569,7 +571,7 @@ async function applyStatus(
   const d = await queryOne<WfRow>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
             d.instagram_status, d.scheduled_at, d.assigned_to, d.service,
-            c.company_name, c.auto_publish, c.ig_user_id,
+            c.company_name, c.auto_publish, c.ig_user_id, c.placeholder_values,
             ${hasContentApproval ? "c.content_approval" : "NULL AS content_approval"},
             ${hasYouTube ? "c.youtube_enabled, d.youtube_status" : "NULL AS youtube_enabled, NULL AS youtube_status"}
        FROM deliverables d JOIN clients c ON c.id = d.client_id

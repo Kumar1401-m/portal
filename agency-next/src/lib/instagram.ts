@@ -25,6 +25,7 @@ import { resolveVideoUrl } from "./storage";
 import { notifyAdmins } from "./notify";
 import {
   nowUtc,
+  nextBestPostTime,
   AUTO_SCHEDULE_CATEGORIES,
   bothClocks,
   windowHoursFor,
@@ -143,6 +144,8 @@ const SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 export function publishHandoff(current: {
   instagram_status?: string | null;
   scheduled_at?: string | null;
+  /** The client's record, for whose evening the post belongs to. */
+  placeholder_values?: unknown;
 }): Record<string, string | null> {
   if (current.instagram_status === "posted") return {};
 
@@ -153,12 +156,25 @@ export function publishHandoff(current: {
 
   /*
    * A time is required — the queue only returns rows whose slot has arrived,
-   * so a null one is never due and never posts. Pressing Schedule without
-   * choosing a time means "as soon as you can", which is now; an existing
-   * time is always left alone.
+   * so a null one is never due and never posts. An existing time is always
+   * left alone; the question is only what to write when there is none.
+   *
+   * It used to write *now*, meaning "as soon as you can". That reads fine
+   * until you follow where the null comes from: sending a video for approval
+   * clears `scheduled_at`, so by the time the approval lands there is never a
+   * time, and every approved video was scheduled for the minute it was
+   * approved. An Australian client's reel approved at a quarter to one in the
+   * afternoon went out at 5:15 in the afternoon their time — not because
+   * anybody chose 5:15, but because that was when somebody pressed a button
+   * in Hyderabad. The whole country-and-window apparatus was being bypassed by
+   * the one line that decides when a post actually goes.
+   *
+   * So the default is the client's next evening slot. "As soon as you can" is
+   * still available and is a different button — Post now, which publishes
+   * immediately rather than pretending to schedule.
    */
   if (!current.scheduled_at) {
-    out.scheduled_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+    out.scheduled_at = nextBestPostTime(countryOf(current.placeholder_values));
   }
 
   return out;
