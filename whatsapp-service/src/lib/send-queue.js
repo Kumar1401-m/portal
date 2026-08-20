@@ -55,7 +55,7 @@ class SendQueue {
   }
 
   async run(job) {
-    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename } = job;
+    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename, followUps } = job;
     const maxAttempts = config.send.maxAttempts;
     let lastError = null;
 
@@ -78,6 +78,9 @@ class SendQueue {
           watchUrl,
           caption,
           filename,
+          // The questions that follow the video, sent from the service so
+          // they cannot arrive before it — see sendVideo.
+          followUps,
         });
 
         log.info('sent', { videoCode, groupId, attempt, ms: result.durationMs });
@@ -108,6 +111,10 @@ class SendQueue {
           messageId: result.messageId,
           attempts: attempt,
           ...(result.sentAsLink ? { sentAsLink: true } : {}),
+          // So the portal knows not to send them a second time, and can say
+          // whether the file had to be re-encoded to fit.
+          ...(result.followUpsSent ? { followUpsSent: true } : {}),
+          ...(result.transcoded ? { transcoded: true } : {}),
         };
       } catch (err) {
         lastError = err;

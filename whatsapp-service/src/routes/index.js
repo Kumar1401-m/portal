@@ -160,7 +160,8 @@ function buildRoutes({ whatsapp, sendQueue }) {
    * Body: { videoCode, deliverableId, groupId, videoUrl, caption?, filename? }
    */
   router.post('/api/send-video', async (req, res) => {
-    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename } = req.body || {};
+    const { videoCode, deliverableId, groupId, videoUrl, watchUrl, caption, filename, followUps } =
+      req.body || {};
 
     const missing = [];
     if (!videoCode) missing.push('videoCode');
@@ -191,7 +192,7 @@ function buildRoutes({ whatsapp, sendQueue }) {
     }
 
     try {
-      const result = await sendQueue.submit({
+      const job = sendQueue.submit({
         videoCode,
         deliverableId: deliverableId ?? null,
         groupId,
@@ -200,7 +201,44 @@ function buildRoutes({ whatsapp, sendQueue }) {
         watchUrl: watchUrl || null,
         caption: caption || defaultCaption(videoCode),
         filename: filename || `${videoCode}.mp4`,
+        // Sent by this service straight after the media, so a client is never
+        // asked to approve a video that has not arrived yet.
+        followUps: Array.isArray(followUps) ? followUps : [],
       });
+
+      /*
+       * Answer quickly, finish however long it takes.
+       *
+       * A small video is sent in a few seconds and the portal gets its "sent"
+       * in the same request, which is what somebody pressing the button
+       * expects. A 300 MB one has to be downloaded and re-encoded first, and
+       * holding an HTTP request open for four minutes only guarantees the
+       * portal gives up on a send that is going to succeed.
+       *
+       * So the job is raced against a short clock. It keeps running either
+       * way, and the queue reports every attempt to the portal — which is
+       * where the send log comes from, not from this response.
+       */
+      const SETTLE_MS = 25_000;
+      let timer;
+      const result = await Promise.race([
+        job,
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve({ ok: true, queued: true }), SETTLE_MS);
+        }),
+      ]).finally(() => clearTimeout(timer));
+
+      if (result.queued) {
+        log.info('still working — answering now and finishing in the background', { videoCode });
+        // Not awaited: the point is to answer. Failures are reported by the
+        // queue, and an unhandled rejection here would take the process down.
+        job.catch(() => {});
+        return res.json({
+          ok: true,
+          queued: true,
+          note: 'The video is being prepared and will go to the group shortly.',
+        });
+      }
 
       if (!result.ok) {
         return res.status(result.permanent ? 422 : 502).json({

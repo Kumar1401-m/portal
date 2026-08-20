@@ -136,8 +136,28 @@ export const sendVideoToGroup = (payload: {
   watchUrl?: string | null;
   caption: string;
   filename?: string;
+  /**
+   * The questions that follow the video into the group.
+   *
+   * Sent by the service rather than from here, because a big video is
+   * downloaded and re-encoded in the background and this call returns before
+   * it lands — sending them from the portal would ask a client to approve a
+   * video that had not arrived. An older service ignores the field, and the
+   * portal sends them itself, which is what `followUpsSent` is for.
+   */
+  followUps?: string[];
 }) =>
-  call<{ messageId: string | null; attempts: number; sentAsLink?: boolean }>("/api/send-video", {
+  call<{
+    messageId: string | null;
+    attempts: number;
+    sentAsLink?: boolean;
+    /** The service is still preparing it; the group gets it shortly. */
+    queued?: boolean;
+    /** It sent the follow-ups, so the portal must not. */
+    followUpsSent?: boolean;
+    /** It had to be re-encoded to fit. */
+    transcoded?: boolean;
+  }>("/api/send-video", {
     method: "POST",
     body: JSON.stringify(payload),
   });

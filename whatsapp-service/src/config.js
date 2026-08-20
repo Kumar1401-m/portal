@@ -83,8 +83,37 @@ const config = {
      * machine.
      */
     maxDocumentBytes: int(process.env.SEND_MAX_DOCUMENT_BYTES, 48 * 1024 * 1024),
+    /**
+     * The most this will pull down before re-encoding it.
+     *
+     * A ceiling on the download rather than on the send: a 300 MB reel is
+     * normal and is re-encoded to fit, but something has to stop a mistyped
+     * link from filling the container's disk with a Blu-ray.
+     */
+    maxSourceBytes: int(process.env.SEND_MAX_SOURCE_BYTES, 600 * 1024 * 1024),
     /** Gap between consecutive sends — WhatsApp rate-limits aggressively. */
     throttleMs: int(process.env.SEND_THROTTLE_MS, 3000),
+  },
+
+  /**
+   * Re-encoding oversized video, so it goes as a video and not as a link.
+   *
+   * On by default because the image ships ffmpeg; FFMPEG_ENABLED=false turns
+   * it off on an install that does not have it, and the old
+   * document-or-a-link behaviour comes back.
+   */
+  ffmpeg: {
+    enabled: bool(process.env.FFMPEG_ENABLED, true),
+    path: process.env.FFMPEG_PATH || 'ffmpeg',
+    probePath: process.env.FFPROBE_PATH || 'ffprobe',
+    /**
+     * veryfast, because this box has one CPU and shares it with the WhatsApp
+     * session. A slower preset would buy perhaps 15% off the file for several
+     * times the wall clock, and the file already fits.
+     */
+    preset: process.env.FFMPEG_PRESET || 'veryfast',
+    /** A minute of 4K on one core is slow; ten minutes is the give-up point. */
+    timeoutMs: int(process.env.FFMPEG_TIMEOUT_MS, 10 * 60 * 1000),
   },
 
   /** Browser origins allowed to open a Socket.IO connection. */

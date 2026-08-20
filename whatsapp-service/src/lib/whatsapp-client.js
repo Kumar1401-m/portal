@@ -29,6 +29,7 @@ const qrcode = require('qrcode');
 
 const { config } = require('../config');
 const { createLogger } = require('./logger');
+const { prepare } = require('./video-file');
 
 const log = createLogger('whatsapp');
 
@@ -523,7 +524,7 @@ class WhatsAppService extends EventEmitter {
     return run;
   }
 
-  async sendVideo({ groupId, videoUrl, watchUrl, caption, filename }) {
+  async sendVideo({ groupId, videoUrl, watchUrl, caption, filename, followUps }) {
     if (this.state !== STATE.CONNECTED) {
       const err = new Error(`WhatsApp is not connected (state: ${this.state})`);
       err.code = 'not_connected';
@@ -538,12 +539,20 @@ class WhatsAppService extends EventEmitter {
     const started = Date.now();
     log.info('fetching media', { groupId, videoUrl: videoUrl.slice(0, 80) });
 
-    // Fetched here rather than handed to WhatsApp as a URL: the library would
-    // download it anyway, and doing it ourselves means the size check below
-    // happens before Chromium is asked to hold the bytes in memory.
+    /*
+     * Prepared here rather than handed to WhatsApp as a URL.
+     *
+     * The library would download it anyway; doing it ourselves means the file
+     * streams to disk instead of into memory, and anything too big to play in
+     * a chat is re-encoded until it fits rather than being replaced by a link.
+     * A 300 MB reel arrives as a video the client can watch.
+     */
     let media;
+    let done = () => {};
     try {
-      media = await this.fetchMedia(videoUrl, filename);
+      const ready = await prepare(videoUrl);
+      done = ready.cleanup;
+      media = this.mediaFrom(ready, filename);
     } catch (err) {
       /*
        * Too big for WhatsApp, but not too big to review.
@@ -576,10 +585,12 @@ class WhatsAppService extends EventEmitter {
         `_(Too large to send here, so it opens in your browser.)_`;
 
       const sentLink = await this.client.sendMessage(groupId, text);
+      const askedAnyway = await this.sendFollowUps(groupId, followUps);
       return {
         messageId: sentLink?.id?._serialized ?? null,
         bytes: 0,
         sentAsLink: true,
+        followUpsSent: askedAnyway,
         note: err.message,
       };
     }
@@ -591,91 +602,93 @@ class WhatsAppService extends EventEmitter {
       ms: Date.now() - started,
     });
 
-    const sent = await this.client.sendMessage(groupId, media.media, {
-      caption,
-      // Inline where WhatsApp will play it, as a file where it will not. The
-      // client gets the video either way, which is the whole point.
-      sendMediaAsDocument: media.asDocument === true,
-    });
+    let sent;
+    try {
+      sent = await this.client.sendMessage(groupId, media.media, {
+        caption,
+        // Inline where WhatsApp will play it, as a file where it will not. The
+        // client gets the video either way, which is the whole point.
+        sendMediaAsDocument: media.asDocument === true,
+      });
+    } finally {
+      // The temp file goes whatever happened, or the disk fills one send at a
+      // time and nothing says why.
+      done();
+    }
+
+    /*
+     * The question, straight after the video, from here.
+     *
+     * It used to be sent by the portal once this call returned — which was
+     * fine while every send was a few seconds, and wrong the moment a 300 MB
+     * file started being re-encoded in the background: the client would be
+     * asked to approve a video that had not arrived yet. Ordering inside a
+     * group is this service's business, so the follow-ups travel with the job.
+     *
+     * Best effort, and never able to fail the send: the video is already in
+     * the group by this point, and reporting a failure invites a retry that
+     * would post it twice.
+     */
+    const asked = await this.sendFollowUps(groupId, followUps);
 
     return {
       messageId: sent?.id?._serialized ?? null,
       bytes: media.bytes,
+      transcoded: media.transcoded === true,
+      asDocument: media.asDocument === true,
+      followUpsSent: asked,
       durationMs: Date.now() - started,
     };
   }
 
-  /**
-   * Download to a MessageMedia, refusing anything WhatsApp would reject.
-   *
-   * Two ceilings, not one. WhatsApp plays a video inline up to about 16 MB and
-   * accepts a far bigger file as a document — and a client would much rather
-   * download a 40 MB reel than be sent a link to it, which is what happened
-   * to every video over the inline limit before. So anything past the inline
-   * ceiling is still sent, as a document, and only past the document ceiling
-   * does the link come back.
-   *
-   * The document ceiling is deliberately well under WhatsApp's own: the bytes
-   * are held in memory and base64 adds a third on top, and the box this runs
-   * on has 2 GB for Chromium, the session and this.
-   */
-  async fetchMedia(url, filename) {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const err = new Error(`Could not fetch the video (HTTP ${res.status})`);
-      err.code = 'media_fetch_failed';
-      throw err;
+  /** The messages that follow a video, in order. Never throws. */
+  async sendFollowUps(groupId, followUps) {
+    if (!Array.isArray(followUps) || !followUps.length) return false;
+    for (const text of followUps.slice(0, 5)) {
+      try {
+        await this.client.sendMessage(groupId, String(text).slice(0, 4096));
+      } catch (err) {
+        log.warn('a follow-up message did not go', { groupId, error: err.message });
+        return false;
+      }
     }
-
-    const ceiling = Math.max(config.send.maxMediaBytes, config.send.maxDocumentBytes);
-    const declared = Number(res.headers.get('content-length') || 0);
-    if (declared && declared > ceiling) {
-      const err = new Error(
-        `Video is ${(declared / 1048576).toFixed(1)} MB; the most we can send here is ` +
-          `${(ceiling / 1048576).toFixed(0)} MB`
-      );
-      err.code = 'media_too_large';
-      err.permanent = true; // a bigger file will not get smaller on retry
-      throw err;
-    }
-
-    const type = (res.headers.get('content-type') || '').toLowerCase();
-    /*
-     * A page, not a file.
-     *
-     * A Google Drive link that has not been shared publicly answers 200 with
-     * an HTML sign-in page, and without this that page was sent to the client
-     * as a video: a broken attachment, and nobody able to say why. It is a
-     * permanent failure — retrying fetches the same page.
-     */
-    if (type.startsWith('text/html')) {
-      const err = new Error(
-        'That link returns a web page rather than a file — check it is shared publicly, or upload the video to the portal instead.'
-      );
-      err.code = 'not_a_file';
-      err.permanent = true;
-      throw err;
-    }
-
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength > ceiling) {
-      const err = new Error(
-        `Video is ${(buffer.byteLength / 1048576).toFixed(1)} MB, over the limit`
-      );
-      err.code = 'media_too_large';
-      err.permanent = true;
-      throw err;
-    }
-
-    const mimeType = type || 'video/mp4';
-    return {
-      media: new MessageMedia(mimeType, buffer.toString('base64'), filename || 'video.mp4'),
-      bytes: buffer.byteLength,
-      // Too big to play in the chat, small enough to send as a file.
-      asDocument: buffer.byteLength > config.send.maxMediaBytes,
-    };
+    return true;
   }
 
+  /**
+   * A prepared file, as something WhatsApp will take.
+   *
+   * By the time this is called the bytes are already on disk and already
+   * small enough — `video-file.js` downloaded and, if it had to, re-encoded
+   * them. All that is left is the decision WhatsApp actually cares about:
+   * play it in the chat, or send it as a file.
+   *
+   * This is the one place the video is held in memory, and it is held once:
+   * whatsapp-web.js takes base64, so a 14 MB file costs about 19 MB here for
+   * as long as the send takes.
+   */
+  mediaFrom(ready, filename) {
+    const ceiling = Math.max(config.send.maxMediaBytes, config.send.maxDocumentBytes);
+    if (ready.bytes > ceiling) {
+      const err = new Error(
+        `The video is ${(ready.bytes / 1048576).toFixed(1)} MB and could not be made smaller; ` +
+          `the most that can be sent here is ${(ceiling / 1048576).toFixed(0)} MB`
+      );
+      err.code = 'media_too_large';
+      err.permanent = true;
+      throw err;
+    }
+
+    const base64 = fs.readFileSync(ready.file).toString('base64');
+    return {
+      media: new MessageMedia(ready.mimeType || 'video/mp4', base64, filename || 'video.mp4'),
+      bytes: ready.bytes,
+      // Small enough to play in the chat, or big enough that WhatsApp will
+      // only take it as a file.
+      asDocument: ready.bytes > config.send.maxMediaBytes,
+      transcoded: ready.transcoded === true,
+    };
+  }
   /**
    * A PDF into a group, as a file the client can save.
    *

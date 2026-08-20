@@ -19,6 +19,15 @@ export type DeliveryResult =
       videoCode: string;
       clientName: string;
       sentAsLink: boolean;
+      /**
+       * Accepted, not yet in the group.
+       *
+       * A large file is downloaded and re-encoded before WhatsApp will take
+       * it, which is minutes rather than seconds, so the service answers
+       * straight away and finishes in the background. Saying "sent" about that
+       * would be a lie for as long as it takes.
+       */
+      queued: boolean;
       /** False when the video went but the "please review" message did not. */
       asked: boolean;
     }
@@ -50,6 +59,7 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
     watchUrl: video.watchUrl,
     caption: video.mediaCaption,
     filename: `${video.videoCode}.mp4`,
+    followUps: video.followUps,
   });
 
   if (!result.ok) {
@@ -79,16 +89,28 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
    * A client left holding a video with no question is recoverable by one
    * message — a client sent the same video twice is not.
    */
+  /*
+   * Unless the service is sending them, which it now does.
+   *
+   * They travel with the video job so they cannot overtake it: a big file is
+   * downloaded and re-encoded in the background, and this call returns before
+   * it lands — asking a client to approve a video that has not arrived is
+   * worse than not asking at all. `followUpsSent` says it handled them;
+   * `queued` says it will once the media is in. An older service says neither,
+   * and this sends them itself exactly as before.
+   */
   let asked = true;
-  for (const text of video.followUps) {
-    const sent = await sendTextToGroup(video.groupId, text);
-    if (!sent.ok) {
-      asked = false;
-      console.warn(
-        `[whatsapp] ${video.videoCode} sent, but the follow-up did not:`,
-        sent.error
-      );
-      break;
+  if (!result.followUpsSent && !result.queued) {
+    for (const text of video.followUps) {
+      const sent = await sendTextToGroup(video.groupId, text);
+      if (!sent.ok) {
+        asked = false;
+        console.warn(
+          `[whatsapp] ${video.videoCode} sent, but the follow-up did not:`,
+          sent.error
+        );
+        break;
+      }
     }
   }
 
@@ -97,12 +119,31 @@ export async function deliverForApproval(deliverableId: number): Promise<Deliver
     videoCode: video.videoCode,
     clientName: video.clientName,
     sentAsLink: Boolean(result.sentAsLink),
+    // Still being prepared: a big file is downloaded and re-encoded before it
+    // can be sent, and saying "sent" about it would be a lie for a few minutes.
+    queued: Boolean(result.queued),
     asked,
   };
 }
 
 /** One sentence describing what the client received, for the UI to echo back. */
 export function describeDelivery(r: Extract<DeliveryResult, { ok: true }>): string {
+  /*
+   * Preparing, not sent.
+   *
+   * A 300 MB file is downloaded and re-encoded before WhatsApp will take it,
+   * which is minutes rather than seconds. Telling somebody it has gone and
+   * having the group stay empty for four minutes is how a working feature gets
+   * reported as broken.
+   */
+  if (r.queued) {
+    return (
+      `${r.videoCode} is being prepared for WhatsApp — it is a large file, so it is being ` +
+      `compressed first. It will reach ${r.clientName}'s group in a few minutes, with the ` +
+      `question straight after it. The approvals board will show it as sent when it lands.`
+    );
+  }
+
   const what = r.sentAsLink
     ? `${r.videoCode} was too large for WhatsApp, so ${r.clientName} got a link to watch it, then the caption.`
     : `${r.videoCode} sent to ${r.clientName} on WhatsApp, followed by the caption.`;

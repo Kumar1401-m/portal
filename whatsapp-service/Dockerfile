@@ -12,6 +12,10 @@ FROM node:20-bookworm-slim
 # Latin script.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
+      # A finished reel is routinely 100-300 MB, and WhatsApp plays a video in
+      # the chat only up to about 16 MB. ffmpeg re-encodes the oversized ones
+      # until they fit, so a client is sent the video rather than a link to it.
+      ffmpeg \
       fonts-liberation \
       fonts-noto-color-emoji \
       fonts-noto-core \
