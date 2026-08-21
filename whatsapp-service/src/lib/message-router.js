@@ -100,8 +100,10 @@ class MessageRouter {
       if (guessed) parsed = guessed;
     }
 
-    // A client who replies to the video message itself doesn't need to type the
-    // code — recover it from the quoted caption, which contains "Video ID: V245".
+    // A client who replies to the video message itself doesn't need to type a
+    // code. Older captions carried one — "Video ID: V245" — so it is still read
+    // out of the quoted text when it is there. Newer ones do not, and those the
+    // portal resolves from `quotedMessageId` instead.
     let videoCode = parsed.videoCode;
     if (!videoCode && parsed.command !== 'none' && msg.quotedText) {
       videoCode = findCode(msg.quotedText);
@@ -154,6 +156,9 @@ class MessageRouter {
       groupId: msg.groupId,
       groupName: msg.groupName,
       waMessageId: msg.messageId,
+      // Which message they replied to. The portal turns this into the video;
+      // it is the only thing that can when several are waiting in one group.
+      quotedMessageId: msg.quotedMessageId || null,
       time: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : new Date().toISOString(),
     };
 

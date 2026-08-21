@@ -433,11 +433,17 @@ class WhatsAppService extends EventEmitter {
     // A reply to the original video message is how a client indicates which
     // video they mean without typing a code.
     let quotedText = null;
+    let quotedMessageId = null;
     let repliedToUs = false;
     try {
       if (message.hasQuotedMsg) {
         const quoted = await message.getQuotedMessage();
         quotedText = quoted?.body ?? quoted?.caption ?? null;
+        // The id, which is the half that matters. The portal stores the id
+        // of the message each video was sent in, so this names the video
+        // outright — where reading the text only worked while the caption
+        // still carried a code, and it has not for a while.
+        quotedMessageId = quoted?.id?._serialized ?? null;
         // Replying to something we said is someone talking to us, not to the
         // room. `fromMe` is set on the quoted message itself, which is the
         // only reliable way to tell — the sender fields are the client's
@@ -476,6 +482,7 @@ class WhatsAppService extends EventEmitter {
       senderNumber,
       body: message.body || '',
       quotedText,
+      quotedMessageId,
       /*
        * Whether this was aimed at us.
        *
