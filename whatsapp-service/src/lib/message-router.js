@@ -159,11 +159,17 @@ class MessageRouter {
       // Which message they replied to. The portal turns this into the video;
       // it is the only thing that can when several are waiting in one group.
       quotedMessageId: msg.quotedMessageId || null,
+      quotedStanzaId: msg.quotedStanzaId || null,
       time: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : new Date().toISOString(),
     };
 
     log.info('approval command', {
       videoCode,
+      // Logged on every attempt rather than only on a mismatch: a reply we
+      // never saw and a reply we could not match are different faults, and
+      // a diagnostic that only prints for the second cannot tell them apart.
+      quoted: msg.quotedMessageId || null,
+      quotedStanza: msg.quotedStanzaId || null,
       command: parsed.command,
       by: msg.senderName,
       hasComment: Boolean(parsed.comment),

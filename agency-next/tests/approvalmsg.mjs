@@ -143,6 +143,7 @@ const build = wa.buildApprovalMessages;
     const first = await add("ZZ901", "Reel one", "ZZ_MSG_ONE");
     await add("ZZ902", "Reel two", "ZZ_MSG_TWO");
     await add("ZZ903", "Reel three", "ZZ_MSG_THREE");
+    await add("ZZ904", "Reel four", "ZZ_MSG_FOUR");
 
     // Without a reply there is genuinely no way to tell, and saying so is right.
     const bare = await wa.recordApproval({
@@ -185,12 +186,41 @@ const build = wa.buildApprovalMessages;
     assert.equal(onQuestion.ok, true, "replying to the question is replying about the video");
     assert.equal(onQuestion.videoCode, "ZZ902", "and it is that video, not another");
 
+    /*
+     * And the same reply when the library could not serialize the quote.
+     *
+     * `getQuotedMessage()` has to find the original in the local store, which
+     * is not guaranteed for a reply to a video — and when it fails it fails
+     * to null, which reads as "they replied to nothing". The raw stanza id is
+     * on the payload either way, and it is the tail of the id we stored.
+     */
+    const [three] = await db.query("SELECT id FROM deliverables WHERE video_code = 'ZZ903'");
+    await db.execute(
+      "UPDATE deliverables SET wa_message_id = 'true_120363000@g.us_3EBSTANZA903' WHERE id = ?",
+      [three.id]
+    );
+    // Two are still waiting at this point, so nothing but the stanza id can
+    // pick this one out — which is the whole claim being tested.
+    const stillWaiting = await wa.recordApproval({
+      videoCode: null, command: "approve", groupId: GROUP,
+    });
+    assert.equal(stillWaiting.ambiguous, true, "two reels are genuinely still open");
+
+    const byStanza = await wa.recordApproval({
+      videoCode: null, command: "approve", groupId: GROUP,
+      quotedMessageId: null,
+      quotedStanzaId: "3EBSTANZA903",
+      waMessageId: "ZZ_INBOUND_3",
+    });
+    assert.equal(byStanza.ok, true, "a stanza id alone still names the video");
+    assert.equal(byStanza.videoCode, "ZZ903");
+
     // The other two are untouched — an "ok" answers one reel, not the group.
     const [others] = await db.query(
       "SELECT COUNT(*) AS n FROM deliverables WHERE wa_group_id = ? AND status = 'review'",
       [GROUP]
     );
-    assert.equal(Number(others.n), 1, "the reel they never replied to is left alone");
+    assert.equal(Number(others.n), 1, "each reply answered its own reel and no other");
   } finally {
     await clean();
   }

@@ -434,6 +434,7 @@ class WhatsAppService extends EventEmitter {
     // video they mean without typing a code.
     let quotedText = null;
     let quotedMessageId = null;
+    let quotedStanzaId = null;
     let repliedToUs = false;
     try {
       if (message.hasQuotedMsg) {
@@ -444,6 +445,21 @@ class WhatsAppService extends EventEmitter {
         // outright — where reading the text only worked while the caption
         // still carried a code, and it has not for a while.
         quotedMessageId = quoted?.id?._serialized ?? null;
+      }
+      /*
+       * ...and the raw stanza id, which survives when the other does not.
+       *
+       * `hasQuotedMsg` reads a field the library has to have parsed, and
+       * `getQuotedMessage()` has to find the original in the local store —
+       * neither is guaranteed for a reply to media, and both fail silently
+       * into a null that looks exactly like "they did not reply to
+       * anything". `quotedStanzaID` is on the raw payload either way.
+       *
+       * It is the last segment of a serialized id (`true_<chat>_<stanza>`),
+       * so the portal can match on it without us reconstructing the rest.
+       */
+      if (!quotedMessageId) {
+        quotedStanzaId = message._data?.quotedStanzaID ?? null;
         // Replying to something we said is someone talking to us, not to the
         // room. `fromMe` is set on the quoted message itself, which is the
         // only reliable way to tell — the sender fields are the client's
@@ -483,6 +499,7 @@ class WhatsAppService extends EventEmitter {
       body: message.body || '',
       quotedText,
       quotedMessageId,
+      quotedStanzaId,
       /*
        * Whether this was aimed at us.
        *

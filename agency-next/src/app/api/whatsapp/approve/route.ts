@@ -80,6 +80,7 @@ export async function POST(request: Request) {
     // Which message they swiped to reply to. Names the video exactly, and
     // is the only thing that can when three are waiting in one group.
     quotedMessageId: str(body.quotedMessageId),
+    quotedStanzaId: str(body.quotedStanzaId),
     time: str(body.time),
   });
 

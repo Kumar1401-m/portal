@@ -611,6 +611,17 @@ export type ApprovalInput = {
    * to quote a code they could no longer see anywhere.
    */
   quotedMessageId?: string | null;
+  /**
+   * The same reply, identified the way the raw payload identifies it.
+   *
+   * A serialized id is `true_<chat>_<stanza>` and the library only produces
+   * one when it has parsed the quote and found the original in its local
+   * store. Neither is guaranteed for a reply to a video, and when either
+   * fails it fails to null — indistinguishable from a client who replied to
+   * nothing at all. The stanza id is on the payload regardless, and it is
+   * the last segment of the id we stored, so it can be matched on directly.
+   */
+  quotedStanzaId?: string | null;
   time?: string | null;
 };
 
@@ -700,17 +711,24 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
      * below on whatever this resolves to — a quoted id is proof of which
      * video, never proof of who is allowed to answer for it.
      */
-    if (input.quotedMessageId) {
+    if (input.quotedMessageId || input.quotedStanzaId) {
       const quoted = await queryOne<{ video_code: string | null }>(
         `SELECT d.video_code
            FROM deliverables d
-          WHERE d.wa_message_id = ?
+          WHERE d.wa_message_id = ? OR d.wa_message_id LIKE ?
           UNION
          SELECT d.video_code
            FROM whatsapp_send_log l JOIN deliverables d ON d.id = l.deliverable_id
-          WHERE l.wa_message_id = ?
+          WHERE l.wa_message_id = ? OR l.wa_message_id LIKE ?
           LIMIT 1`,
-        [input.quotedMessageId, input.quotedMessageId]
+        [
+          input.quotedMessageId ?? "",
+          // The stanza is the tail of the id we stored, so a suffix match
+          // finds it whichever prefix the library gave the original.
+          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : " ",
+          input.quotedMessageId ?? "",
+          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : " ",
+        ]
       );
       if (quoted?.video_code) videoCode = quoted.video_code;
       else quotedButUnknown = true;
@@ -748,9 +766,9 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
          * with the same symptom. Both ids side by side in the service log
          * settle it in one look; neither belongs in a message to a client.
          */
-        diagnostic: input.quotedMessageId
+        diagnostic: input.quotedMessageId || input.quotedStanzaId
           ? {
-              repliedTo: input.quotedMessageId,
+              repliedTo: input.quotedMessageId ?? `stanza:${input.quotedStanzaId}`,
               known: await query<{ wa_message_id: string | null }>(
                 `SELECT wa_message_id FROM deliverables
                   WHERE wa_group_id = ? AND wa_message_id IS NOT NULL LIMIT 5`,
