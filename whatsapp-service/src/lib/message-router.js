@@ -176,6 +176,11 @@ class MessageRouter {
       // video code, which the client can fix themselves if we tell them.
       if (result.permanent) {
         const reason = result.data?.error || 'that video code was not recognised';
+        // Printed when the portal could not match what they replied to. The
+        // two ids side by side are the whole diagnosis.
+        if (result.data?.diagnostic) {
+          log.warn('a reply quoted a message we could not match', result.data.diagnostic);
+        }
         /*
          * Two videos waiting in one group is the only case the portal cannot
          * settle on its own. Its message already names a code to use, so it is

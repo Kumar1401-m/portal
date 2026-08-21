@@ -1,0 +1,328 @@
+{
+  "name": "Portal — the nightly chain",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 4 * * *"
+            }
+          ]
+        }
+      },
+      "id": "c1a1b2c3-0001-4000-8000-000000000001",
+      "name": "04:00 every night",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        0
+      ],
+      "notes": "After the 02:30 caption analysis and the 03:30 ad sync, so the night's three AI jobs read a database nothing else is still writing to."
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/insights/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c1a1b2c3-0010-4000-8000-000000000010",
+      "name": "Pull post insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        0
+      ],
+      "notes": "Reach, likes, saves and shares for every published post. First, because the two below read what it writes — a Brain run on yesterday's numbers explains yesterday. Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env — the same value every other portal workflow uses."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-not-ok-sync",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1a1b2c3-0011-4000-8000-000000000011",
+      "name": "Did sync fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -20,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/insights/brain",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c1a1b2c3-0012-4000-8000-000000000012",
+      "name": "Work out what changed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ],
+      "notes": "The Marketing Brain: what moved for each client this week and why. Needs the sync above to have run tonight. Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env — the same value every other portal workflow uses."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-not-ok-brain",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1a1b2c3-0013-4000-8000-000000000013",
+      "name": "Did brain fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://nvkhub.vercel.app/api/automation/decisions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c1a1b2c3-0014-4000-8000-000000000014",
+      "name": "Decide tomorrow's list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        0
+      ],
+      "notes": "The night shift. Reads the Brain's findings and the money and work boards, and puts what needs a person into the notification bell. Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env — the same value every other portal workflow uses."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-not-ok-decisions",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1a1b2c3-0015-4000-8000-000000000015",
+      "name": "Did decisions fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "=A step of the nightly chain returned {{ $json.statusCode }}: {{ JSON.stringify($json.body) }}"
+      },
+      "id": "c1a1b2c3-0099-4000-8000-000000000099",
+      "name": "Stop and report",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        640,
+        -180
+      ]
+    }
+  ],
+  "connections": {
+    "04:00 every night": {
+      "main": [
+        [
+          {
+            "node": "Pull post insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull post insights": {
+      "main": [
+        [
+          {
+            "node": "Did sync fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did sync fail?": {
+      "main": [
+        [
+          {
+            "node": "Stop and report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Work out what changed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Work out what changed": {
+      "main": [
+        [
+          {
+            "node": "Did brain fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did brain fail?": {
+      "main": [
+        [
+          {
+            "node": "Stop and report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide tomorrow's list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide tomorrow's list": {
+      "main": [
+        [
+          {
+            "node": "Did decisions fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did decisions fail?": {
+      "main": [
+        [
+          {
+            "node": "Stop and report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {}
+}

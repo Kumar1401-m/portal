@@ -1,0 +1,148 @@
+{
+  "name": "Portal — monthly reports",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "d1a1b2c3-0001-4000-8000-000000000001",
+      "name": "02:00 on the 1st",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -240,
+        0
+      ],
+      "notes": "The month that just finished is what the endpoint reports on by default, which is what running it on the 1st means. Early, because nothing is sent at this hour — the batch is only queued."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvkhub.vercel.app/api/automation/reports/monthly",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "PASTE_CRON_SECRET_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sendAt: $now.setZone('Asia/Kolkata').set({ hour: 11, minute: 0, second: 0, millisecond: 0 }).toUTC().toFormat('yyyy-MM-dd HH:mm:ss') }) }}",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "d1a1b2c3-0002-4000-8000-000000000002",
+      "name": "Queue each client's month",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        0
+      ],
+      "notes": "A body is required — the endpoint answers 400 to an empty one — and `sendAt` is the reason there is one at all. Left out, every report is stamped with the current time and the outbox posts the lot within five minutes, which is the one thing this endpoint was written not to do: a generated message reaching a client before anybody has read it. 11:00 India time on the same morning gives whoever is on that day a real window in Settings → Reminders to read them and cancel any that are wrong. Replace PASTE_CRON_SECRET_HERE with the CRON_SECRET from deploy/.env."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-not-ok",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1a1b2c3-0003-4000-8000-000000000003",
+      "name": "Did it fail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "=Monthly reports returned {{ $json.statusCode }}: {{ JSON.stringify($json.body) }}"
+      },
+      "id": "d1a1b2c3-0004-4000-8000-000000000004",
+      "name": "Stop and report",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        420,
+        -100
+      ]
+    }
+  ],
+  "connections": {
+    "02:00 on the 1st": {
+      "main": [
+        [
+          {
+            "node": "Queue each client's month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue each client's month": {
+      "main": [
+        [
+          {
+            "node": "Did it fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did it fail?": {
+      "main": [
+        [
+          {
+            "node": "Stop and report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {}
+}

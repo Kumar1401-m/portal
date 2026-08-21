@@ -1,6 +1,6 @@
 # n8n → the portal
 
-Four workflows, and the reason each exists.
+Eight workflows, and the reason each exists.
 
 ## What n8n is actually for here
 
@@ -105,6 +105,39 @@ edit page.
 **`nightly-analyse.json`** — 02:30 daily, `GET /api/automation/analyse`. Watches new
 videos so the caption generator has something to work from. Overnight because it costs
 an AI call per video and nobody is waiting on it.
+
+**`nightly-chain.json`** — 04:00 daily, and three calls rather than one:
+`GET /api/automation/insights/sync` → `.../insights/brain` → `.../decisions`.
+
+The order is the point. The sync reads each published post's reach and engagement back
+from Instagram; the Brain works out what changed for each client and why; the night shift
+reads the Brain's findings and decides what needs a person in the morning. Run out of
+order, the Brain explains yesterday and the night shift acts on it.
+
+These three were written, deployed, listed on the Automations page with a daily
+interval — and never wired to anything. For as long as that was true the analytics board
+only had whatever numbers somebody had refreshed by hand, and the bell was empty because
+nothing filled it. `tests/automations.mjs` now fails if a job is listed on that page with
+no cron or workflow fetching its URL, so this cannot quietly happen to the next one.
+
+A failing step stops the chain and turns the run red in n8n, rather than carrying on into
+jobs that read what it should have written. The cost is honest: an Instagram hiccup at
+04:00 costs that night's Brain too, and both are back the next night.
+
+**`monthly-reports.json`** — 02:00 on the 1st, and the only `POST` here:
+`/api/automation/reports/monthly`. Builds each client's month — delivered, reach,
+follower growth, ad spend — and puts one message per client into the outbox.
+
+Two things about it are deliberate. A body is required at all, because the endpoint
+answers 400 to an empty one. And the body sets `sendAt`, because without it every
+report is stamped with the current time and `whatsapp-outbox.json` posts the batch
+within five minutes — which is precisely what this endpoint was written not to do. It
+queues; it never sends. `sendAt` is 11:00 India time the same morning, so whoever is
+on that day has the hours in between to read them in Settings → Reminders and cancel
+anything wrong before a client sees a number nobody checked.
+
+Safe to run twice: each client's month is claimed in `scheduled_reports`, so a second
+call queues nothing and reports those clients as skipped.
 
 **`whatsapp-reminders.json`** — 10:00 daily, `GET /api/automation/whatsapp/run`. The
 routine chases the agency would otherwise have to remember: an unanswered approval after

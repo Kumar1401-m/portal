@@ -620,6 +620,8 @@ export type ApprovalResult = {
   /** Two or more videos are waiting in that group; the client must say which. */
   ambiguous?: boolean;
   choices?: { code: string; title: string }[];
+  /** Only when a reply could not be matched — for the service log. */
+  diagnostic?: { repliedTo: string; known: (string | null)[] };
   /** The code this reply was matched to — the client may not have typed one. */
   videoCode?: string;
   alreadyRecorded?: boolean;
@@ -673,6 +675,16 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
    * client said "ok"; only the portal knows what they said it about.
    */
   let videoCode = input.videoCode;
+  /*
+   * They replied to something, and it is not a message we sent about a video.
+   *
+   * Worth its own answer. "More than one video is waiting" is what to say to
+   * somebody who replied to nothing — said to somebody who did reply, it is
+   * simply wrong, and it sends them to look for a code as though they had not
+   * just pointed at the thing they meant. It also hides which half is broken:
+   * a reply that never arrived and a reply we could not match read the same.
+   */
+  let quotedButUnknown = false;
   if (!videoCode) {
     /*
      * A reply to the video message is the answer, and it is exact.
@@ -701,6 +713,7 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
         [input.quotedMessageId, input.quotedMessageId]
       );
       if (quoted?.video_code) videoCode = quoted.video_code;
+      else quotedButUnknown = true;
     }
   }
 
@@ -727,11 +740,34 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
         ok: false,
         ambiguous: true,
         choices: resolved.choices,
-        error:
-          "More than one video is waiting here, so I can't tell which you mean. " +
-          "Reply to the video itself and say OK, or send the code — for example APPROVE " +
-          resolved.choices[0].code +
-          ".",
+        /*
+         * For the log, not for the group.
+         *
+         * A quoted id that matches nothing is either an id we never stored or
+         * an id in a shape we did not expect, and those are different bugs
+         * with the same symptom. Both ids side by side in the service log
+         * settle it in one look; neither belongs in a message to a client.
+         */
+        diagnostic: input.quotedMessageId
+          ? {
+              repliedTo: input.quotedMessageId,
+              known: await query<{ wa_message_id: string | null }>(
+                `SELECT wa_message_id FROM deliverables
+                  WHERE wa_group_id = ? AND wa_message_id IS NOT NULL LIMIT 5`,
+                [input.groupId]
+              ).then((r) => r.map((x) => x.wa_message_id)),
+            }
+          : undefined,
+        error: quotedButUnknown
+          ? "I can't match that message to any video waiting here — it may be from " +
+            "an older send. Please reply to the video itself, or send the code — for " +
+            "example APPROVE " +
+            resolved.choices[0].code +
+            "."
+          : "More than one video is waiting here, so I can't tell which you mean. " +
+            "Reply to the video itself and say OK, or send the code — for example APPROVE " +
+            resolved.choices[0].code +
+            ".",
       };
     }
     videoCode = resolved.videoCode;
