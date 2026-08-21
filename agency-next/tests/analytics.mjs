@@ -174,4 +174,148 @@ const post = (o = {}) => ({
   ok("a post read every day is still one post in every total");
 }
 
+/* ---------------- a refused insight is not a zero ---------------- */
+{
+  // The failure this closes. A token without `instagram_manage_insights`
+  // reads the post list perfectly and is refused every insight, so the sync
+  // stored real captions, real like counts and a reach of nought — and
+  // reported success. Nothing on the board could tell that from a post nobody
+  // saw, which is exactly the moment somebody needs to be told to go and check
+  // a permission.
+  const clean = async () => {
+    await db.execute("DELETE FROM post_insights WHERE media_id LIKE 'ZZ_BLIND_%'");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ blind'");
+  };
+  await clean();
+  const cid = Number(
+    (await db.execute(
+      `INSERT INTO clients (company_name, status, ig_user_id, ig_access_token)
+       VALUES ('ZZ blind','active','17800000000000000','tok')`
+    )).insertId
+  );
+
+  const posted = new Date(Date.now() - 3600_000).toISOString();
+  const realFetch = global.fetch;
+  global.fetch = async (url) => ({
+    json: async () =>
+      String(url).includes("/insights")
+        ? { error: { message: "(#10) Application does not have permission for this action" } }
+        : {
+            data: [{
+              id: "ZZ_BLIND_1", media_type: "VIDEO", media_product_type: "REELS",
+              permalink: "https://example.test/p", caption: "c",
+              timestamp: posted, like_count: 7, comments_count: 0,
+            }],
+          },
+  });
+
+  try {
+    const r = await a.syncClientPosts(cid);
+    assert.equal(r.ok, false, "a sync that could not read a single number did not succeed");
+    assert.match(r.error ?? "", /instagram_manage_insights/, "and says which permission is missing");
+
+    // The post is still on the board — losing it would hide that it exists.
+    const [row] = await db.query(
+      "SELECT reach, likes FROM post_insights WHERE media_id = 'ZZ_BLIND_1'"
+    );
+    assert.ok(row, "the post is stored even though its figures could not be read");
+    assert.equal(Number(row.likes), 7, "with what the post list did give us");
+
+    // And a second pass never overwrites a number we once read with a zero.
+    await db.execute("UPDATE post_insights SET reach = 119 WHERE media_id = 'ZZ_BLIND_1'");
+    await a.syncClientPosts(cid);
+    const [again] = await db.query(
+      "SELECT reach FROM post_insights WHERE media_id = 'ZZ_BLIND_1'"
+    );
+    assert.equal(Number(again.reach), 119, "a refused read leaves the reach we already had");
+  } finally {
+    global.fetch = realFetch;
+    await clean();
+  }
+  ok("insights Instagram refuses are reported, not stored as nought");
+}
+
+/* ---------------- the follower count is Instagram's ---------------- */
+{
+  // Every post on this board is an Instagram post and the reach beside it is
+  // Instagram's, so a "Followers" figure with the client's Facebook Page
+  // rolled into it is a number that describes neither account. 1,001 on
+  // Instagram and 28 on the Page read as 1,029.
+  const clean = async () => {
+    await db.execute("DELETE FROM audience_snapshots WHERE client_id IN (SELECT id FROM clients WHERE company_name = 'ZZ audience')");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ audience'");
+  };
+  await clean();
+  const cid = Number(
+    (await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ audience','active')")).insertId
+  );
+  try {
+    await db.execute(
+      `INSERT INTO audience_snapshots (client_id, platform, followers, taken_on)
+       VALUES (?,'instagram',1001,CURDATE()), (?,'facebook',28,CURDATE())`,
+      [cid, cid]
+    );
+    const board = await a.followerBoard();
+    assert.equal(board.get(cid)?.followers, 1001, "Instagram's count, not Instagram plus the Page");
+    ok("the Followers figure counts the account the posts were published to");
+  } finally {
+    await clean();
+  }
+}
+
+
+/* ---------------- an archived client is off the board ---------------- */
+{
+  /*
+   * Archiving deletes the work and keeps the money, on purpose. The published
+   * numbers belonged to neither rule and so followed no rule: reach,
+   * engagement and a name in "Reach by client" for somebody the agency
+   * stopped working with, counted into every roster-wide total.
+   *
+   * Two ways it survived, and both are covered here. A post with no task
+   * behind it keys on the client and not on a deliverable, so clearing by
+   * deliverable never reached it; and nothing read the client's status at
+   * all, so even a cleared client's follower history still totalled up.
+   */
+  const clean = async () => {
+    await db.execute("DELETE FROM post_insights WHERE media_id LIKE 'ZZ_ARC_%'");
+    await db.execute("DELETE FROM audience_snapshots WHERE client_id IN (SELECT id FROM clients WHERE company_name = 'ZZ archived')");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ archived'");
+  };
+  await clean();
+  const cid = Number(
+    (await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ archived','active')")).insertId
+  );
+  try {
+    await db.execute(
+      `INSERT INTO post_insights (client_id, platform, media_id, media_type, permalink,
+                                  caption, published_at, snapshot_date, reach, likes,
+                                  comments, saves, shares, total_interactions, engagement_rate)
+       VALUES (?, 'instagram', 'ZZ_ARC_1', 'REELS', NULL, NULL, '2026-08-10 12:00:00',
+               CURDATE(), 500, 10, 0, 0, 0, 10, 2.00)`,
+      [cid]
+    );
+    await db.execute(
+      "INSERT INTO audience_snapshots (client_id, platform, followers, taken_on) VALUES (?,'instagram',900,CURDATE())",
+      [cid]
+    );
+
+    const seen = async () => ({
+      posts: (await a.getPosts("2026-08-01", "2026-08-31")).filter((p) => p.client_id === cid).length,
+      audience: (await a.audienceByPlatform()).has(cid),
+    });
+
+    const live = await seen();
+    assert.equal(live.posts, 1, "a working client's post is on the board");
+    assert.equal(live.audience, true, "and their following counts");
+
+    await db.execute("UPDATE clients SET status = 'churned' WHERE id = ?", [cid]);
+    const gone = await seen();
+    assert.equal(gone.posts, 0, "an archived client's posts leave the board");
+    assert.equal(gone.audience, false, "and so does their following");
+  } finally {
+    await clean();
+  }
+  ok("archiving a client takes their numbers off the analytics board");
+}
 await finish(pass);

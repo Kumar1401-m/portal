@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink, MessageSquareWarning } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getPortalDeliverable, ACCEPTS_RAW } from "@/lib/portal";
+import { needsRawFootage } from "@/lib/raw-footage";
 import { resolveVideoUrl } from "@/lib/storage";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -34,7 +35,11 @@ export default async function PortalContentDetail({
   const needsReview = d.status === "review";
   // The same list the dashboard offers the link on and the action accepts, so
   // a "Add Drive link" button can never lead to a page with no form on it.
-  const needsRawFootage = (ACCEPTS_RAW as readonly string[]).includes(d.status);
+  // ...and only for work a shoot feeds. A poster at this status is with the
+  // designer, not waiting on the client for anything.
+  const showRawForm =
+    (ACCEPTS_RAW as readonly string[]).includes(d.status) &&
+    needsRawFootage(d.service, d.video_type);
 
   // Null on a database that predates the WhatsApp approval feature, in which
   // case the timeline is simply not rendered.
@@ -147,7 +152,7 @@ export default async function PortalContentDetail({
         <div className="lg:col-span-1">
           {needsReview ? (
             <PortalReview deliverableId={d.id} />
-          ) : needsRawFootage ? (
+          ) : showRawForm ? (
             <RawFootageForm deliverableId={d.id} />
           ) : (
             <Card>

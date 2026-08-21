@@ -89,8 +89,16 @@ git clone <your repo> nvkhub && cd nvkhub/deploy
 cp .env.example .env
 nano .env            # fill in every blank; read the comments, the two
                      # portal keys are different on purpose
-docker compose up -d
+BUILD_SHA=$(git -C .. rev-parse --short HEAD) docker compose up -d --build
 ```
+
+`BUILD_SHA` is what `/health` reports back, and the reason to pass it every
+time is that the endpoint exists to catch a deploy that did not happen. It
+used to be written into `.env` by `hostinger.sh` alone, so a plain
+`docker compose up -d --build` rebuilt the image and left the old hash — and
+the one thing that can tell you a container is stale said, with confidence,
+that it was current. Passed on the command line it describes the tree you are
+actually building; omitted, it reads `unknown`, which is at least true.
 
 ### 4. Scan the QR
 

@@ -34,9 +34,10 @@ export async function GET(request: Request) {
   await recordRun(
     "insights_sync",
     result.failed === 0,
-    `${result.posts} posts across ${result.clients} clients${
-      result.failed ? `, ${result.failed} failed` : ""
-    }`
+    `${result.posts} posts across ${result.clients} clients` +
+      // The name and the reason, not the tally. "1 failed" on the
+      // Automations page is a red dot nobody can act on.
+      result.problems.map((p) => `. ${p.client}: ${p.error}`).join("")
   ).catch(() => {});
 
   // 200 even with per-client failures, like the ads sync: one expired token is

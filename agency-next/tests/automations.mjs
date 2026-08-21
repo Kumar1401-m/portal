@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { finish } from "./finish.mjs";
 import { pathToFileURL } from "node:url";
+import fs from "node:fs";
 
 const SRC = process.env.PORTAL_SRC;
 const m = await import(pathToFileURL(`${SRC}/lib/automation-map.ts`).href);
@@ -80,4 +81,125 @@ const ranHoursAgo = (hours, okFlag = 1) => ({
   ok("every arrow joins two real stages, and every job it names is watched");
 }
 
+/* ---------------- every job on the page has something that calls it ---------------- */
+{
+  /*
+   * The failure this closes, and it had already happened twice.
+   *
+   * The Automations page lists a job, gives it an interval and shows a
+   * heartbeat — and none of that requires anybody to have wired a scheduler to
+   * it. Three of the eight had none: the post-insights sync, the Marketing
+   * Brain and the night shift were written, deployed, listed, and never once
+   * run. The board reported "Never run" and that read as new rather than as
+   * broken, so analytics sat on whatever numbers a person had last refreshed
+   * by hand.
+   *
+   * A job is only real if something out there fetches its URL. The schedulers
+   * are Vercel Cron and the n8n workflows, both of which are files in this
+   * repo, so this is checkable rather than a matter of belief.
+   */
+  const root = `${SRC}/../..`;
+  const scheduled = new Set();
+  for (const p of JSON.parse(fs.readFileSync(`${SRC}/../vercel.json`, "utf8")).crons ?? []) {
+    scheduled.add(p.path.split("?")[0]);
+  }
+  const wf = `${root}/n8n/workflows`;
+  for (const file of fs.readdirSync(wf)) {
+    for (const n of JSON.parse(fs.readFileSync(`${wf}/${file}`, "utf8")).nodes ?? []) {
+      const url = n.parameters?.url;
+      if (typeof url === "string" && url.includes("/api/")) {
+        scheduled.add("/api/" + url.split("/api/")[1].split("?")[0]);
+      }
+    }
+  }
+
+  /** Which endpoint each job on the page is behind. */
+  const ENDPOINT = {
+    publishing: "/api/automation/publish/run",
+    whatsapp_reminders: "/api/automation/whatsapp/run",
+    whatsapp_outbox: "/api/automation/whatsapp/outbox",
+    ads_sync: "/api/automation/ads/sync",
+    insights_sync: "/api/automation/insights/sync",
+    ai_insights: "/api/automation/insights/brain",
+    ai_decisions: "/api/automation/decisions",
+    monthly_reports: "/api/automation/reports/monthly",
+  };
+
+  for (const j of m.JOBS) {
+    assert.ok(j.key in ENDPOINT, `${j.key} is on the page but nothing here says what runs it`);
+    if (ENDPOINT[j.key] === null) continue;
+    assert.ok(
+      scheduled.has(ENDPOINT[j.key]),
+      `${j.key} is listed with a ${j.everyMinutes}-minute interval but no cron or n8n workflow fetches ${ENDPOINT[j.key]}`
+    );
+  }
+  ok("every job the Automations page promises has a scheduler behind it");
+}
+
+/* ---------------- and accepts the secret its scheduler sends ---------------- */
+{
+  /*
+   * Wiring a job to a scheduler is only half of it.
+   *
+   * Every n8n workflow in this repo sends `CRON_SECRET` — the README says to
+   * paste that one into each of them — while most of these endpoints sat
+   * behind a guard that took the automation key and nothing else. The ad sync,
+   * the YouTube runner and the whole nightly chain answered 401 to their own
+   * caller, nightly, from workflows that were imported and switched on. It
+   * looked like a mistyped key rather than the wrong door.
+   *
+   * The rule lives in the two shared guards rather than in each route, so this
+   * checks the rule, then that no route has quietly stepped around it.
+   */
+  const api = fs.readFileSync(`${SRC}/lib/automation-api.ts`, "utf8");
+  const body = (name) => (api.split(name)[1] ?? "").split(/^}/m)[0];
+  for (const entry of ["export function guard(", "export async function readAuthorized("]) {
+    assert.ok(
+      body(entry).includes("isAuthorizedCronRequest("),
+      `${entry.trim()} must take the cron secret — it is what every scheduler here sends`
+    );
+  }
+
+  const SCHEDULED_ROUTES = [
+    "publish/run", "analyse", "insights/sync", "insights/brain", "decisions",
+    "ads/sync", "whatsapp/run", "whatsapp/outbox", "youtube/queue", "reports/monthly",
+  ];
+  for (const r of SCHEDULED_ROUTES) {
+    const src = fs.readFileSync(`${SRC}/app/api/automation/${r}/route.ts`, "utf8");
+    assert.ok(
+      ["guard(request)", "readAuthorized(", "isAuthorizedCronRequest("].some((g) => src.includes(g)),
+      `${r} is fetched on a schedule and must go through a guard that accepts the cron secret`
+    );
+    assert.ok(
+      !src.includes("isAuthorizedAutomationRequest("),
+      `${r} reaches past the shared guard to the automation-key-only check`
+    );
+  }
+  ok("every scheduled endpoint accepts the secret a scheduler can actually send");
+}
+
+
+/* ---------------- and the deploy cannot lie about itself ---------------- */
+{
+  /*
+   * The WhatsApp service reports its own commit at `/health`, and that field
+   * exists because a feature that was simply never deployed once cost an
+   * afternoon of debugging a parser that was fine.
+   *
+   * It then did exactly the same thing again. The hash lived in `deploy/.env`
+   * and only `hostinger.sh` ever rewrote it, so the ordinary
+   * `docker compose up -d --build` left the previous value sitting there —
+   * and the endpoint whose only job is catching a stale deploy reported a
+   * twelve-day-old hash on a container that had just been rebuilt.
+   *
+   * Interpolated from the shell now, so it describes the tree being built, or
+   * says "unknown". Either is honest; the old behaviour could be neither.
+   */
+  const compose = fs.readFileSync(`${SRC}/../../deploy/docker-compose.yml`, "utf8");
+  assert.ok(
+    compose.includes("BUILD_SHA: ${BUILD_SHA:-unknown}"),
+    "the running commit comes from the shell that built it, not from a file somebody edits"
+  );
+  ok("the service cannot report a commit it is not running");
+}
 await finish(pass);

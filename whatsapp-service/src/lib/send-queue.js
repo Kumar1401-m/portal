@@ -92,6 +92,10 @@ class SendQueue {
           attemptNo: attempt,
           status: 'sent',
           waMessageId: result.messageId,
+          // The caption and the question that went with it. A client replies to
+          // whichever message is in front of them, and it is usually the one
+          // that asked them something rather than the one with the thumbnail.
+          followUpMessageIds: result.followUpMessageIds || [],
           mediaBytes: result.bytes,
           durationMs: result.durationMs,
         });

@@ -18,6 +18,7 @@ import { pathToFileURL } from "node:url";
 const SRC = process.env.PORTAL_SRC;
 const msg = await import(pathToFileURL(`${SRC}/lib/reminder-messages.ts`).href);
 const rem = readFileSync(`${SRC}/lib/whatsapp-reminders.ts`, "utf8");
+const raw = await import(pathToFileURL(`${SRC}/lib/raw-footage.ts`).href);
 
 let pass = 0;
 const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
@@ -113,6 +114,48 @@ const items = [
     assert.ok(!/\bASAP\b|as soon as possible/i.test(t), `${name} does not hurry them`);
   }
   ok("three different messages, none of which blames anybody");
+}
+
+/* ---------------- a poster is never chased for footage ---------------- */
+{
+  // Posters and videos share one `status` column, so a poster handed to its
+  // designer sits at `waiting_for_raw` — and every footage query read that as
+  // "blocked on the client". The chase went out asking for rushes that were
+  // never going to exist, about a piece already sitting with our own designer.
+  assert.ok(raw.needsRawFootage("video_editing"), "a reel is shot by the client");
+  for (const s of ["poster_designing", "meta_ads", "content_writing"]) {
+    assert.ok(!raw.needsRawFootage(s), s + " has no footage to send");
+  }
+  // Rows older than the service column fall back the way the migration does.
+  assert.ok(!raw.needsRawFootage(null, "Poster"), "an untagged poster is still a poster");
+  assert.ok(!raw.needsRawFootage("", "poster"), "whatever the casing");
+  assert.ok(raw.needsRawFootage(null, null), "and an untagged row is a video, as it always was");
+  ok("only video editing waits on the client for anything");
+}
+
+/* ---------------- and every query that asks knows it ---------------- */
+{
+  // The rule is worth nothing in one query. It was eight, each with its own
+  // copy of "status IN (pending, waiting_for_raw) AND no link" — the chase,
+  // the manual reminder, the client portal, the group reply, the map, the
+  // monthly summary and both assistants. Any new one must carry it too.
+  const ASKS = [
+    "lib/whatsapp-reminders.ts",
+    "lib/reminder-messages.ts",
+    "lib/portal.ts",
+    "lib/whatsapp-ai.ts",
+    "lib/assistant.ts",
+    "lib/automation-map.ts",
+    "app/api/whatsapp/footage/route.ts",
+    "app/api/whatsapp/summary/route.ts",
+  ];
+  for (const p of ASKS) {
+    assert.ok(
+      readFileSync(`${SRC}/${p}`, "utf8").includes("needsRawFootageSql("),
+      `${p} decides who to chase and must read the one rule`
+    );
+  }
+  ok("all eight places that ask for footage read the same rule");
 }
 
 await finish(pass);

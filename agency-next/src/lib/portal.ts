@@ -9,7 +9,7 @@ const n = (v: unknown) => Number(v ?? 0);
  * task dialog is a client component. Re-exported so the queries below and the
  * pages that already import from here keep reading one definition.
  */
-import { ACCEPTS_RAW } from "./raw-footage";
+import { ACCEPTS_RAW, needsRawFootageSql } from "./raw-footage";
 export { ACCEPTS_RAW, rawUploadStatus } from "./raw-footage";
 
 const ACCEPTS_RAW_SQL = ACCEPTS_RAW.map((s) => `'${s}'`).join(",");
@@ -94,6 +94,7 @@ export async function getPortalOverview(clientId: number): Promise<PortalOvervie
       `SELECT id, title, status, service, video_type, content_category FROM deliverables
        WHERE client_id = ? AND status IN (${ACCEPTS_RAW_SQL})
          AND (raw_drive_link IS NULL OR raw_drive_link = '')
+         AND ${needsRawFootageSql("")}
        ORDER BY due_date IS NULL, due_date ASC, id ASC`,
       [clientId]
     ),

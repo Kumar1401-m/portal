@@ -20,6 +20,7 @@ import { query, execute, hasColumn, hasTable } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { sendDueMessages } from "./reminder-outbox";
 import { recordRun } from "./automation-runs";
+import { needsRawFootageSql } from "./raw-footage";
 import { notifyAdmins } from "./notify";
 import { expensesNeedingNotice } from "./expenses";
 import { money } from "./utils";
@@ -396,6 +397,10 @@ async function findFootageDue(lead: number) {
        JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
       WHERE d.status IN ('pending','waiting_for_raw')
         AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
+        -- A poster is not waiting on a shoot. Chasing one asks the client
+        -- for rushes that will never exist, about a piece already sitting
+        -- with our own designer.
+        AND ${needsRawFootageSql("d")}
         AND d.due_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
       GROUP BY d.client_id, g.group_id, d.due_date
       ORDER BY d.due_date ASC

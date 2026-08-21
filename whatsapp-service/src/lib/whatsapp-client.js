@@ -597,7 +597,8 @@ class WhatsAppService extends EventEmitter {
         messageId: sentLink?.id?._serialized ?? null,
         bytes: 0,
         sentAsLink: true,
-        followUpsSent: askedAnyway,
+        followUpsSent: askedAnyway.sent,
+        followUpMessageIds: askedAnyway.ids,
         note: err.message,
       };
     }
@@ -643,23 +644,36 @@ class WhatsAppService extends EventEmitter {
       bytes: media.bytes,
       transcoded: media.transcoded === true,
       asDocument: media.asDocument === true,
-      followUpsSent: asked,
+      followUpsSent: asked.sent,
+      followUpMessageIds: asked.ids,
       durationMs: Date.now() - started,
     };
   }
 
   /** The messages that follow a video, in order. Never throws. */
+  /**
+   * The caption and the question, each as its own message.
+   *
+   * Their ids are returned now rather than dropped. A video is three
+   * messages and the last of them is the one that asks the client anything,
+   * so it is the one they reply to — and "reply to the video and say OK"
+   * could not see that reply at all while only the reel's id was kept.
+   */
   async sendFollowUps(groupId, followUps) {
-    if (!Array.isArray(followUps) || !followUps.length) return false;
+    if (!Array.isArray(followUps) || !followUps.length) return { sent: false, ids: [] };
+    const ids = [];
     for (const text of followUps.slice(0, 5)) {
       try {
-        await this.client.sendMessage(groupId, String(text).slice(0, 4096));
+        const sent = await this.client.sendMessage(groupId, String(text).slice(0, 4096));
+        // Kept even on a partial failure below: a message that did go out is
+        // one a client can reply to, whether or not the next one made it.
+        if (sent?.id?._serialized) ids.push(sent.id._serialized);
       } catch (err) {
         log.warn('a follow-up message did not go', { groupId, error: err.message });
-        return false;
+        return { sent: false, ids };
       }
     }
-    return true;
+    return { sent: true, ids };
   }
 
   /**

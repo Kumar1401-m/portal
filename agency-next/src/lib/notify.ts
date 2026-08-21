@@ -28,18 +28,35 @@ export async function notifyUser(
   }
 }
 
-/** Notify every active admin + super admin. */
+/**
+ * Notify every active admin + super admin — in the bell.
+ *
+ * Email is off unless a caller asks for it, and that is the whole change.
+ * Every one of these went out as mail as well, to every admin, for every
+ * event the portal has: a post published, a poster submitted, a client
+ * asking a question, footage arriving, each of the night shift's decisions.
+ * An inbox that fills with things already sitting in the bell is an inbox
+ * that stops being read, and the one message that did need answering — a
+ * client's reel that failed to publish — arrived looking like all of them.
+ *
+ * `notifyClientById` below has always had this flag. Admins were the ones
+ * with no way to turn it off.
+ */
 export async function notifyAdmins(
   type: string,
   title: string,
   body: string,
-  link: string | null = null
+  link: string | null = null,
+  /** True only for something that needs a person who is not looking at the portal. */
+  mail = false
 ): Promise<void> {
   try {
     const admins = await query<{ id: number; email: string | null }>(
       "SELECT id, email FROM users WHERE role IN ('admin','super_admin') AND is_active = 1"
     );
-    await Promise.all(admins.map((a) => notifyUser(a.id, type, title, body, link, a.email)));
+    await Promise.all(
+      admins.map((a) => notifyUser(a.id, type, title, body, link, mail ? a.email : null))
+    );
   } catch (err) {
     console.warn("notifyAdmins failed:", err instanceof Error ? err.message : err);
   }

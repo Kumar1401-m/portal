@@ -21,6 +21,7 @@ import "server-only";
 import { query } from "./db";
 import { onTheFloor } from "./client-status";
 import { lastRuns, type JobRun } from "./automation-runs";
+import { needsRawFootageSql } from "./raw-footage";
 
 export type NodeKey =
   | "planned"
@@ -234,8 +235,10 @@ export async function liveCounts(): Promise<Record<NodeKey, number>> {
   const rows = await query<Record<string, unknown>>(
     `SELECT
        SUM(d.status = 'pending') AS planned,
-       SUM(d.status = 'waiting_for_raw'
-           OR (d.status = 'pending' AND (d.raw_drive_link IS NULL OR d.raw_drive_link = ''))) AS footage,
+       SUM(${needsRawFootageSql("d")}
+           AND (d.status = 'waiting_for_raw'
+                OR (d.status = 'pending'
+                    AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')))) AS footage,
        SUM(d.status IN ('raw_uploaded','editing','caption_ready')) AS editing,
        SUM(d.status IN ('review','content_review')) AS with_client,
        SUM(d.status = 'changes_requested') AS changes,

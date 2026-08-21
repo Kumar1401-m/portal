@@ -24,6 +24,7 @@ import { env } from "./env";
 import { getSettings } from "./settings";
 import { prettyLocal } from "./posting";
 import { fmtDate } from "./utils";
+import { needsRawFootageSql } from "./raw-footage";
 
 /** How long after replying before this group may be replied to again. */
 const COOLDOWN_MS = 20_000;
@@ -167,6 +168,7 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
       `SELECT title FROM deliverables
         WHERE client_id = ? AND status IN ('pending','waiting_for_raw')
           AND (raw_drive_link IS NULL OR raw_drive_link = '')
+          AND ${needsRawFootageSql("")}
         ORDER BY due_date IS NULL, due_date ASC LIMIT 10`,
       [clientId]
     ).catch(() => []),

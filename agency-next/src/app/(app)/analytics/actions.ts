@@ -46,6 +46,6 @@ export async function syncInsightsAction(clientId?: number): Promise<SyncState> 
     ok: r.failed === 0,
     message:
       `Updated ${r.posts} post${r.posts === 1 ? "" : "s"} across ${r.clients} client${r.clients === 1 ? "" : "s"}.` +
-      (r.failed ? ` ${r.failed} couldn't be read — check their Instagram token.` : ""),
+      r.problems.map((p) => ` ${p.client}: ${p.error}`).join(""),
   };
 }

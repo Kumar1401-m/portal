@@ -9,12 +9,13 @@ import { sparkline } from "@/lib/sparkline";
  * value with a trend behind it — the number is the answer and the line is the
  * context, not the other way round.
  *
- * **Two tiles, never one chart.** Instagram is in the thousands and Facebook
- * in the dozens. On one pair of axes the smaller account is a flat line along
+ * **One tile per platform, never one chart.** Instagram is in the thousands,
+ * Facebook in the dozens, a new YouTube channel in single figures. On one pair of axes the smaller account is a flat line along
  * the bottom, and the fix for that — a second y-scale — is the single most
  * misread thing in charting: two series that appear to cross when they never
  * met. Separate tiles give each account its own scale honestly, and nothing is
- * lost, because nobody compares an Instagram follower to a Facebook one.
+ * lost, because nobody compares an Instagram follower to a Facebook one, or
+ * either to a YouTube subscriber.
  */
 
 /** The two hues, each validated against its own surface rather than picked. */
@@ -30,6 +31,14 @@ const TONES = {
        not by eye — a lighter blue looked right and measured wrong. */
     line: "text-[#0ea5e9] dark:text-[#0284c7]",
     chip: "bg-[#0ea5e9]/12 text-[#0284c7] dark:text-[#38bdf8]",
+  },
+  youtube: {
+    /* amber-500 / amber-600, not YouTube's own red: rose already carries
+       Instagram here, and two reds a shade apart is the one pairing that
+       reads as an error state rather than as two accounts. Third hue, same
+       validator, same lightness band on both surfaces. */
+    line: "text-[#f59e0b] dark:text-[#d97706]",
+    chip: "bg-[#f59e0b]/12 text-[#b45309] dark:text-[#fbbf24]",
   },
 } as const;
 

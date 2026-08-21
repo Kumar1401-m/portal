@@ -13,6 +13,7 @@
 import { isAuthorizedWhatsAppRequest, unauthorized } from "@/lib/api-auth";
 import { clientForGroup } from "@/lib/whatsapp-approvals";
 import { query } from "@/lib/db";
+import { needsRawFootageSql } from "@/lib/raw-footage";
 import { fmtDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
        COALESCE(SUM(status IN ('approved','scheduled')),0)                     AS scheduled,
        COALESCE(SUM(status IN ('raw_uploaded','editing','caption_ready')),0)   AS editing,
        COALESCE(SUM(status IN ('pending','waiting_for_raw')
-                AND (raw_drive_link IS NULL OR raw_drive_link = '')),0)        AS needs_footage
+                AND (raw_drive_link IS NULL OR raw_drive_link = '')
+                AND ${needsRawFootageSql("")}),0)                              AS needs_footage
      FROM deliverables
      WHERE client_id = ? AND month_key = DATE_FORMAT(CURDATE(),'%Y-%m')`,
     [clientId]

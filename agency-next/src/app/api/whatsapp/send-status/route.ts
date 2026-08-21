@@ -55,6 +55,11 @@ export async function POST(request: Request) {
       attemptNo: int(body.attemptNo) ?? 1,
       status: raw as "queued" | "sending" | "sent" | "delivered" | "read" | "failed",
       waMessageId: str(body.waMessageId),
+      // The caption and the question sent with the video. A reply to any of
+      // them has to mean the same video.
+      followUpMessageIds: Array.isArray(body.followUpMessageIds)
+        ? body.followUpMessageIds.map(str).filter(Boolean)
+        : null,
       mediaBytes: int(body.mediaBytes),
       durationMs: int(body.durationMs),
       errorCode: str(body.errorCode),

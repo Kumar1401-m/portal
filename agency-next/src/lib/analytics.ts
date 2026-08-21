@@ -29,6 +29,7 @@
  * showing yesterday's numbers.
  */
 import "server-only";
+import type { PlatformKey } from "./audience";
 import { query, queryOne, execute, hasTable } from "./db";
 import { env } from "./env";
 import { onTheFloor } from "./client-status";
@@ -210,8 +211,8 @@ async function mediaInsights(
   mediaId: string,
   token: string,
   isReel: boolean
-): Promise<{ reach: number; saves: number; shares: number; views: number }> {
-  const out = { reach: 0, saves: 0, shares: 0, views: 0 };
+): Promise<{ reach: number; saves: number; shares: number; views: number; failed: boolean }> {
+  const out = { reach: 0, saves: 0, shares: 0, views: 0, failed: false };
   const wanted = isReel ? "reach,saved,shares,views" : "reach,saved,shares";
 
   type Insights = { data?: { name?: string; values?: { value?: number }[] }[] };
@@ -227,7 +228,20 @@ async function mediaInsights(
   };
 
   if (read(await graph<Insights>(`/${mediaId}/insights?metric=${wanted}`, token))) return out;
-  read(await graph<Insights>(`/${mediaId}/insights?metric=reach`, token));
+
+  /*
+   * Whether the numbers are real, told apart from whether they are zero.
+   *
+   * Both calls returning nothing used to leave the same all-zero object a
+   * genuinely unseen post leaves, and it was written to the table as fact. A
+   * token without `instagram_manage_insights` reads the post list perfectly
+   * and is refused every insight — so the board filled up with real captions,
+   * real like counts and a reach of zero, and said nothing. There is no way to
+   * look at that and know to go and check a permission.
+   */
+  const bare = await graph<Insights>(`/${mediaId}/insights?metric=reach`, token);
+  read(bare);
+  out.failed = bare === null;
   return out;
 }
 
@@ -277,6 +291,8 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
   const cutoff = Date.now() - FIRST_SYNC_DAYS * 86_400_000;
   const settled = Date.now() - SETTLES_AFTER_DAYS * 86_400_000;
   let written = 0;
+  /** Posts whose figures Instagram would not hand over. */
+  let blind = 0;
 
   for (const m of list.data ?? []) {
     if (!m.id) continue;
@@ -289,6 +305,13 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
 
     const isReel = (m.media_product_type || m.media_type || "").toUpperCase() === "REELS";
     const ins = await mediaInsights(m.id, token, isReel);
+    if (ins.failed) {
+      blind++;
+      // Never overwrite numbers we did read once with zeros we did not. A new
+      // post is still stored, so it appears on the board; the count below is
+      // what says its figures are missing rather than nil.
+      if (known.has(m.id)) continue;
+    }
 
     const likes = Number(m.like_count ?? 0);
     const comments = Number(m.comments_count ?? 0);
@@ -339,24 +362,58 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
     written++;
   }
 
+  if (blind) {
+    return {
+      ok: false,
+      posts: written,
+      error:
+        `Instagram listed ${blind === written ? "the posts" : `${blind} of the posts`} but refused ` +
+        `their reach and engagement. That is a permission, not a bad account: the token this ` +
+        `client uses is missing instagram_manage_insights. Clear the token on the client to fall ` +
+        `back to the agency one, or reissue it with that scope.`,
+    };
+  }
+
   return { ok: true, posts: written };
 }
 
 /** Every client on the floor with Instagram set up. Used by the nightly job. */
-export async function syncAllPosts(): Promise<{ clients: number; posts: number; failed: number }> {
-  if (!(await insightsReady())) return { clients: 0, posts: 0, failed: 0 };
-  const clients = await query<{ id: number }>(
-    `SELECT c.id FROM clients c
+/** Which client could not be read, and what Instagram said about it. */
+export type SyncProblem = { client: string; error: string };
+
+export async function syncAllPosts(): Promise<{
+  clients: number;
+  posts: number;
+  failed: number;
+  /*
+   * Named, because a bare count is not something anybody can act on.
+   *
+   * This reported `1 failed` and threw away both the client and the reason,
+   * so the Automations page could say a nightly job was failing and never
+   * say which account or why — and the reason is nearly always one client's
+   * token, which is a two-minute fix once you know whose.
+   */
+  problems: SyncProblem[];
+}> {
+  if (!(await insightsReady())) return { clients: 0, posts: 0, failed: 0, problems: [] };
+  const clients = await query<{ id: number; company_name: string }>(
+    `SELECT c.id, c.company_name FROM clients c
       WHERE ${onTheFloor()} AND c.ig_user_id IS NOT NULL AND c.ig_user_id <> ''`
   );
   let posts = 0;
-  let failed = 0;
+  const problems: SyncProblem[] = [];
   for (const c of clients) {
-    const r = await syncClientPosts(c.id).catch(() => ({ ok: false, posts: 0 }) as SyncResult);
-    if (r.ok) posts += r.posts;
-    else failed++;
+    const r = await syncClientPosts(c.id).catch((e) => ({
+      ok: false,
+      posts: 0,
+      error: e instanceof Error ? e.message : "The sync threw.",
+    }) as SyncResult);
+    // Counted whether or not the client succeeded: a run that stored eight
+    // posts and was refused the ninth wrote eight, and said zero.
+    posts += r.posts;
+    if (!r.ok) problems.push({ client: c.company_name, error: r.error ?? "Instagram would not answer." });
   }
-  return { clients: clients.length, posts, failed };
+  return { clients: clients.length, posts, failed: problems.length, problems };
 }
 
 /* ------------------------------ Reading ------------------------------ */
@@ -416,7 +473,20 @@ export async function getPosts(
   opts: { clientId?: number | null; clientIds?: number[] | null } = {}
 ): Promise<PostRow[]> {
   if (!(await insightsReady())) return [];
-  const where: string[] = ["p.published_at >= ?", "p.published_at < ? + INTERVAL 1 DAY"];
+  /*
+   * An archived client is off this board, like every other board.
+   *
+   * Archiving deletes the work and leaves the money — deliberately — but the
+   * published numbers sat outside both rules: reach, engagement and a name in
+   * "Reach by client" for somebody the agency stopped working with months
+   * ago, counted into every roster-wide total. `onTheFloor` is the same test
+   * the deliverables boards, my-work and the reminders already apply.
+   */
+  const where: string[] = [
+    onTheFloor("c"),
+    "p.published_at >= ?",
+    "p.published_at < ? + INTERVAL 1 DAY",
+  ];
   const params: (string | number)[] = [from, to];
 
   if (opts.clientId) {
@@ -499,15 +569,33 @@ export function byClient(posts: PostRow[]): ClientPerformance[] {
  * read each would be twenty round trips before the page renders — the ads
  * page fetches live because it shows one client at a time.
  */
-export async function followerBoard(): Promise<Map<number, { followers: number; growth: number | null }>> {
-  const out = new Map<number, { followers: number; growth: number | null }>();
+/** One account's standing: where it is now, and what it has done this month. */
+export type AudienceStanding = { followers: number; growth: number | null };
+
+/**
+ * Every client's standing on every platform, in one query.
+ *
+ * Kept per platform rather than summed. A client with 1,001 on Instagram and
+ * 28 on their Page has two facts, and the number that adds them up — 1,029 —
+ * is true of no account anybody can open. The board draws them side by side
+ * for the same reason: "followers" is not one figure once a client is on
+ * three platforms, and a single total hides which one is actually growing.
+ *
+ * Growth is measured against the close of last month, not the first reading
+ * of this one, so a month still running reads as "up 40 so far" rather than
+ * resetting on the 1st. Null when there is no earlier month at all — a first
+ * reading has no growth, and "+0" would claim a flat month nobody watched.
+ */
+export async function audienceByPlatform(): Promise<
+  Map<number, Partial<Record<PlatformKey, AudienceStanding>>>
+> {
+  const out = new Map<number, Partial<Record<PlatformKey, AudienceStanding>>>();
   if (!(await hasTable("audience_snapshots"))) return out;
 
   const rows = await query<Record<string, unknown>>(
-    `SELECT s.client_id,
-            SUM(s.followers) AS followers,
-            SUM(s.followers) - SUM(COALESCE(prev.followers, 0)) AS growth,
-            COUNT(prev.followers) AS had_prev
+    `SELECT s.client_id, s.platform, s.followers,
+            s.followers - COALESCE(prev.followers, 0) AS growth,
+            prev.followers IS NOT NULL AS had_prev
        FROM audience_snapshots s
        JOIN (
          SELECT client_id, platform, MAX(taken_on) AS latest
@@ -521,16 +609,37 @@ export async function followerBoard(): Promise<Map<number, { followers: number; 
                 WHERE q.client_id = s.client_id AND q.platform = s.platform
                   AND q.taken_on < DATE_FORMAT(CURDATE(), '%Y-%m-01')
              )
-      GROUP BY s.client_id`
+       JOIN clients c ON c.id = s.client_id
+      -- Same rule as the posts above: an archived client's following is not
+      -- part of what the agency currently reaches.
+      WHERE ${onTheFloor("c")}`
   ).catch(() => []);
 
   for (const r of rows) {
-    out.set(num(r.client_id), {
+    const id = num(r.client_id);
+    const platform = String(r.platform) as PlatformKey;
+    const entry = out.get(id) ?? {};
+    entry[platform] = {
       followers: num(r.followers),
-      // No reading from before this month means no growth to report — a first
-      // month showing "+0" would claim a flat month nobody measured.
       growth: num(r.had_prev) > 0 ? num(r.growth) : null,
-    });
+    };
+    out.set(id, entry);
+  }
+  return out;
+}
+
+/**
+ * The same, narrowed to Instagram.
+ *
+ * Derived rather than queried again: the posts on this board are Instagram's
+ * and so is the follower figure beside them, and two queries against one
+ * table are two chances for the two numbers to disagree.
+ */
+export async function followerBoard(): Promise<Map<number, AudienceStanding>> {
+  const all = await audienceByPlatform();
+  const out = new Map<number, AudienceStanding>();
+  for (const [id, byPlatform] of all) {
+    if (byPlatform.instagram) out.set(id, byPlatform.instagram);
   }
   return out;
 }

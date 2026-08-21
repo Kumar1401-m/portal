@@ -52,6 +52,20 @@ const ORPHANED_BY_DELETE = [
   "post_insights",
 ];
 
+/**
+ * Tables that key on the client rather than on one of their videos.
+ *
+ * `post_insights` is in both lists on purpose. Most of its rows point at the
+ * deliverable they came from and go with it — but a post published straight
+ * to the account, with no task behind it, is stored with a client and a null
+ * deliverable. Clearing only by deliverable left exactly those rows, and they
+ * are the ones that kept an archived client on the analytics board.
+ *
+ * `audience_snapshots` was never cleared at all: a follower count, per month,
+ * for an account the agency no longer runs.
+ */
+const KEYED_BY_CLIENT = ["post_insights", "audience_snapshots"];
+
 export async function clearAllVideoData(): Promise<ClearSummary> {
   const summary: ClearSummary = { videos: 0, filesDeleted: 0, filesFailed: 0, rows: {} };
 
@@ -146,6 +160,15 @@ export async function clearClientVideoData(clientId: number): Promise<ClearSumma
         [id]
       );
       summary.rows[table] = res.affectedRows ?? 0;
+    } catch {
+      /* a table this install never created is not a failure to report */
+    }
+  }
+
+  for (const table of KEYED_BY_CLIENT) {
+    try {
+      const res = await execute(`DELETE FROM ${table} WHERE client_id = ?`, [id]);
+      summary.rows[table] = (summary.rows[table] ?? 0) + (res.affectedRows ?? 0);
     } catch {
       /* a table this install never created is not a failure to report */
     }

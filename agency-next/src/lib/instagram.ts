@@ -815,7 +815,12 @@ export async function markFailed(input: {
       `"${d.title}" could not be posted after ${attemptsUsed} attempt${
         attemptsUsed === 1 ? "" : "s"
       }: ${String(input.errorMessage).slice(0, 200)}`,
-      `/deliverables/${d.id}`
+      `/deliverables/${d.id}`,
+      // Mailed, unlike the rest. A reel that has used every retry is not going
+      // out at all, on a client's account, on a day they were told it would —
+      // and nobody finds that by opening the portal, because the reason to
+      // open the portal was that it had gone out.
+      true
     );
   }
 

@@ -43,3 +43,36 @@ export const acceptsRaw = (status: string): boolean =>
 export function rawUploadStatus(current: string): string | null {
   return current === "waiting_for_raw" ? "raw_uploaded" : null;
 }
+
+/**
+ * Whether this kind of work waits on the client to send us anything.
+ *
+ * Only video editing does. A poster is drawn, an ad is bought, a caption is
+ * typed — nobody is filming any of them. A poster handed to its designer sits
+ * at `waiting_for_raw` because a poster and a video share one status column,
+ * and every footage query read that as "blocked on the client": the chase went
+ * out asking for rushes that were never going to exist, for a piece already
+ * sitting with our own designer. `posterStageLabel` in constants.ts renames
+ * that status for reports; this is the same fact, told to the queries.
+ *
+ * Poster-or-video is decided the way the client board decides it, so the
+ * chase, the counts and the progress bars all draw one line. The difference:
+ * this asks for video editing specifically, not merely "not a poster" — ads
+ * and copywriting have no footage either.
+ */
+export function needsRawFootageSql(alias = "d"): string {
+  const p = alias ? `${alias}.` : "";
+  return `(COALESCE(NULLIF(${p}service,''),
+    IF(LOWER(COALESCE(${p}video_type,'')) = 'poster','poster_designing','video_editing')) = 'video_editing')`;
+}
+
+/** The same question, asked of a row already in hand rather than in SQL. */
+export function needsRawFootage(
+  service: string | null | undefined,
+  videoType?: string | null
+): boolean {
+  const s =
+    service ||
+    (String(videoType || "").toLowerCase() === "poster" ? "poster_designing" : "video_editing");
+  return s === "video_editing";
+}

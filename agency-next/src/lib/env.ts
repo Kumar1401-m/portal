@@ -65,6 +65,23 @@ export const env = {
     enabled: Boolean(process.env.GEMINI_API_KEY),
   },
 
+  /**
+   * YouTube, read-only, and a plain API key rather than a credential.
+   *
+   * Uploading needs OAuth and lives in n8n, which is why this portal holds no
+   * Google credential at all. Subscriber counts and a video's view count are
+   * public data, and public data on the YouTube Data API takes an API key and
+   * nothing else — so the one thing the portal wants back from YouTube is the
+   * one thing it can have without becoming a place that stores OAuth tokens.
+   *
+   * Enable "YouTube Data API v3" on any Google Cloud project and paste the key.
+   * Without it the YouTube figures are absent rather than wrong.
+   */
+  youtube: {
+    apiKey: process.env.YOUTUBE_API_KEY || "",
+    enabled: Boolean(process.env.YOUTUBE_API_KEY),
+  },
+
   mail: {
     host: process.env.SMTP_HOST || "",
     port: toInt(process.env.SMTP_PORT, 587),

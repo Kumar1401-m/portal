@@ -147,4 +147,19 @@ const mk = (vals) => months.slice(-vals.length).map((m, i) => ({ month: m, follo
   ok("history is one row per day, closed monthly, and never fatal");
 }
 
+/* ---------------- the page that shows the number also takes it ---------------- */
+{
+  // The Followers card reads `audience_snapshots`; for a long time the only
+  // thing that wrote to it was Ad Management, so a client nobody had opened
+  // there showed a dash on Analytics for ever. Whoever reads the board must
+  // also record the reading.
+  const page = readFileSync(`${SRC}/app/(app)/analytics/page.tsx`, "utf8");
+  assert.ok(page.includes("getAudience("), "analytics records the follower count it displays");
+  assert.ok(
+    page.indexOf("getAudience(") < page.indexOf("audienceByPlatform()"),
+    "and records it before reading the board back, or the first visit still shows a dash"
+  );
+  ok("analytics writes today's follower reading before it reads the board");
+}
+
 await finish(pass);

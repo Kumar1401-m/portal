@@ -425,6 +425,21 @@ export async function recordSendStatus(input: {
   durationMs?: number | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /**
+   * The other messages this video went out as.
+   *
+   * A video is three messages: the reel, its caption, and the question that
+   * asks about it. Only the first was kept, and the question is the one a
+   * client answers — so "reply to the video and say OK" worked for the
+   * message with the thumbnail on it and failed for the message that had
+   * just asked them something, which is the reply anybody would actually
+   * make.
+   *
+   * Logged rather than kept on the row: the row holds the current state and
+   * these are not it, and the log already answers "which video was this
+   * message part of" for delivery receipts.
+   */
+  followUpMessageIds?: (string | null)[] | null;
 }): Promise<void> {
   if (!(await approvalsReady())) return;
 
@@ -489,6 +504,22 @@ export async function recordSendStatus(input: {
         WHERE id = ? AND wa_status NOT IN ('approved','changes_requested','rejected')`,
       [input.waMessageId ?? null, deliverableId]
     );
+
+    /*
+     * One log row per accompanying message, so a reply to any of them can be
+     * traced back to this video. Deliberately after the update above and
+     * never instead of it: `deliverables.wa_message_id` stays the reel, which
+     * is what every other reader of it means.
+     */
+    for (const id of input.followUpMessageIds ?? []) {
+      if (!id) continue;
+      await execute(
+        `INSERT INTO whatsapp_send_log
+           (deliverable_id, video_code, group_id, attempt_no, status, wa_message_id)
+         VALUES (?,?,?,?, 'sent', ?)`,
+        [deliverableId, input.videoCode ?? null, input.groupId ?? null, input.attemptNo ?? 1, id]
+      ).catch(() => {});
+    }
   } else if (input.status === "delivered") {
     await execute(
       `UPDATE deliverables SET wa_status = 'delivered', wa_delivered_at = COALESCE(wa_delivered_at, NOW())
@@ -570,6 +601,16 @@ export type ApprovalInput = {
   groupId?: string | null;
   groupName?: string | null;
   waMessageId?: string | null;
+  /**
+   * The message they swiped to reply to, if they did.
+   *
+   * Which video a client means, said the way WhatsApp already says it. The
+   * service used to answer this by hunting "Video ID: V245" in the quoted
+   * message's own text — which stopped working the day the code came off the
+   * video message, and left a client replying to the reel itself being told
+   * to quote a code they could no longer see anywhere.
+   */
+  quotedMessageId?: string | null;
   time?: string | null;
 };
 
@@ -633,6 +674,37 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
    */
   let videoCode = input.videoCode;
   if (!videoCode) {
+    /*
+     * A reply to the video message is the answer, and it is exact.
+     *
+     * `wa_message_id` is the id of the message this video was sent in, kept
+     * on the row since the day it went out. So a quoted id is not a hint to
+     * be weighed against what else is pending — it is the video, named by
+     * the client, and it settles the case that used to be unanswerable:
+     * three reels in a group and an "ok" that could have meant any of them.
+     *
+     * Checked before the group is consulted at all, because this is better
+     * evidence than anything the group can offer. The group check still runs
+     * below on whatever this resolves to — a quoted id is proof of which
+     * video, never proof of who is allowed to answer for it.
+     */
+    if (input.quotedMessageId) {
+      const quoted = await queryOne<{ video_code: string | null }>(
+        `SELECT d.video_code
+           FROM deliverables d
+          WHERE d.wa_message_id = ?
+          UNION
+         SELECT d.video_code
+           FROM whatsapp_send_log l JOIN deliverables d ON d.id = l.deliverable_id
+          WHERE l.wa_message_id = ?
+          LIMIT 1`,
+        [input.quotedMessageId, input.quotedMessageId]
+      );
+      if (quoted?.video_code) videoCode = quoted.video_code;
+    }
+  }
+
+  if (!videoCode) {
     if (!input.groupId) {
       return { ok: false, error: "No video code, and no group to work it out from." };
     }
@@ -657,7 +729,7 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
         choices: resolved.choices,
         error:
           "More than one video is waiting here, so I can't tell which you mean. " +
-          "Please reply with the code, for example APPROVE " +
+          "Reply to the video itself and say OK, or send the code — for example APPROVE " +
           resolved.choices[0].code +
           ".",
       };

@@ -15,6 +15,7 @@ import { query, queryOne, hasColumn } from "./db";
 import { env } from "./env";
 import type { SessionUser } from "./auth";
 import { crmClientIds } from "./crm";
+import { needsRawFootageSql } from "./raw-footage";
 import {
   getPosts,
   followerBoard,
@@ -194,7 +195,8 @@ export async function buildSnapshot(user: SessionUser): Promise<Snapshot> {
           went out without anyone approving it, and work whose posting
           actually failed as opposed to merely not having happened yet. */
        SUM(d.status IN ('pending','waiting_for_raw')
-           AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')) AS no_footage,
+           AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
+           AND ${needsRawFootageSql("d")}) AS no_footage,
        ${waOk ? `SUM(d.wa_approved_by = 'Auto-approved after 24h'
            AND d.month_key = DATE_FORMAT(CURDATE(),'%Y-%m'))` : "0"} AS auto_approved,
        SUM(d.instagram_status = 'failed') AS posting_failed
@@ -743,6 +745,7 @@ export async function actionOffers(user: SessionUser, question: string): Promise
         WHERE c.status <> 'churned' AND ${where}
           AND d.status IN ('pending','waiting_for_raw')
           AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
+          AND ${needsRawFootageSql("d")}
         ORDER BY c.company_name LIMIT 8`
     );
     if (rows.length)

@@ -17,12 +17,15 @@
  * down with it: every failure returns null and the caller renders nothing.
  */
 import "server-only";
-import { query, queryOne, execute, hasTable } from "./db";
+import { query, queryOne, execute, hasTable, hasColumn } from "./db";
 import { env } from "./env";
 
 const GRAPH = "https://graph.facebook.com";
 
 /** A month's closing follower count. */
+/** The three accounts a client can have work published to. */
+export type PlatformKey = "instagram" | "facebook" | "youtube";
+
 export type MonthPoint = { month: string; followers: number };
 
 export type Platform = {
@@ -36,6 +39,7 @@ export type Platform = {
 export type Audience = {
   instagram: (Platform & { username: string | null }) | null;
   facebook: (Platform & { name: string | null }) | null;
+  youtube: (Platform & { channelId: string | null }) | null;
 };
 
 type Row = {
@@ -43,6 +47,7 @@ type Row = {
   ig_username: string | null;
   fb_page_id: string | null;
   ig_access_token: string | null;
+  youtube_channel_id: string | null;
 };
 
 /**
@@ -61,13 +66,16 @@ type Row = {
  */
 export async function getAudience(clientId: number): Promise<Audience | null> {
   const c = await queryOne<Row>(
-    "SELECT ig_user_id, ig_username, fb_page_id, ig_access_token FROM clients WHERE id = ?",
+    `SELECT ig_user_id, ig_username, fb_page_id, ig_access_token,
+            ${(await hasColumn("clients", "youtube_channel_id")) ? "youtube_channel_id" : "NULL AS youtube_channel_id"}
+       FROM clients WHERE id = ?`,
     [clientId]
   );
   if (!c) return null;
 
   const token = c.ig_access_token || env.meta.accessToken;
-  if (!token || (!c.ig_user_id && !c.fb_page_id)) return null;
+  const wantsYouTube = Boolean(env.youtube.enabled && c.youtube_channel_id);
+  if ((!token || (!c.ig_user_id && !c.fb_page_id)) && !wantsYouTube) return null;
 
   const v = env.meta.apiVersion;
   const get = async <T>(path: string): Promise<T | null> => {
@@ -122,7 +130,37 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
     }
   }
 
-  if (!ig && !fb) return null;
+  /*
+   * YouTube, on its own API and its own key.
+   *
+   * Nothing here is shared with the Meta calls above: a different host, a
+   * different credential, and a channel that may be connected on a client
+   * whose Instagram is not. So it is asked for independently and its absence
+   * costs the other two nothing.
+   */
+  let yt: { channelId: string | null; followers: number } | null = null;
+  if (wantsYouTube) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=statistics` +
+          `&id=${encodeURIComponent(c.youtube_channel_id!)}` +
+          `&key=${encodeURIComponent(env.youtube.apiKey)}`,
+        { cache: "no-store", signal: AbortSignal.timeout(6_000) }
+      );
+      const j = (await res.json().catch(() => ({}))) as {
+        items?: { statistics?: { subscriberCount?: string } }[];
+      };
+      const n = Number(j.items?.[0]?.statistics?.subscriberCount);
+      // A channel that hides its count returns the field absent, not zero —
+      // and reporting nought subscribers for a hidden count is a wrong number,
+      // not a missing one.
+      if (Number.isFinite(n)) yt = { channelId: c.youtube_channel_id, followers: n };
+    } catch {
+      /* the tile simply has no YouTube row */
+    }
+  }
+
+  if (!ig && !fb && !yt) return null;
 
   /*
    * Today is recorded, and the months are read back.
@@ -133,14 +171,16 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
    * opens has gaps — and it is the right one here, because the number is only
    * ever looked at on the page that fetches it.
    */
-  const [igHistory, fbHistory] = await Promise.all([
+  const [igHistory, fbHistory, ytHistory] = await Promise.all([
     ig ? record(clientId, "instagram", ig.followers) : Promise.resolve([]),
     fb ? record(clientId, "facebook", fb.followers) : Promise.resolve([]),
+    yt ? record(clientId, "youtube", yt.followers) : Promise.resolve([]),
   ]);
 
   return {
     instagram: ig ? { ...ig, ...trend(igHistory, ig.followers) } : null,
     facebook: fb ? { ...fb, ...trend(fbHistory, fb.followers) } : null,
+    youtube: yt ? { ...yt, ...trend(ytHistory, yt.followers) } : null,
   };
 }
 
@@ -153,7 +193,7 @@ export async function getAudience(clientId: number): Promise<Audience | null> {
  */
 async function record(
   clientId: number,
-  platform: "instagram" | "facebook",
+  platform: PlatformKey,
   followers: number
 ): Promise<MonthPoint[]> {
   try {

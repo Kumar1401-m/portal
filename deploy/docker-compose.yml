@@ -17,6 +17,23 @@ services:
     container_name: whatsapp-approval-service
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Which commit this container is actually running.
+      #
+      # `/health` reports this, and it exists because a feature that was
+      # simply not deployed once cost an afternoon of debugging a parser that
+      # was fine. But the value lived in .env and only `hostinger.sh` rewrote
+      # it — so the ordinary `docker compose up -d --build` left the old hash
+      # in place and the endpoint whose whole job is catching a stale deploy
+      # reported a stale hash with total confidence.
+      #
+      # Read from the shell instead, so it describes the tree being built:
+      #
+      #   BUILD_SHA=$(git -C .. rev-parse --short HEAD) docker compose up -d --build
+      #
+      # Started any other way it says "unknown", which is the honest answer
+      # and the one thing the old behaviour could never give.
+      BUILD_SHA: ${BUILD_SHA:-unknown}
     ports:
       # localhost only; the reverse proxy terminates TLS in front of it.
       - "127.0.0.1:4000:4000"

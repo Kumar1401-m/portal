@@ -77,6 +77,9 @@ export async function POST(request: Request) {
     groupId: str(body.groupId),
     groupName: str(body.groupName),
     waMessageId: str(body.waMessageId),
+    // Which message they swiped to reply to. Names the video exactly, and
+    // is the only thing that can when three are waiting in one group.
+    quotedMessageId: str(body.quotedMessageId),
     time: str(body.time),
   });
 

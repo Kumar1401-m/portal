@@ -7,7 +7,7 @@
  * carries `ok`, so an n8n IF node only ever has to look at one field.
  */
 import "server-only";
-import { isAuthorizedAutomationRequest, unauthorized } from "./api-auth";
+import { isAuthorizedCronRequest, unauthorized } from "./api-auth";
 
 export type ApiOk<T> = { ok: true } & T;
 export type ApiErr = { ok: false; error: string; code?: string };
@@ -30,7 +30,8 @@ export function fail(error: string, status = 400, code?: string): Response {
 export async function readAuthorized(
   request: Request
 ): Promise<{ response: Response; body?: never } | { response?: never; body: Record<string, unknown> }> {
-  if (!isAuthorizedAutomationRequest(request)) return { response: unauthorized() };
+  // The same door as `guard` above: n8n POSTs to these with the cron secret.
+  if (!isAuthorizedCronRequest(request)) return { response: unauthorized() };
   try {
     const parsed = await request.json();
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -43,8 +44,23 @@ export async function readAuthorized(
 }
 
 /** Auth guard for GET routes, which have no body to read. */
+/**
+ * Both machine secrets, because both schedulers are ours.
+ *
+ * This took the automation key alone, and every n8n workflow in this repo
+ * sends `CRON_SECRET` — the README tells you to paste that one, into each of
+ * them. So the ad sync, the YouTube runner and the whole nightly chain
+ * answered 401 to the only credential their caller had, every night, from a
+ * workflow that had been imported and switched on. A 401 reads as "wrong
+ * key", which is why it was never read as "wrong door".
+ *
+ * `isAuthorizedCronRequest` takes either secret and nothing besides. Nothing
+ * widens: both are machine credentials for the same scheduled jobs, and the
+ * one endpoint that can publish to a client's Instagram has accepted both
+ * from the start.
+ */
 export function guard(request: Request): Response | null {
-  return isAuthorizedAutomationRequest(request) ? null : unauthorized();
+  return isAuthorizedCronRequest(request) ? null : unauthorized();
 }
 
 /* ------------------------------ Field coercion ------------------------------ */

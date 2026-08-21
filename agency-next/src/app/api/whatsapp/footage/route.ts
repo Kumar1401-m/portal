@@ -18,7 +18,7 @@ import { isAuthorizedWhatsAppRequest, unauthorized } from "@/lib/api-auth";
 import { clientForGroup } from "@/lib/whatsapp-approvals";
 import { query, execute } from "@/lib/db";
 import { notifyAdmins } from "@/lib/notify";
-import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/raw-footage";
+import { ACCEPTS_RAW, rawUploadStatus, needsRawFootageSql } from "@/lib/raw-footage";
 import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
     `SELECT id, title, status FROM deliverables
       WHERE client_id = ? AND status IN (${ACCEPTS_RAW.map(() => "?").join(",")})
         AND (raw_drive_link IS NULL OR raw_drive_link = '')
+        AND ${needsRawFootageSql("")}
       ORDER BY due_date IS NULL, due_date ASC, id ASC LIMIT 1`,
     [clientId, ...ACCEPTS_RAW]
   );
@@ -84,7 +85,8 @@ export async function POST(request: Request) {
   const [more] = await query<{ n: number }>(
     `SELECT COUNT(*) AS n FROM deliverables
       WHERE client_id = ? AND status IN (${ACCEPTS_RAW.map(() => "?").join(",")})
-        AND (raw_drive_link IS NULL OR raw_drive_link = '')`,
+        AND (raw_drive_link IS NULL OR raw_drive_link = '')
+        AND ${needsRawFootageSql("")}`,
     [clientId, ...ACCEPTS_RAW]
   );
   const left = Number(more?.n) || 0;

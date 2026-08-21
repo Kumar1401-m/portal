@@ -15,7 +15,7 @@ import { getClientsMini } from "@/lib/deliverables";
 import {
   getPosts,
   byClient,
-  followerBoard,
+  audienceByPlatform,
   insightsReady,
   lastInsightSync,
   engagementRate,
@@ -29,6 +29,8 @@ import {
   type PostRow,
 } from "@/lib/analytics";
 import { resolveRange } from "@/lib/date-range";
+import { getAudience } from "@/lib/audience";
+import { AudienceTile } from "@/components/admin/audience-tile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { RangePicker } from "@/components/admin/range-picker";
@@ -112,11 +114,39 @@ export default async function AnalyticsPage({
     Number.isInteger(wanted) && clients.some((c) => c.id === wanted) ? wanted : null;
 
   const range = resolveRange(sp.range ?? new Date().toISOString().slice(0, 7));
-  const [posts, followers, syncedAt] = await Promise.all([
+
+  /*
+   * Take today's follower reading before the board is read back.
+   *
+   * The Followers card reads `audience_snapshots`, and the only thing that
+   * has ever written to it is opening Ad Management for that client. So a
+   * client nobody had visited there showed a dash for ever — on the page whose
+   * whole subject is their numbers, beside a reach figure read live from the
+   * same account. Same call the ads page makes, on the same terms: one client
+   * at a time, best-effort, and the page renders whether or not Meta answers.
+   *
+   * Only when a client is picked. The all-clients view would be one Graph
+   * request per client on every page view, to fill in a total that is already
+   * the sum of everyone who has been looked at.
+   */
+  const audienceNow = clientId ? await getAudience(clientId).catch(() => null) : null;
+
+  const [posts, audience, syncedAt] = await Promise.all([
     getPosts(range.from, range.to, { clientId, clientIds: scope }),
-    followerBoard(),
+    audienceByPlatform(),
     lastInsightSync(),
   ]);
+
+  /*
+   * Instagram, for everything measured against a post.
+   *
+   * Reach, engagement and the posts themselves are Instagram's on this board,
+   * so the follower figure beside them has to be Instagram's too. The other
+   * platforms get their own card rather than being folded into this number.
+   */
+  const followers = new Map(
+    [...audience].flatMap(([id, p]) => (p.instagram ? [[id, p.instagram] as const] : []))
+  );
 
   const totals = sum(posts);
   const rate = engagementRate(totals);
@@ -139,6 +169,7 @@ export default async function AnalyticsPage({
     : [...followers.entries()]
         .filter(([id]) => clients.some((c) => c.id === id))
         .reduce<number | null>((t, [, v]) => (v.growth === null ? t : (t ?? 0) + v.growth), null);
+
 
   const top = rank(posts);
   const best = slots(posts, "weekday");
@@ -197,6 +228,55 @@ export default async function AnalyticsPage({
           tone="emerald"
         />
       </div>
+
+      {/*
+        * Where the audience actually is, one platform at a time.
+        *
+        * The tile above it says "Followers" and means Instagram, because
+        * every post on this board is an Instagram post. That is the right
+        * number to put beside a reach figure and the wrong answer to "how big
+        * are we?" — a client is on three platforms and the sum of the three is
+        * a number true of no account anybody can open. Same component the ads
+        * page uses, for the same reason it gives: one scale each, honestly.
+        *
+        * Only for a single client. Across the roster these would be three
+        * totals of unrelated accounts, which is the chart this component was
+        * written to avoid.
+        */}
+      {audienceNow ? (
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {audienceNow.instagram ? (
+            <AudienceTile
+              platform="instagram"
+              label="Instagram followers"
+              handle={audienceNow.instagram.username ? `@${audienceNow.instagram.username}` : null}
+              followers={audienceNow.instagram.followers}
+              history={audienceNow.instagram.history}
+              change={audienceNow.instagram.change}
+            />
+          ) : null}
+          {audienceNow.facebook ? (
+            <AudienceTile
+              platform="facebook"
+              label="Facebook followers"
+              handle={audienceNow.facebook.name}
+              followers={audienceNow.facebook.followers}
+              history={audienceNow.facebook.history}
+              change={audienceNow.facebook.change}
+            />
+          ) : null}
+          {audienceNow.youtube ? (
+            <AudienceTile
+              platform="youtube"
+              label="YouTube subscribers"
+              handle={null}
+              followers={audienceNow.youtube.followers}
+              history={audienceNow.youtube.history}
+              change={audienceNow.youtube.change}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {!posts.length ? (
         <Card>
