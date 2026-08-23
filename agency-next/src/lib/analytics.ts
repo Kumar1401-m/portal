@@ -185,6 +185,32 @@ const asDateTime = (iso: string | undefined): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 19).replace("T", " ");
 };
 
+/**
+ * The same request, with the client's own credential and then the agency's.
+ *
+ * A per-client token exists for the client who will not add us to their
+ * Business Manager, and it is whatever they were able to issue — often
+ * `instagram_basic` and nothing else. That reads the post list perfectly and
+ * is refused every insight, so the board filled with real captions, real like
+ * counts and a reach of nought, and the nightly job reported itself failed
+ * every morning while an agency token that could read all of it sat unused.
+ *
+ * The client's first, because when it works it is the more specific grant.
+ * The fallback is only reached when theirs returns nothing at all, and if the
+ * agency has no access to that account either the answer is the same as
+ * before — absent, and reported as absent.
+ */
+async function graphEither<T>(path: string, tokens: (string | null)[]): Promise<T | null> {
+  const tried = new Set<string>();
+  for (const t of tokens) {
+    if (!t || tried.has(t)) continue;
+    tried.add(t);
+    const res = await graph<T>(path, t);
+    if (res) return res;
+  }
+  return null;
+}
+
 async function graph<T>(path: string, token: string): Promise<T | null> {
   try {
     const res = await fetch(
@@ -209,7 +235,7 @@ async function graph<T>(path: string, token: string): Promise<T | null> {
  */
 async function mediaInsights(
   mediaId: string,
-  token: string,
+  tokens: (string | null)[],
   isReel: boolean
 ): Promise<{ reach: number; saves: number; shares: number; views: number; failed: boolean }> {
   const out = { reach: 0, saves: 0, shares: 0, views: 0, failed: false };
@@ -227,7 +253,7 @@ async function mediaInsights(
     return Boolean(res?.data?.length);
   };
 
-  if (read(await graph<Insights>(`/${mediaId}/insights?metric=${wanted}`, token))) return out;
+  if (read(await graphEither<Insights>(`/${mediaId}/insights?metric=${wanted}`, tokens))) return out;
 
   /*
    * Whether the numbers are real, told apart from whether they are zero.
@@ -239,7 +265,7 @@ async function mediaInsights(
    * real like counts and a reach of zero, and said nothing. There is no way to
    * look at that and know to go and check a permission.
    */
-  const bare = await graph<Insights>(`/${mediaId}/insights?metric=reach`, token);
+  const bare = await graphEither<Insights>(`/${mediaId}/insights?metric=reach`, tokens);
   read(bare);
   out.failed = bare === null;
   return out;
@@ -265,14 +291,23 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
   );
   if (!c) return { ok: false, posts: 0, error: "No such client." };
 
+  /*
+   * Theirs, then ours. Not one or the other.
+   *
+   * This picked the client's token when it existed and never looked at the
+   * agency's again — so one weak credential on one client turned into a
+   * nightly job that reported itself failed while a token that could read the
+   * account was sitting in the environment.
+   */
+  const tokens = [c.ig_access_token, env.meta.accessToken];
   const token = c.ig_access_token || env.meta.accessToken;
   if (!token) return { ok: false, posts: 0, error: "No Meta access token — add one on the client's page." };
   if (!c.ig_user_id) return { ok: false, posts: 0, error: "This client has no Instagram account id set." };
 
-  const list = await graph<{ data?: Media[] }>(
+  const list = await graphEither<{ data?: Media[] }>(
     `/${c.ig_user_id}/media?limit=50&fields=id,caption,media_type,media_product_type,` +
       `permalink,timestamp,like_count,comments_count`,
-    token
+    tokens
   );
   if (!list) {
     return { ok: false, posts: 0, error: "Instagram refused the request — check the token on this client." };
@@ -304,7 +339,7 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
     if (known.has(m.id) && postedMs && postedMs < settled) continue;
 
     const isReel = (m.media_product_type || m.media_type || "").toUpperCase() === "REELS";
-    const ins = await mediaInsights(m.id, token, isReel);
+    const ins = await mediaInsights(m.id, tokens, isReel);
     if (ins.failed) {
       blind++;
       // Never overwrite numbers we did read once with zeros we did not. A new
@@ -367,10 +402,11 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
       ok: false,
       posts: written,
       error:
-        `Instagram listed ${blind === written ? "the posts" : `${blind} of the posts`} but refused ` +
-        `their reach and engagement. That is a permission, not a bad account: the token this ` +
-        `client uses is missing instagram_manage_insights. Clear the token on the client to fall ` +
-        `back to the agency one, or reissue it with that scope.`,
+        `Instagram listed ${blind === written ? "the posts" : `${blind} of the posts`} but ` +
+        `refused their reach and engagement — to this client's own token and to the agency ` +
+        `token both. Neither credential has instagram_manage_insights on this account. Add ` +
+        `the account to the agency's system user in Business Settings, or reissue the ` +
+        `client's token with that scope.`,
     };
   }
 
@@ -629,6 +665,29 @@ export async function audienceByPlatform(): Promise<
 }
 
 /**
+ * Clients this board can say nothing about, because nobody told it where to
+ * look.
+ *
+ * Analytics reads Instagram through `clients.ig_user_id`. A client without
+ * one is not a client with no reach — it is a client the portal has never
+ * asked about, and on "All clients" their absence is invisible: the roster
+ * total is one account's numbers wearing the word All.
+ */
+export async function clientsWithoutInstagram(clientIds?: number[] | null): Promise<string[]> {
+  if (clientIds && clientIds.length === 0) return [];
+  const scope =
+    clientIds && clientIds.length ? `AND c.id IN (${clientIds.map(() => "?").join(",")})` : "";
+  const rows = await query<{ company_name: string }>(
+    `SELECT c.company_name FROM clients c
+      WHERE ${onTheFloor()} AND (c.ig_user_id IS NULL OR c.ig_user_id = '')
+        ${scope}
+      ORDER BY c.company_name`,
+    clientIds && clientIds.length ? clientIds : []
+  ).catch(() => []);
+  return rows.map((r) => r.company_name);
+}
+
+/**
  * The same, narrowed to Instagram.
  *
  * Derived rather than queried again: the posts on this board are Instagram's
@@ -649,4 +708,110 @@ export async function lastInsightSync(): Promise<string | null> {
   if (!(await insightsReady())) return null;
   const r = await queryOne<{ at: string | null }>("SELECT MAX(updated_at) AS at FROM post_insights");
   return r?.at ?? null;
+}
+
+/* ------------------------- Month by month ------------------------- */
+
+/** One month's closing position, and what was published into it. */
+export type GrowthMonth = {
+  /** "2026-08" */
+  month: string;
+  posts: number;
+  reach: number;
+  likes: number;
+  comments: number;
+  saves: number;
+  shares: number;
+  /** Instagram followers at the close of that month, or null before the first reading. */
+  followers: number | null;
+};
+
+/**
+ * The last twelve months, side by side.
+ *
+ * The rest of this board answers "how did this month go". That is the wrong
+ * question for "are we growing" — a single month has nothing to be bigger than,
+ * and the answer only appears when the months are put next to each other.
+ *
+ * Followers are the closing count for each month rather than an average: "grew
+ * by 40 in July" means where July finished. Reach is summed from the posts
+ * published in that month, deduped the same way `getPosts` does it — the table
+ * holds one row per post per day it was read, and a plain SUM would multiply a
+ * month's reach by however long the sync has been running.
+ */
+export async function monthlyGrowth(
+  clientIds?: number[] | null,
+  months = 12
+): Promise<GrowthMonth[]> {
+  if (!(await insightsReady())) return [];
+  if (clientIds && clientIds.length === 0) return [];
+
+  const scope = clientIds && clientIds.length ? clientIds : [];
+  const inClients = scope.length ? `AND p.client_id IN (${scope.map(() => "?").join(",")})` : "";
+  const n = Math.max(1, Math.min(24, Math.trunc(months) || 12));
+
+  const posts = await query<Record<string, unknown>>(
+    `SELECT DATE_FORMAT(p.published_at,'%Y-%m') AS month,
+            COUNT(*) AS posts,
+            COALESCE(SUM(p.reach),0)    AS reach,
+            COALESCE(SUM(p.likes),0)    AS likes,
+            COALESCE(SUM(p.comments),0) AS comments,
+            COALESCE(SUM(p.saves),0)    AS saves,
+            COALESCE(SUM(p.shares),0)   AS shares
+       FROM post_insights p
+       JOIN clients c ON c.id = p.client_id
+       JOIN (SELECT media_id, MAX(snapshot_date) AS latest
+               FROM post_insights GROUP BY media_id) last
+         ON last.media_id = p.media_id AND last.latest = p.snapshot_date
+      WHERE ${onTheFloor("c")} AND p.published_at IS NOT NULL ${inClients}
+      GROUP BY month`,
+    scope
+  ).catch(() => []);
+
+  const followers = (await hasTable("audience_snapshots"))
+    ? await query<Record<string, unknown>>(
+        `SELECT DATE_FORMAT(s.taken_on,'%Y-%m') AS month, SUM(s.followers) AS followers
+           FROM audience_snapshots s
+           JOIN clients c ON c.id = s.client_id
+           JOIN (SELECT client_id, DATE_FORMAT(taken_on,'%Y-%m') AS m, MAX(taken_on) AS closing
+                   FROM audience_snapshots WHERE platform = 'instagram'
+                  GROUP BY client_id, m) last
+             ON last.client_id = s.client_id AND last.closing = s.taken_on
+          WHERE s.platform = 'instagram' AND ${onTheFloor("c")}
+            ${scope.length ? `AND s.client_id IN (${scope.map(() => "?").join(",")})` : ""}
+          GROUP BY month`,
+        scope
+      ).catch(() => [])
+    : [];
+
+  const byMonth = new Map<string, GrowthMonth>();
+  const blank = (month: string): GrowthMonth => ({
+    month, posts: 0, reach: 0, likes: 0, comments: 0, saves: 0, shares: 0, followers: null,
+  });
+
+  // Every month in the window, present or not — a gap in the bars is a month
+  // with no work, which is itself the answer to "are we growing".
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const key = d.toISOString().slice(0, 7);
+    byMonth.set(key, blank(key));
+  }
+
+  for (const r of posts) {
+    const row = byMonth.get(String(r.month));
+    if (!row) continue;
+    row.posts = num(r.posts);
+    row.reach = num(r.reach);
+    row.likes = num(r.likes);
+    row.comments = num(r.comments);
+    row.saves = num(r.saves);
+    row.shares = num(r.shares);
+  }
+  for (const r of followers) {
+    const row = byMonth.get(String(r.month));
+    if (row) row.followers = num(r.followers);
+  }
+
+  return [...byMonth.values()];
 }

@@ -130,15 +130,28 @@ export function ApprovalBoard({
   // Recomputed from the live rows rather than trusting the server's snapshot,
   // so the cards and the table can never disagree on screen.
   const counts = useMemo<ApprovalCounts>(() => {
-    const c = { pending: 0, approved: 0, changesRequested: 0, rejected: 0, readyToPost: 0, failed: 0 };
+    const c = { pending: 0, approved: 0, changesRequested: 0, rejected: 0, posted: 0, failed: 0 };
+    /*
+     * The answer, whoever gave it and wherever they gave it.
+     *
+     * `wa_status` knows only what happened on WhatsApp. A super admin
+     * approving inside the portal writes `approval_status` and never touches
+     * it — so a video answered at a desk stayed under "Awaiting client", and
+     * one sent back for changes from the portal never appeared under changes
+     * at all. Whichever field holds a settled answer is the answer.
+     */
+    const SETTLED = ["approved", "changes_requested", "rejected"];
     for (const r of rows) {
-      if (["queued", "sending", "sent", "delivered", "viewed"].includes(r.wa_status)) c.pending++;
-      else if (r.wa_status === "approved") {
+      const answer = SETTLED.includes(r.approval_status ?? "")
+        ? (r.approval_status as string)
+        : r.wa_status;
+      if (r.instagram_status === "posted") c.posted++;
+      if (["queued", "sending", "sent", "delivered", "viewed"].includes(answer)) c.pending++;
+      else if (answer === "approved") {
         c.approved++;
-        if (r.status !== "posted") c.readyToPost++;
-      } else if (r.wa_status === "changes_requested") c.changesRequested++;
-      else if (r.wa_status === "rejected") c.rejected++;
-      else if (r.wa_status === "failed") c.failed++;
+      } else if (answer === "changes_requested") c.changesRequested++;
+      else if (answer === "rejected") c.rejected++;
+      else if (answer === "failed") c.failed++;
     }
     return rows.length ? c : initialCounts;
   }, [rows, initialCounts]);
@@ -148,7 +161,7 @@ export function ApprovalBoard({
     { key: "approved", label: "Approved", value: counts.approved, icon: CheckCircle2, tone: "text-emerald-600 dark:text-emerald-400" },
     { key: "changes", label: "Changes requested", value: counts.changesRequested, icon: MessageSquare, tone: "text-orange-600 dark:text-orange-400" },
     { key: "rejected", label: "Rejected", value: counts.rejected, icon: XCircle, tone: "text-rose-600 dark:text-rose-400" },
-    { key: "ready", label: "Ready to post", value: counts.readyToPost, icon: Send, tone: "text-sky-600 dark:text-sky-400" },
+    { key: "posted", label: "Posted", value: counts.posted, icon: Send, tone: "text-sky-600 dark:text-sky-400" },
     { key: "failed", label: "Failed to send", value: counts.failed, icon: TriangleAlert, tone: "text-rose-600 dark:text-rose-400" },
   ];
 

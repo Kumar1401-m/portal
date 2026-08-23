@@ -47,8 +47,24 @@ const SEVERITY_ORDER: Record<Severity, number> = {
  */
 export async function refreshInsights(
   clientIds?: number[]
-): Promise<{ clients: number; found: number; cleared: number }> {
-  if (!(await insightsReady())) return { clients: 0, found: 0, cleared: 0 };
+): Promise<{
+  clients: number;
+  found: number;
+  cleared: number;
+  /**
+   * Why there was nothing to do, when there was nothing to do.
+   *
+   * `clients: 0` is not a result anybody can act on. The Brain skips the
+   * agency's own accounts — the `is_personal` box on the client form — and
+   * a roster where that box happens to be ticked on everyone produces a
+   * nightly job that succeeds, reports nothing, and gives no hint that a
+   * checkbox is the reason.
+   */
+  skipped?: string;
+}> {
+  if (!(await insightsReady())) {
+    return { clients: 0, found: 0, cleared: 0, skipped: "The ai_insights table is not in this database." };
+  }
 
   const scope =
     clientIds && clientIds.length
@@ -59,6 +75,23 @@ export async function refreshInsights(
       : await query<{ id: number }>(
           `SELECT id FROM clients c WHERE ${onTheFloor()} AND COALESCE(is_personal,0) = 0`
         );
+
+  if (scope.length === 0) {
+    // Told apart, because the two have different fixes: nobody on the floor
+    // is a roster problem, everybody personal is one checkbox.
+    const onFloor = await query<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM clients c WHERE ${onTheFloor()}`
+    );
+    const n = Number(onFloor[0]?.n ?? 0);
+    return {
+      clients: 0,
+      found: 0,
+      cleared: 0,
+      skipped: n
+        ? `All ${n} active clients are marked as the agency's own — untick "our own account" on the client to include them.`
+        : "No active clients to analyse.",
+    };
+  }
 
   const month = thisMonthKey();
   const [y, m] = month.split("-").map(Number);

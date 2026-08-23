@@ -7,6 +7,7 @@
  * the retry would post to Instagram a second time.
  */
 import assert from "node:assert/strict";
+import fs2 from "node:fs";
 import { finish } from "./finish.mjs";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -263,6 +264,54 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   }
   assert.equal(fb.explain(undefined, undefined), "Facebook refused the post.", "and silence still says something");
   ok("each Meta error is explained as the thing that is actually wrong");
+}
+
+
+/* ---------------- the link actually goes somewhere ---------------- */
+{
+  /*
+   * `/{page-id}/videos` returns two ids and they are not the same thing.
+   * `post_id` is `<pageId>_<postId>` — a feed post, which lives at /posts/.
+   * `id` alone is the video, and it does not live there: asked for its own
+   * `permalink_url`, Meta answers `/reel/<id>/`.
+   *
+   * This built facebook.com/<id> for the second — a bare number after the
+   * domain, which is a profile URL for somebody who does not exist. Every
+   * video published without a feed post got a link that went nowhere, on a
+   * page a client is shown.
+   */
+  assert.equal(
+    fb.facebookPermalink("973697795837500_1122334455"),
+    "https://www.facebook.com/973697795837500/posts/1122334455",
+    "a feed post keeps its page and its post"
+  );
+  assert.equal(
+    fb.facebookPermalink("3431135350380461"),
+    "https://www.facebook.com/reel/3431135350380461/",
+    "and a bare video id is a reel, which is what Meta itself returns"
+  );
+  assert.equal(fb.facebookPermalink(null), null, "nothing published, nothing linked");
+  ok("a published video links to the video, not to a profile that is not there");
+}
+/* ---------------- and the client is sent the link that exists ---------------- */
+{
+  /*
+   * The live-post message sent `instagram_permalink` and nothing else, so a
+   * reel published to the client's Facebook Page and not to Instagram arrived
+   * with no link at all — a message telling somebody their post is live and
+   * giving them no way to look at it. The button said Instagram either way.
+   */
+  const route = fs2.readFileSync(`${SRC}/app/api/automation/notify/route.ts`, "utf8");
+  assert.ok(route.includes("d.facebook_post_id"), "the Facebook post is read too");
+  assert.ok(
+    route.includes("target.permalink || fbLink"),
+    "and used when there is no Instagram link"
+  );
+  assert.ok(
+    !route.includes('platform: "Instagram" }'),
+    "the platform in the button is no longer assumed"
+  );
+  ok("a post that went to Facebook is linked to on Facebook");
 }
 
 await finish(pass);

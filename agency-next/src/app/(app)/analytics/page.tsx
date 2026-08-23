@@ -16,6 +16,8 @@ import {
   getPosts,
   byClient,
   audienceByPlatform,
+  clientsWithoutInstagram,
+  monthlyGrowth,
   insightsReady,
   lastInsightSync,
   engagementRate,
@@ -34,7 +36,9 @@ import { AudienceTile } from "@/components/admin/audience-tile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { RangePicker } from "@/components/admin/range-picker";
-import { ClientFilter, SyncInsights } from "./controls";
+import { SyncInsights } from "./controls";
+import { ClientFilter } from "@/components/admin/client-filter";
+import { Growth } from "./growth";
 import { fmtDate } from "@/lib/utils";
 import { prettyLocal } from "@/lib/posting";
 
@@ -131,10 +135,21 @@ export default async function AnalyticsPage({
    */
   const audienceNow = clientId ? await getAudience(clientId).catch(() => null) : null;
 
-  const [posts, audience, syncedAt] = await Promise.all([
+  const [posts, audience, syncedAt, noInstagram, growth] = await Promise.all([
     getPosts(range.from, range.to, { clientId, clientIds: scope }),
     audienceByPlatform(),
     lastInsightSync(),
+    clientsWithoutInstagram(scope),
+    /*
+     * Deliberately outside the range picker.
+     *
+     * Every other figure on this page belongs to the month at the top. Growth
+     * is the one question that cannot be asked of a single month, so it reads
+     * the last twelve regardless of what is selected — and says so on the
+     * heading, because a chart quietly ignoring the filter above it is worse
+     * than no chart.
+     */
+    monthlyGrowth(clientId ? [clientId] : scope),
   ]);
 
   /*
@@ -180,7 +195,7 @@ export default async function AnalyticsPage({
   return (
     <div className="space-y-5">
       <Header>
-        <ClientFilter clients={clients} current={clientId} range={range.key} />
+        <ClientFilter clients={clients} current={clientId} basePath="/analytics" keep={{ range: range.key }} />
         <RangePicker
           current={range.key}
           basePath={clientId ? `/analytics?client=${clientId}` : "/analytics"}
@@ -243,6 +258,25 @@ export default async function AnalyticsPage({
         * totals of unrelated accounts, which is the chart this component was
         * written to avoid.
         */}
+      {/*
+        * Who is missing, said out loud.
+        *
+        * Everything on this page comes from the clients with an Instagram
+        * account id set. Without a line like this, a roster of four where one
+        * is configured shows that one's numbers under the words "All clients"
+        * — a figure that is not so much wrong as about somebody else.
+        */}
+      {!clientId && noInstagram.length ? (
+        <Card>
+          <CardContent className="py-4 text-sm text-muted-foreground">
+            Not counted here:{" "}
+            <span className="font-medium text-foreground">{noInstagram.join(", ")}</span> —
+            {noInstagram.length === 1 ? " this client has" : " these clients have"} no Instagram
+            account id, so nothing can be read back for them. Add it on the client&apos;s page.
+          </CardContent>
+        </Card>
+      ) : null}
+
       {audienceNow ? (
         <div className="flex flex-col gap-4 sm:flex-row">
           {audienceNow.instagram ? (
@@ -444,6 +478,8 @@ export default async function AnalyticsPage({
           </CardContent>
         </Card>
       ) : null}
+
+      <Growth months={growth} />
     </div>
   );
 }

@@ -144,6 +144,7 @@ const build = wa.buildApprovalMessages;
     await add("ZZ902", "Reel two", "ZZ_MSG_TWO");
     await add("ZZ903", "Reel three", "ZZ_MSG_THREE");
     await add("ZZ904", "Reel four", "ZZ_MSG_FOUR");
+    await add("ZZ905", "Reel five", "ZZ_MSG_FIVE");
 
     // Without a reply there is genuinely no way to tell, and saying so is right.
     const bare = await wa.recordApproval({
@@ -151,6 +152,25 @@ const build = wa.buildApprovalMessages;
     });
     assert.equal(bare.ok, false, "a bare ok with three waiting cannot be guessed");
     assert.equal(bare.ambiguous, true, "and is reported as ambiguous, not as an error");
+
+    /*
+     * And it tells them the codes rather than an example of one.
+     *
+     * This asked for a code and printed a specimen — `APPROVE V105` — for a
+     * video that need not be one of the ones waiting. The codes came off the
+     * video messages a while ago, so there was nowhere to read the real ones:
+     * the reply asked the client for the one thing they had no way of doing.
+     * Replying to the video was supposed to be the way out and cannot be —
+     * whatsapp-web.js reports no quoted message here at all.
+     */
+    for (const code of ["ZZ901", "ZZ902", "ZZ903"]) {
+      assert.ok(bare.error?.includes(code), `${code} is listed, not left to be guessed`);
+    }
+    assert.ok(bare.error?.includes("Reel one"), "beside the title it belongs to");
+    assert.ok(
+      !/V105/.test(bare.error ?? ""),
+      "and no invented example code that belongs to nothing on the list"
+    );
 
     // Replying to the first one names it outright.
     const replied = await wa.recordApproval({
@@ -206,6 +226,7 @@ const build = wa.buildApprovalMessages;
     });
     assert.equal(stillWaiting.ambiguous, true, "two reels are genuinely still open");
 
+
     const byStanza = await wa.recordApproval({
       videoCode: null, command: "approve", groupId: GROUP,
       quotedMessageId: null,
@@ -214,6 +235,21 @@ const build = wa.buildApprovalMessages;
     });
     assert.equal(byStanza.ok, true, "a stanza id alone still names the video");
     assert.equal(byStanza.videoCode, "ZZ903");
+
+    /*
+     * And when neither id arrives at all — which is this setup.
+     *
+     * whatsapp-web.js reports no quoted message here through any route. The
+     * text of it sometimes comes through even so, and the video is captioned
+     * with its own title, so a swipe-reply quotes that title back.
+     */
+    const byText = await wa.recordApproval({
+      videoCode: null, command: "approve", groupId: GROUP,
+      quotedText: ["📹 *Video Ready*","","_Reel four_"].join(String.fromCharCode(10)),
+      waMessageId: "ZZ_INBOUND_TEXT",
+    });
+    assert.equal(byText.ok, true, "the title in the quoted message names the video");
+    assert.equal(byText.videoCode, "ZZ904", "and it is that one");
 
     // The other two are untouched — an "ok" answers one reel, not the group.
     const [others] = await db.query(

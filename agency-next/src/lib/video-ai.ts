@@ -40,6 +40,31 @@ const BASE = "https://generativelanguage.googleapis.com";
 const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || "gemini-flash-latest";
 
 /**
+ * ...and what to try when that one has nothing left to give.
+ *
+ * The free tier counts generations per model per day — twenty, and the reply
+ * says so: `limit: 20, model: gemini-3.7-flash`. So an exhausted quota is not
+ * the account being out, it is that one model being out, and a different one
+ * has its own untouched allowance.
+ *
+ * Only models that accept video belong here. `gemini-flash-lite-latest` is
+ * the caption studio's and does not take a file, so it is not a fallback for
+ * this — it would fail differently and look like a broken video.
+ *
+ * Order matters: the configured one first because it is the one chosen for
+ * quality and cost, the rest only when it refuses.
+ */
+const VIDEO_MODELS = [
+  ...new Set([
+    VIDEO_MODEL,
+    ...(process.env.GEMINI_VIDEO_FALLBACKS || "gemini-3.6-flash,gemini-3.5-flash")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ]),
+];
+
+/**
  * Gemini's Files API accepts up to 2 GB, but everything in between has to pass
  * through this process's memory twice — once down from R2, once up to Gemini.
  * A cap well under the serverless memory limit turns "the function died" into
@@ -198,7 +223,27 @@ ${templateRule}
 - Describe what is genuinely in the video. Never invent offers, prices,
   interest rates, guarantees or claims that were not made — for a regulated
   business this is the difference between marketing and a false promise.
-- 8-12 hashtags: a few broad, several specific to the business and its city.
+- THREE lines about the video, and no more. Not a summary of the topic —
+  what is actually in this footage. Line one: what happens, the thing a
+  viewer sees. Line two: the detail that makes it worth watching — the
+  process, the ingredient, the number, whatever the video is proud of.
+  Line three: who it is for, or what to do about it.
+- Use the branding you read off the screen. The logo, the footer bar and the
+  business name are how this business presents itself; if the footer says
+  "loan provider" the lines should read as one wrote them. Never attribute a
+  logo or a footer to a business other than the one shown.
+- Emoji: one or two, and only where they carry meaning — the thing being
+  made, the place, the action. Not one per line, not decoration, never on a
+  price or a claim.
+- Then a contact line: the business name, and the phone, website or handle
+  ONLY if it is listed above or visible on screen. Add the city if you know
+  it. Leave out what you do not have — an invented number reaches a stranger.
+- EXACTLY THREE hashtags, every one a word the video itself carries: what is
+  being made or sold, what is written on screen, what the branding says. Not
+  broad tags, and not the business name, its handle, its city or its country
+  — those four are added afterwards and a duplicate wastes one of your three.
+- Do NOT put the hashtags or the keywords in the caption. They go in
+  "hashtags" alone.
 - No preamble, no explanation, JSON only.`;
 }
 
@@ -298,18 +343,46 @@ export async function queueAnalysis(deliverableId: number, force = false): Promi
     // opinion on footage Gemini already holds would be pure waste. Safe only
     // because the check above has already thrown the row away if the video
     // itself changed.
+    /*
+     * A fresh ask is a fresh budget.
+     *
+     * `attempts` survived a requeue, and four of them ends the job for good —
+     * so a video that had spent them, for reasons long since fixed, was marked
+     * failed on the next run before Gemini was called at all. Pressing the
+     * button appeared to do nothing, and no amount of deploying could change
+     * it, because nothing that was deployed ever ran.
+     */
     await execute(
       `INSERT INTO video_analysis (deliverable_id, state, attempts)
        VALUES (?, 'queued', 0)
-       ON DUPLICATE KEY UPDATE state = 'queued', last_error = NULL, locked_at = NULL`,
+       ON DUPLICATE KEY UPDATE state = 'queued', last_error = NULL, locked_at = NULL,
+         attempts = 0`,
       [deliverableId]
     );
     return;
   }
 
+  /*
+   * Asking again revives a job that failed; it never disturbs one in flight.
+   *
+   * This was `deliverable_id = deliverable_id` — a deliberate no-op, so that
+   * queueing a video already being analysed did not restart it. True, and it
+   * also meant a *failed* row could not be revived by anything: the button
+   * sends `force` only for a rewrite of a finished caption, so every retry of
+   * a failure ran this branch and changed nothing. The state stayed failed,
+   * the attempts stayed spent, and the same error was shown back for ever.
+   *
+   * `state` is assigned last on purpose: MySQL evaluates the list in order
+   * and later columns would see the new value, so the three tests above have
+   * to run while it still reads 'failed'.
+   */
   await execute(
     `INSERT INTO video_analysis (deliverable_id, state) VALUES (?, 'queued')
-     ON DUPLICATE KEY UPDATE deliverable_id = deliverable_id`,
+     ON DUPLICATE KEY UPDATE
+       attempts   = IF(state = 'failed', 0, attempts),
+       last_error = IF(state = 'failed', NULL, last_error),
+       locked_at  = IF(state = 'failed', NULL, locked_at),
+       state      = IF(state = 'failed', 'queued', state)`,
     [deliverableId]
   );
 }
@@ -612,8 +685,11 @@ async function generate(
     description: string | null;
     client_id: number;
     caption_settings: unknown;
+    company_name: string | null;
+    ig_username: string | null;
   }>(
-    `SELECT d.title, d.description, d.client_id, c.caption_settings
+    `SELECT d.title, d.description, d.client_id, c.caption_settings,
+            c.company_name, c.ig_username
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
@@ -657,42 +733,122 @@ async function generate(
    */
   const useGrounding = groundingAvailable();
 
-  const res = await fetch(
-    `${BASE}/v1beta/models/${VIDEO_MODEL}:generateContent?key=${env.gemini.apiKey}`,
+  const callModel = (model: string) =>
+    fetch(
+      `${BASE}/v1beta/models/${model}:generateContent?key=${env.gemini.apiKey}`,
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ file_data: { mime_type: mimeType, file_uri: fileUri } }, { text: prompt }],
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ file_data: { mime_type: mimeType, file_uri: fileUri } }, { text: prompt }],
+            },
+          ],
+          ...(useGrounding ? { tools: [{ google_search: {} }] } : {}),
+          generationConfig: {
+            temperature: 0.7,
+            // Grounding and forced-JSON output are mutually exclusive in the
+            // API, so the JSON is parsed out of the text when searching is on.
+            ...(useGrounding ? {} : { responseMimeType: "application/json" }),
           },
-        ],
-        ...(useGrounding ? { tools: [{ google_search: {} }] } : {}),
-        generationConfig: {
-          temperature: 0.7,
-          // Grounding and forced-JSON output are mutually exclusive in the
-          // API, so the JSON is parsed out of the text when searching is on.
-          ...(useGrounding ? {} : { responseMimeType: "application/json" }),
-        },
-      }),
-    }
-  );
+        }),
+      }
+    );
 
-  const out = (await res.json()) as {
+  type GenerateReply = {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     usageMetadata?: { totalTokenCount?: number };
     error?: { message?: string; code?: number };
   };
 
+  /*
+   * Each model in turn, until one has quota left.
+   *
+   * A quota refusal is about one model, not the account — the reply names it:
+   * `limit: 20, model: gemini-3.7-flash`. So the next model on the list is
+   * asked, with its own untouched allowance, and the caption arrives instead
+   * of the card saying Failed until tomorrow.
+   *
+   * Any other error breaks out immediately. A video Gemini cannot read is a
+   * video none of them can read, and walking the whole list to be told so
+   * three times costs three uploads' worth of nothing.
+   */
+  let out: GenerateReply = {};
+  let usedModel = VIDEO_MODELS[0];
+  /*
+   * Whether any model refused on quota, kept across the loop.
+   *
+   * Only the last error survives it, and the last model on the list may have
+   * been retired — which classifies as permanent and marks the job failed,
+   * for a video whose only problem was that today's allowance had run out and
+   * would be back in the morning.
+   */
+  let sawQuota = false;
+  for (const model of VIDEO_MODELS) {
+    usedModel = model;
+    out = (await (await callModel(model)).json()) as GenerateReply;
+    if (!out.error) break;
+    const m = out.error.message || "";
+    const quota = out.error.code === 429 || /quota|rate.?limit|too many requests/i.test(m);
+    if (quota) sawQuota = true;
+    /*
+     * A retired model is the same situation as an exhausted one: this name
+     * cannot answer, the next might. Google withdraws them without notice —
+     * `gemini-2.0-flash` was the fallback here and had already gone, so the
+     * chain that existed to survive a quota error died on its first hop and
+     * looked exactly like having no fallback at all.
+     */
+    const gone = out.error.code === 404 || /no longer available|not found/i.test(m);
+    if (!quota && !gone) break;
+  }
+
   if (out.error) {
-    const permanent = out.error.code === 400 || /not available|not found/i.test(out.error.message || "");
-    await setState(deliverableId, permanent ? "failed" : "queued", {
-      last_error: out.error.message || "Gemini error",
-      locked_at: null,
-    });
-    return { ok: false, state: permanent ? "failed" : "queued", error: out.error.message };
+    const message = out.error.message || "Gemini error";
+    const permanent =
+      !sawQuota && (out.error.code === 400 || /not available|not found/i.test(message));
+
+    /*
+     * Out of quota is not a failure, and retrying at once makes it worse.
+     *
+     * The free tier allows twenty generations, and Gemini says exactly how
+     * long to wait — "Please retry in 28.4s". This cleared the lease and
+     * requeued, so the next run asked again immediately, was refused again,
+     * and wrote a second identical error under the first. The card ended up
+     * showing the same paragraph twice beside the word Failed, for a video
+     * that would have captioned itself half a minute later.
+     *
+     * Holding the lease is the whole fix: a claimed job is not re-claimed
+     * until it expires, so leaving `locked_at` set is a back-off written in
+     * machinery that already exists.
+     */
+    const outOfQuota =
+      sawQuota || out.error.code === 429 || /quota|rate.?limit|too many requests/i.test(message);
+
+    const patch: Record<string, string | number | null> = {
+      last_error: outOfQuota
+        ? `Out of Gemini quota for now — this will try itself again shortly. (${message})`
+        : message,
+    };
+    // Released on an ordinary error so the next run picks it straight up;
+    // held on a quota one, which is what makes the back-off.
+    if (!outOfQuota) patch.locked_at = null;
+    /*
+     * And it costs no attempt. The claim raises the count before anything is
+     * known, and four of them ends the job for good — spending that budget on
+     * refusals that burned no tokens and analysed no video is how a working
+     * video reaches "gave up after repeated failures" without ever having
+     * been read.
+     */
+    if (outOfQuota) {
+      await execute(
+        "UPDATE video_analysis SET attempts = GREATEST(attempts - 1, 0) WHERE deliverable_id = ?",
+        [deliverableId]
+      ).catch(() => {});
+    }
+    await setState(deliverableId, permanent ? "failed" : "queued", patch);
+    return { ok: false, state: permanent ? "failed" : "queued", error: message };
   }
 
   const text = (out.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
@@ -714,9 +870,70 @@ async function generate(
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-  const hashtags = arr(parsed.hashtags)
+  /*
+   * Five tags: the client, the account, and three from the video.
+   *
+   * The first two are built here rather than asked for. The portal knows the
+   * company name and the handle exactly, and a model asked for them returns a
+   * plausible spelling of the handle — which is a tag belonging to somebody
+   * else, posted on the client's own account.
+   *
+   * Deduped against the model's three because it is told not to repeat them
+   * and sometimes does, and a repeat would silently cost one of the three
+   * that carry the actual video.
+   */
+  const tag = (v: string | null | undefined): string | null => {
+    const clean = String(v ?? "").replace(/[^p{L}p{N}]/gu, "");
+    return clean ? `#${clean.toLowerCase()}` : null;
+  };
+  const fromVideo = arr(parsed.hashtags)
     .map((h) => (h.startsWith("#") ? h : `#${h}`))
-    .join(" ");
+    .map((h) => h.trim())
+    .filter(Boolean);
+  /*
+   * Who, and where. Both from the portal, neither from the model.
+   *
+   * The name and the handle it knows exactly; the city and country come off
+   * the client's own record. A model asked for any of them returns something
+   * plausible — a handle spelled almost right is a tag belonging to a
+   * stranger, posted on this client's account, and a guessed city is worse
+   * because it looks correct to everyone who does not live there.
+   *
+   * Location earns its place: "near me" is how this kind of business is
+   * actually searched for, and a reel about a dosa shop that never says which
+   * town it is in is competing with every dosa shop.
+   */
+  const ours = [
+    tag(d.company_name),
+    tag(d.ig_username),
+    tag(ctx?.city),
+    tag(ctx?.country),
+  ].filter(Boolean) as string[];
+  const seen = new Set(ours.map((t) => t.toLowerCase()));
+  const chosen = [
+    ...ours,
+    ...fromVideo.filter((t) => !seen.has(t.toLowerCase())).slice(0, 3),
+  ];
+
+  /*
+   * The same terms twice: once as words, once as tags.
+   *
+   * Instagram reads the caption for what a post is about, and a hashtag is a
+   * link rather than a word — so the terms worth being found for have to
+   * appear as text too. One bracket with commas, not a bracket each: seven
+   * separate parentheses under a caption reads as debris, one list reads as
+   * a label.
+   *
+   * Both off one array on purpose. Written apart they drift the first time
+   * somebody changes how many there are, and a post whose keywords and tags
+   * disagree is being optimised for two different things.
+   */
+  const hashtags = [
+    chosen.length ? `(${chosen.map((t) => t.slice(1)).join(", ")})` : "",
+    chosen.join(" "),
+  ]
+    .filter(Boolean)
+    .join(String.fromCharCode(10));
 
   // Flatten the branding block into readable lines. Stored as text rather than
   // JSON because its only reader is a human checking why a caption came out
@@ -772,7 +989,8 @@ async function generate(
         SET state = 'done', summary = ?, spoken_language = ?, topic = ?, mood = ?,
             on_screen_text = ?, scenes_json = ?, caption = ?, hook = ?, hashtags = ?,
             ${audit ? "brand_seen = ?, context_used = ?, grounded = ?," : ""}
-            raw_json = ?, tokens_used = ?, duration_ms = ?, last_error = NULL, locked_at = NULL
+            raw_json = ?, tokens_used = ?, duration_ms = ?, model = ?,
+            last_error = NULL, locked_at = NULL
       WHERE deliverable_id = ?`,
     [
       s(parsed.summary),
@@ -796,6 +1014,10 @@ async function generate(
       JSON.stringify(parsed),
       out.usageMetadata?.totalTokenCount ?? null,
       Date.now() - started,
+      // Which model actually answered. On a busy day the first one is out of
+      // quota and the caption came from the fallback — worth being able to see
+      // rather than guess at from the timing.
+      usedModel,
       deliverableId,
     ]
   );
@@ -856,9 +1078,17 @@ export async function applyCaption(deliverableId: number): Promise<{ ok: boolean
    */
   await nameFromTopic(deliverableId, a.topic);
 
-  const withTags = a.hashtags ? `${a.caption}\n\n${a.hashtags}` : a.caption;
+  /*
+   * The body, and the tags, and never both in one column.
+   *
+   * This wrote the tags into the caption *and* into `hashtags`, and
+   * `composeCaption` — whose whole job is putting the two together for
+   * Instagram — then appended them again. Every published reel carried the
+   * same hashtags twice, on a client's account, and the caption studio
+   * showed the doubled copy back as though somebody had written it.
+   */
   await execute("UPDATE deliverables SET caption = ?, hashtags = ? WHERE id = ?", [
-    withTags,
+    a.caption,
     a.hashtags,
     deliverableId,
   ]);

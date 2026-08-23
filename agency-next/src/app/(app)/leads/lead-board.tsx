@@ -186,7 +186,7 @@ function LeadRow({
         {/* What the hidden columns were carrying, folded under the name on a
             phone — the same shape the task boards use. */}
         <span className="mt-0.5 block text-xs text-muted-foreground md:hidden">
-          {[lead.phone || lead.email, sourceLabel(lead.source), lead.owner_name]
+          {[lead.client_name, lead.phone || lead.email, sourceLabel(lead.source), lead.owner_name]
             .filter(Boolean)
             .join(" · ")}
         </span>

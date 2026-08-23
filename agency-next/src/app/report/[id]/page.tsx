@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { buildMonthlyReport } from "@/lib/monthly-report";
+import { monthlyGrowth } from "@/lib/analytics";
+import { ReportCharts } from "./report-charts";
 import { getDeliverables } from "@/lib/deliverables";
 import { getSettings } from "@/lib/settings";
 import { DONE_STATUSES } from "@/lib/constants";
@@ -86,10 +88,18 @@ export default async function ReportDocumentPage({
     if (!(await canAccessClient(user, clientId))) notFound();
   }
 
-  const [report, settings, work] = await Promise.all([
+  const [report, settings, work, growth] = await Promise.all([
     buildMonthlyReport(clientId, month),
     getSettings(),
     getDeliverables({ clientId, month }),
+    /*
+     * Twelve months, on a document about one of them.
+     *
+     * A client reading "191 accounts reached" has no idea whether that is a
+     * good month. The bars behind it are the only thing on the page that
+     * answers that, and they are the part a client actually asks about.
+     */
+    monthlyGrowth([clientId]),
   ]);
   if (!report) notFound();
 
@@ -195,6 +205,8 @@ export default async function ReportDocumentPage({
           />
         </Section>
       ) : null}
+
+      <ReportCharts months={growth} />
 
       {report.ads ? (
         <Section title="Ads">

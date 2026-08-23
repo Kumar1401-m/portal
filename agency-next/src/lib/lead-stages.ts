@@ -61,6 +61,8 @@ export type Lead = {
   value: number;
   owner_user_id: number | null;
   owner_name: string | null;
+  /** Whose ads produced this lead, when it came from a client's campaign. */
+  client_name: string | null;
   next_follow_up: string | null;
   note: string | null;
   lost_reason: string | null;

@@ -55,7 +55,15 @@ function actionsFor(status: string, canSendToClient: boolean, editingOnly: boole
   if (["content_review", "review"].includes(status)) {
     out.push({ label: "Request changes", status: "changes_requested", variant: "outline", reason: true });
   }
-  if (!["completed", "cancelled", "rejected"].includes(status)) {
+  /*
+   * Nothing to reject once it is out.
+   *
+   * `posted` was missing from this list, so a reel already on a client's
+   * account still offered Reject and Cancel — buttons that change a word in
+   * the database and nothing on Instagram. The only honest move left is
+   * Mark completed, which NEXT already offers.
+   */
+  if (!["posted", "completed", "cancelled", "rejected"].includes(status)) {
     out.push({ label: "Reject", status: "rejected", variant: "destructive", reason: true });
     out.push({ label: "Cancel", status: "cancelled", variant: "outline", reason: true });
   }

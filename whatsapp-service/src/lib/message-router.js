@@ -97,7 +97,10 @@ class MessageRouter {
     // question with no good answer and a cost per message.
     if (parsed.command === 'none' && String(msg.body || '').trim() && !emojiOnly(msg.body)) {
       const guessed = await this.readIntent(msg);
-      if (guessed) parsed = guessed;
+      // Kept apart from a command the parser read outright. What the words
+      // plainly said and what a model thought they meant are not the same
+      // evidence, and below they are not treated as if they were.
+      if (guessed) parsed = { ...guessed, inferred: true };
     }
 
     // A client who replies to the video message itself doesn't need to type a
@@ -160,6 +163,15 @@ class MessageRouter {
       // it is the only thing that can when several are waiting in one group.
       quotedMessageId: msg.quotedMessageId || null,
       quotedStanzaId: msg.quotedStanzaId || null,
+      /*
+       * The words of the message they replied to.
+       *
+       * Neither id survives here — whatsapp-web.js reports no quoted message
+       * at all in this setup, through `hasQuotedMsg` or the raw payload. The
+       * text sometimes does, and the video message carries the title, so the
+       * portal can match on that when it has nothing better.
+       */
+      quotedText: msg.quotedText || null,
       time: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : new Date().toISOString(),
     };
 
@@ -170,6 +182,7 @@ class MessageRouter {
       // a diagnostic that only prints for the second cannot tell them apart.
       quoted: msg.quotedMessageId || null,
       quotedStanza: msg.quotedStanzaId || null,
+      quotedChars: String(msg.quotedText || '').length,
       command: parsed.command,
       by: msg.senderName,
       hasComment: Boolean(parsed.comment),
@@ -194,6 +207,26 @@ class MessageRouter {
          * question for the client, not a failure to report at them.
          */
         if (result.data?.ambiguous) {
+          /*
+           * Only when they actually answered something.
+           *
+           * "Which video do you mean?" is the right question after somebody
+           * types OK. It is the wrong one after a paragraph — a client
+           * writing four numbered points about what the next videos should
+           * look like was read as a change request, given no code to go on,
+           * and asked to pick from a list of four. To them the agency had
+           * stopped listening and started filling in a form.
+           *
+           * An inferred command with nothing to attach it to is left for the
+           * assistant to answer in words, which is what it is for.
+           */
+          if (parsed.inferred) {
+            log.info('inferred command with no video named — leaving it to the assistant', {
+              command: parsed.command,
+              chars: String(msg.body || '').length,
+            });
+            return { handled: false, reason: 'inferred-ambiguous' };
+          }
           await this.replySafely(msg.groupId, reason);
           return { handled: false, reason: 'ambiguous' };
         }

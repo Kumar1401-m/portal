@@ -185,6 +185,19 @@ export function composeCaption(caption: string | null, hashtags: string | null):
   const tags = (hashtags || "").trim();
   if (!tags) return body;
   if (!body) return tags;
+  /*
+   * Once, however many times it has been stored.
+   *
+   * The analysis used to write the tags into the caption as well as into
+   * `hashtags`, so joining them here published the block twice. The writer
+   * no longer does that — but every reel captioned before it stopped still
+   * holds a body ending in its own tags, and those go out too.
+   *
+   * Compared on the tags alone rather than on whitespace: the two copies
+   * were joined with different spacing depending on which path wrote them.
+   */
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+  if (norm(body).endsWith(norm(tags))) return body;
   // Blank line between copy and tags — how the caption reads in the app.
   return `${body}\n\n${tags}`;
 }

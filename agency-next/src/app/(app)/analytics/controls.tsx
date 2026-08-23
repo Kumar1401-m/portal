@@ -17,39 +17,6 @@ import { syncInsightsAction } from "./actions";
  * this month would be the page answering a different question from the one
  * that was asked.
  */
-export function ClientFilter({
-  clients,
-  current,
-  range,
-}: {
-  clients: { id: number; company_name: string }[];
-  current: number | null;
-  range: string;
-}) {
-  const router = useRouter();
-  return (
-    <Select
-      aria-label="Client"
-      value={current ? String(current) : ""}
-      onChange={(e) => {
-        const v = e.target.value;
-        router.push(
-          v ? `/analytics?client=${v}&range=${range}` : `/analytics?range=${range}`,
-          { scroll: false }
-        );
-      }}
-      className="h-9 w-44 text-sm"
-    >
-      <option value="">All clients</option>
-      {clients.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.company_name}
-        </option>
-      ))}
-    </Select>
-  );
-}
-
 export function SyncInsights({ clientId }: { clientId?: number | null }) {
   const [pending, start] = useTransition();
   const toast = useToast();

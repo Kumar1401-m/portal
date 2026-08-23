@@ -24,6 +24,7 @@ import { env } from "./env";
 import { getSettings } from "./settings";
 import { prettyLocal } from "./posting";
 import { fmtDate } from "./utils";
+import { facebookPermalink } from "./facebook";
 import { needsRawFootageSql } from "./raw-footage";
 
 /** How long after replying before this group may be replied to again. */
@@ -126,8 +127,10 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
     scheduled_at: string | null;
     posted_at: string | null;
     instagram_permalink: string | null;
+    facebook_post_id: string | null;
   }>(
-    `SELECT id, title, status, due_date, scheduled_at, posted_at, instagram_permalink
+    `SELECT id, title, status, due_date, scheduled_at, posted_at, instagram_permalink,
+            facebook_post_id
        FROM deliverables
       WHERE client_id = ?
       ORDER BY COALESCE(scheduled_at, due_date, created_at) DESC
@@ -142,7 +145,16 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
     due: r.due_date,
     scheduledAt: r.scheduled_at,
     postedAt: r.posted_at,
+    /*
+     * Both places it went, not just the first one we happened to store.
+     *
+     * Only `instagram_permalink` was read, so a reel published to Instagram
+     * and the client's Facebook Page was answered with one link — and a
+     * client asking "where is it?" was told half the truth about their own
+     * post. The model can only offer what it is given.
+     */
     permalink: r.instagram_permalink,
+    facebookLink: facebookPermalink(r.facebook_post_id),
   }));
 
   const count = (fn: (s: string) => boolean) => items.filter((i) => fn(i.status)).length;

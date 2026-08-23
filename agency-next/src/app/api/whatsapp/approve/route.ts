@@ -81,6 +81,9 @@ export async function POST(request: Request) {
     // is the only thing that can when three are waiting in one group.
     quotedMessageId: str(body.quotedMessageId),
     quotedStanzaId: str(body.quotedStanzaId),
+    // The words of the quoted message — the only thing that survives when
+    // the library hands over no id at all.
+    quotedText: str(body.quotedText),
     time: str(body.time),
   });
 

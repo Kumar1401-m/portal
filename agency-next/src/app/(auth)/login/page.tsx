@@ -45,8 +45,11 @@ export default async function LoginPage({
             N
           </span>
           <div className="text-center">
-            <h1 className="text-2xl font-semibold tracking-tight">NVK Hub</h1>
-            <p className="mt-1 text-sm text-white/45">Sign in to continue</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
+            {/* The product name sits under the greeting rather than over it:
+                whoever is here already knows what this is, and the one thing
+                worth saying to them is that it is theirs. */}
+            <p className="mt-1 text-sm text-white/45">Sign in to NVK Hub</p>
           </div>
         </div>
 

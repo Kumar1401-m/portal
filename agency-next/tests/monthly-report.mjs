@@ -8,6 +8,7 @@
  * growth of +0.
  */
 import assert from "node:assert/strict";
+import fs3 from "node:fs";
 import { finish } from "./finish.mjs";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -187,6 +188,27 @@ const report = (o = {}) => ({
   const card = read("app/(app)/reports/[id]/report-card.tsx");
   assert.match(card, /href=\{`\/report\/\$\{clientId\}\?month=\$\{month\}`\}/, "linked from the report card");
   ok("the month is also a document: only what was delivered, and it names itself");
+}
+
+/* ---------------- an empty month says it is empty ---------------- */
+{
+  /*
+   * The columns of the clients scorecard are the content categories that saw
+   * work, so a month with no work has no columns — and the table rendered as
+   * a list of client names under S.No, Category and nothing else. Every
+   * client present, every number absent, and no word anywhere about why. It
+   * read as a broken report rather than an empty month.
+   */
+  const page = fs3.readFileSync(`${SRC}/app/(app)/reports/page.tsx`, "utf8");
+  assert.ok(
+    page.includes("rows.length === 0 || categories.length === 0"),
+    "clients with no work is an empty state too, not a stub table"
+  );
+  assert.ok(
+    page.includes("No work recorded for this month yet"),
+    "and it says which of the two emptinesses this is"
+  );
+  ok("a month with nothing in it reads as empty, not as broken");
 }
 
 await finish(pass);

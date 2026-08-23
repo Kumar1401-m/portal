@@ -21,6 +21,7 @@
  *   or   { "client_id": 4, "title": "…", "permalink": "…" }
  */
 import { readAuthorized, ok, fail, asInt, asStr, asDateTime } from "@/lib/automation-api";
+import { facebookPermalink } from "@/lib/facebook";
 import { queryOne } from "@/lib/db";
 import { sendPostPublishedEmail } from "@/lib/email";
 import { sendPostPublishedWhatsApp } from "@/lib/whatsapp";
@@ -37,6 +38,8 @@ type Target = {
   title: string;
   caption: string | null;
   permalink: string | null;
+  /** The Facebook post, when the reel went there and not to Instagram. */
+  facebook_post_id: string | null;
   posted_at: string | null;
 };
 
@@ -59,6 +62,7 @@ export async function POST(request: Request) {
         `SELECT c.id AS client_id, c.company_name, c.contact_person, c.email,
                 COALESCE(NULLIF(c.whatsapp_number,''), c.phone) AS whatsapp,
                 d.title, d.caption, d.instagram_permalink AS permalink,
+                d.facebook_post_id,
                 COALESCE(d.instagram_posted_at, d.posted_at) AS posted_at
            FROM deliverables d JOIN clients c ON c.id = d.client_id
           WHERE d.id = ?`,
@@ -67,7 +71,8 @@ export async function POST(request: Request) {
     : await queryOne<Target>(
         `SELECT c.id AS client_id, c.company_name, c.contact_person, c.email,
                 COALESCE(NULLIF(c.whatsapp_number,''), c.phone) AS whatsapp,
-                '' AS title, NULL AS caption, NULL AS permalink, NULL AS posted_at
+                '' AS title, NULL AS caption, NULL AS permalink,
+                NULL AS facebook_post_id, NULL AS posted_at
            FROM clients c WHERE c.id = ?`,
         [clientId]
       );
@@ -77,7 +82,18 @@ export async function POST(request: Request) {
   // A caller may override the display fields (useful for a client-level send
   // that has no deliverable behind it), but never the recipient.
   const title = asStr(body.title) || target.title || "Your latest post";
-  const permalink = asStr(body.permalink) || target.permalink;
+  /*
+   * The link goes to the post that exists.
+   *
+   * This sent `instagram_permalink` and nothing else, so a reel published to
+   * the client's Facebook Page and not to Instagram arrived with no link at
+   * all — a message telling somebody their post is live and giving them no
+   * way to look at it. The platform in the button followed the same
+   * assumption and said Instagram either way.
+   */
+  const fbLink = facebookPermalink(target.facebook_post_id);
+  const permalink = asStr(body.permalink) || target.permalink || fbLink;
+  const platform = target.permalink || asStr(body.permalink) ? "Instagram" : fbLink ? "Facebook" : "Instagram";
   const postedAt = asDateTime(body.posted_at) || target.posted_at;
 
   const requested = Array.isArray(body.channels)
@@ -93,7 +109,7 @@ export async function POST(request: Request) {
         contact_person: target.contact_person,
         email: target.email,
       },
-      { title, permalink, caption: target.caption, postedAt, platform: "Instagram" }
+      { title, permalink, caption: target.caption, postedAt, platform }
     );
     result.email = { sent, to: target.email };
   }

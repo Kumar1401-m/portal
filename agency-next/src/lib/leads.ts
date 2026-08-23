@@ -41,6 +41,7 @@ const mapLead = (r: Record<string, unknown>): Lead => ({
   value: num(r.value),
   owner_user_id: r.owner_user_id ? num(r.owner_user_id) : null,
   owner_name: r.owner_name ? String(r.owner_name) : null,
+  client_name: r.client_name ? String(r.client_name) : null,
   next_follow_up: r.next_follow_up ? String(r.next_follow_up).slice(0, 10) : null,
   note: r.note ? String(r.note) : null,
   lost_reason: r.lost_reason ? String(r.lost_reason) : null,
@@ -58,7 +59,16 @@ const mapLead = (r: Record<string, unknown>): Lead => ({
  * things to do is how the things to do get missed.
  */
 export async function getLeads(
-  opts: { stage?: StageKey; ownerId?: number | null; includeClosed?: boolean; search?: string } = {}
+  opts: {
+    stage?: StageKey;
+    ownerId?: number | null;
+    includeClosed?: boolean;
+    search?: string;
+    /** One client's leads — the ads that ran for them are what produced these. */
+    clientId?: number | null;
+    /** The clients this user may see at all, or null for everybody. */
+    clientIds?: number[] | null;
+  } = {}
 ): Promise<Lead[]> {
   if (!(await leadsReady())) return [];
 
@@ -72,6 +82,22 @@ export async function getLeads(
     where.push(`l.stage IN (${OPEN_STAGES.map(() => "?").join(",")})`);
     params.push(...OPEN_STAGES);
   }
+  /*
+   * Whose lead this is — which on an agency's board is a different question
+   * from whose desk it sits on. A lead exists because an ad ran for a client,
+   * and without this the board is every client's leads in one list, so the
+   * question anybody actually asks — "what did we get them this month?" —
+   * cannot be asked at all.
+   */
+  if (opts.clientId) {
+    where.push("l.client_id = ?");
+    params.push(opts.clientId);
+  }
+  if (opts.clientIds) {
+    if (opts.clientIds.length === 0) return [];
+    where.push(`l.client_id IN (${opts.clientIds.map(() => "?").join(",")})`);
+    params.push(...opts.clientIds);
+  }
   if (opts.ownerId) {
     where.push("l.owner_user_id = ?");
     params.push(opts.ownerId);
@@ -83,9 +109,10 @@ export async function getLeads(
   }
 
   const rows = await query<Record<string, unknown>>(
-    `SELECT l.*, u.name AS owner_name
+    `SELECT l.*, u.name AS owner_name, c.company_name AS client_name
        FROM leads l
        LEFT JOIN users u ON u.id = l.owner_user_id
+       LEFT JOIN clients c ON c.id = l.client_id
       WHERE ${where.join(" AND ")}
       /* Whoever is overdue first, then by the day they are due. A lead with
          no follow-up date set is not urgent, it is unplanned — it goes last

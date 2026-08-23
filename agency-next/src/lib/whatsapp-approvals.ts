@@ -284,18 +284,38 @@ export async function prepareSend(
     video_code: string | null;
     caption: string | null;
     hashtags: string | null;
+    approval_status: string | null;
+    status: string;
   }>(
     `SELECT d.id, d.client_id, d.title, c.company_name,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
-            d.wa_status, d.video_code, d.caption, d.hashtags
+            d.wa_status, d.video_code, d.caption, d.hashtags,
+            d.approval_status, d.status
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
   );
   if (!d) return { ok: false, error: "Task not found." };
 
-  if (d.wa_status === "approved") {
-    return { ok: false, error: "This video has already been approved on WhatsApp." };
+  /*
+   * Approved is approved, whoever said so and wherever they said it.
+   *
+   * This asked `wa_status` alone — which only knows about answers that came
+   * back through WhatsApp. A super admin approving inside the portal writes
+   * `status` and `approval_status` and never touches it, so the guard did not
+   * fire and the video went to the client's group asking them to approve
+   * something already approved. To a client that reads as the agency having
+   * lost track of its own work.
+   *
+   * The later statuses count too: a video already scheduled, posted or
+   * completed is well past the point of asking anybody's permission.
+   */
+  const settled =
+    d.wa_status === "approved" ||
+    d.approval_status === "approved" ||
+    ["approved", "scheduled", "posted", "completed"].includes(d.status);
+  if (settled) {
+    return { ok: false, error: "This video has already been approved — there is nothing to ask." };
   }
 
   const groups = await getGroupsForClient(d.client_id);
@@ -622,6 +642,15 @@ export type ApprovalInput = {
    * the last segment of the id we stored, so it can be matched on directly.
    */
   quotedStanzaId?: string | null;
+  /**
+   * The words of the message they replied to, when neither id survived.
+   *
+   * whatsapp-web.js reports no quoted message at all in this setup — not
+   * through `hasQuotedMsg`, not on the raw payload. The text sometimes comes
+   * through even so, and the video goes out captioned with its own title, so
+   * a reply to it can still be matched on the one thing that did arrive.
+   */
+  quotedText?: string | null;
   time?: string | null;
 };
 
@@ -733,6 +762,24 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
       if (quoted?.video_code) videoCode = quoted.video_code;
       else quotedButUnknown = true;
     }
+
+    /*
+     * Last resort: the words of the message they replied to.
+     *
+     * The video is sent captioned with its own title, so a swipe-reply to it
+     * quotes that title back — and matching on it is the only route left when
+     * the library hands over no id of any kind. Only when exactly one waiting
+     * video matches: two reels with similar names is precisely the case where
+     * a guess would approve the wrong one.
+     */
+    if (!videoCode && input.quotedText && input.groupId) {
+      const quoted = input.quotedText.toLowerCase();
+      const waiting = await awaitingReplyInGroup(input.groupId);
+      const hits = waiting.filter(
+        (r) => r.video_code && r.title && quoted.includes(r.title.trim().toLowerCase())
+      );
+      if (hits.length === 1) videoCode = hits[0].video_code!;
+    }
   }
 
   if (!videoCode) {
@@ -776,16 +823,32 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
               ).then((r) => r.map((x) => x.wa_message_id)),
             }
           : undefined,
-        error: quotedButUnknown
-          ? "I can't match that message to any video waiting here — it may be from " +
-            "an older send. Please reply to the video itself, or send the code — for " +
-            "example APPROVE " +
-            resolved.choices[0].code +
-            "."
-          : "More than one video is waiting here, so I can't tell which you mean. " +
-            "Reply to the video itself and say OK, or send the code — for example APPROVE " +
-            resolved.choices[0].code +
-            ".",
+        /*
+         * The codes, not an example of one.
+         *
+         * This asked the client to send a code and showed them a specimen —
+         * `APPROVE V105` — for a video that may not even be one of the ones
+         * waiting. The codes are not on the video messages any more, so there
+         * was nowhere to read the real ones: the reply told them to do the one
+         * thing they had no way of doing.
+         *
+         * Replying to the video was meant to be the answer to that, and it
+         * cannot be: whatsapp-web.js reports no quoted message here at all —
+         * not through `hasQuotedMsg`, not on the raw payload — so a reply to a
+         * reel arrives indistinguishable from a message sent to the room.
+         *
+         * So: list them. Title against code, and one line showing exactly what
+         * to type. It needs nothing from WhatsApp beyond the words the client
+         * types back, which is the only thing here that has never failed.
+         */
+        error:
+          "More than one video is waiting here:\n\n" +
+          resolved.choices
+            .map((c) => `*${c.code}* — ${c.title}`)
+            .join("\n") +
+          "\n\nReply with the one you mean — for example: *OK " +
+          resolved.choices[0].code +
+          "*",
       };
     }
     videoCode = resolved.videoCode;
@@ -1093,7 +1156,8 @@ export type ApprovalCounts = {
   approved: number;
   changesRequested: number;
   rejected: number;
-  readyToPost: number;
+  /** On Instagram. Not "approved and waiting" — that is `approved`. */
+  posted: number;
   failed: number;
 };
 
@@ -1121,7 +1185,7 @@ export type ApprovalCounts = {
  */
 export async function getApprovalCounts(clientIds?: number[] | null): Promise<ApprovalCounts> {
   if (!(await approvalsReady())) {
-    return { pending: 0, approved: 0, changesRequested: 0, rejected: 0, readyToPost: 0, failed: 0 };
+    return { pending: 0, approved: 0, changesRequested: 0, rejected: 0, posted: 0, failed: 0 };
   }
   const scope =
     clientIds && clientIds.length
@@ -1132,17 +1196,26 @@ export async function getApprovalCounts(clientIds?: number[] | null): Promise<Ap
 
   const row = await queryOne<Record<string, unknown>>(
     `SELECT
-       COALESCE(SUM(d.wa_status IN ('queued','sending','sent','delivered','viewed')),0) AS pending,
-       COALESCE(SUM(d.wa_status = 'approved'),0)          AS approved,
-       COALESCE(SUM(d.wa_status = 'changes_requested'),0) AS changes_requested,
-       COALESCE(SUM(d.wa_status = 'rejected'),0)          AS rejected,
-       COALESCE(SUM(d.wa_status = 'failed'),0)            AS failed,
-       -- Approved by the client and not out yet. See the note above the query.
+       /*
+        * The answer, whoever gave it and wherever they gave it.
+        *
+        * wa_status knows only what happened on WhatsApp. A super admin
+        * approving inside the portal writes approval_status and never
+        * touches it — so a video answered at a desk stayed counted as sent
+        * and waiting, and one sent back for changes from the portal was
+        * counted nowhere at all.
+        */
        COALESCE(SUM(
-         d.wa_status = 'approved'
-         AND COALESCE(d.posting_status,'') <> 'posted'
-         AND d.status NOT IN ('posted','completed','cancelled','rejected')
-       ),0) AS ready_to_post
+         COALESCE(d.approval_status,'') NOT IN ('approved','changes_requested','rejected')
+         AND d.wa_status IN ('queued','sending','sent','delivered','viewed')
+       ),0) AS pending,
+       COALESCE(SUM(d.approval_status = 'approved' OR d.wa_status = 'approved'),0) AS approved,
+       COALESCE(SUM(d.approval_status = 'changes_requested'
+                    OR d.wa_status = 'changes_requested'),0) AS changes_requested,
+       COALESCE(SUM(d.approval_status = 'rejected' OR d.wa_status = 'rejected'),0) AS rejected,
+       COALESCE(SUM(d.wa_status = 'failed'),0)            AS failed,
+       -- On Instagram. The publisher writes this and it means one thing.
+       COALESCE(SUM(d.instagram_status = 'posted'),0) AS posted
      FROM deliverables d JOIN clients c ON c.id = d.client_id
      WHERE c.status <> 'churned' ${scope}`,
     clientIds && clientIds.length ? clientIds : []
@@ -1154,7 +1227,7 @@ export async function getApprovalCounts(clientIds?: number[] | null): Promise<Ap
     approved: n(row?.approved),
     changesRequested: n(row?.changes_requested),
     rejected: n(row?.rejected),
-    readyToPost: n(row?.ready_to_post),
+    posted: n(row?.posted),
     failed: n(row?.failed),
   };
 }
@@ -1176,6 +1249,24 @@ export type ApprovalRow = {
   wa_comment: string | null;
   wa_last_error: string | null;
   status: string;
+  /**
+   * Whether the reel is on Instagram — which `status` does not always say.
+   *
+   * Publishing sets `status` to 'posted' unless it is already 'completed',
+   * and leaves 'completed' alone on purpose: the work is finished and that
+   * is the truer word for it. So a published reel can carry either, and the
+   * board counted 'completed' as still waiting to be posted — for ever.
+   */
+  instagram_status: string | null;
+  /**
+   * The answer, however it was given.
+   *
+   * `wa_status` only knows what happened on WhatsApp. A super admin
+   * approving inside the portal writes this and never touches that — so a
+   * video answered at a desk still read as sent-and-waiting on the board,
+   * and sat under "Awaiting client" for ever.
+   */
+  approval_status: string | null;
 };
 
 export async function getApprovalBoard(
@@ -1193,7 +1284,8 @@ export async function getApprovalBoard(
   return query<ApprovalRow>(
     `SELECT d.id, d.video_code, d.title, c.company_name, d.client_id,
             d.wa_status, d.wa_group_id, d.wa_message_id, d.wa_sent_at, d.wa_viewed_at,
-            d.wa_responded_at, d.wa_approved_by, d.wa_comment, d.wa_last_error, d.status
+            d.wa_responded_at, d.wa_approved_by, d.wa_comment, d.wa_last_error, d.status,
+            d.instagram_status, d.approval_status
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE c.status <> 'churned' AND d.wa_status <> 'not_sent' ${scope}
       ORDER BY COALESCE(d.wa_responded_at, d.wa_sent_at, d.updated_at) DESC

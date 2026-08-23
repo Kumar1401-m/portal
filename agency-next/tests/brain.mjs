@@ -8,6 +8,7 @@
  * published half as much, or turning three posts into a trend.
  */
 import assert from "node:assert/strict";
+import fs4 from "node:fs";
 import { finish } from "./finish.mjs";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -194,6 +195,29 @@ const find = (list, kind) => list.find((f) => f.kind === kind);
   // wording and never the figures.
   assert.match(src, /plainAnswer\(evidence, list\)/);
   ok("an absent or broken model costs the wording, not the numbers");
+}
+
+/* ---------------- nothing to do, and why ---------------- */
+{
+  /*
+   * `clients: 0` is not a result anybody can act on. The Brain skips the
+   * agency's own accounts — the is_personal box on the client form — so a
+   * roster where that box happens to be ticked produces a nightly job that
+   * succeeds, reports nothing, and gives no hint that a checkbox is why.
+   */
+  const lib = fs4.readFileSync(`${SRC}/lib/ai-insights.ts`, "utf8");
+  assert.ok(lib.includes("skipped?: string;"), "the run can say why it did nothing");
+  assert.ok(
+    lib.includes("marked as the agency's own"),
+    "and names the checkbox rather than reporting a bare zero"
+  );
+  assert.ok(
+    lib.includes("No active clients to analyse."),
+    "an empty roster is told apart from an all-personal one"
+  );
+  const route = fs4.readFileSync(`${SRC}/app/api/automation/insights/brain/route.ts`, "utf8");
+  assert.ok(route.includes("result.skipped ??"), "and the heartbeat carries it");
+  ok("a Brain run that found nobody says which kind of nobody");
 }
 
 await finish(pass);

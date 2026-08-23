@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { onTheFloor } from "@/lib/client-status";
 import { Users, AlarmClock, TriangleAlert } from "lucide-react";
 import { query } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,7 +39,18 @@ export async function WorkloadPanel() {
   }>(
     `SELECT d.id, d.title, d.due_date, d.assigned_to, c.company_name
        FROM deliverables d JOIN clients c ON c.id = d.client_id
-      WHERE d.status IN ('pending','waiting_for_raw','raw_uploaded','editing','changes_requested')
+      /*
+       * A client the agency has stopped working with has no late work.
+       *
+       * This joined clients for the name and never asked anything about
+       * them, so an archived client's unfinished tasks stayed on the
+       * going-to-be-late list for ever — twelve videos for a client nobody
+       * has worked on in months, at the top of a panel meant to say what
+       * needs doing today. Nothing anybody did could clear them, because the
+       * work is never going to be done.
+       */
+      WHERE ${onTheFloor()}
+        AND d.status IN ('pending','waiting_for_raw','raw_uploaded','editing','changes_requested')
         AND d.due_date IS NOT NULL
         AND d.due_date <= CURDATE() + INTERVAL 14 DAY
       ORDER BY d.due_date ASC

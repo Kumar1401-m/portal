@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sparkles,
   Loader2,
@@ -78,10 +79,24 @@ export function AiCaption({
     analyseVideoAction,
     { ok: false }
   );
+  const router = useRouter();
   const [applied, applyAction, applying] = useActionState<AnalyseState, FormData>(
     applyCaptionAction,
     { ok: false }
   );
+
+  /*
+   * The task page is a server component; this is not.
+   *
+   * Applying writes the caption to the task and the action revalidates —
+   * but the caption box beside this panel is a client component holding its
+   * own state, initialised once. Without this the caption lands in the
+   * database and the box keeps showing what it showed before, which reads
+   * as the button having done nothing at all.
+   */
+  useEffect(() => {
+    if (applied.ok) router.refresh();
+  }, [applied, router]);
 
   const formRef = useRef<HTMLFormElement>(null);
   const [autoRuns, setAutoRuns] = useState(0);

@@ -308,12 +308,27 @@ export async function checkPageConnection(clientId: number): Promise<PageConnect
   }
 }
 
-/** The public address of a Page post, for the task page to link to. */
+/**
+ * The public address of a Page post, for the task page to link to.
+ *
+ * Two ids come back from `/{page-id}/videos` and they are not the same
+ * thing. `post_id` is `<pageId>_<postId>` — a feed post, which lives at
+ * /posts/. `id` on its own is the video, and it does not live there at all:
+ * asked for its own `permalink_url`, Meta answers `/reel/<id>/`.
+ *
+ * This built /posts/ for the first and, for the second, facebook.com/<id> —
+ * a bare number after the domain, which is a profile URL for a user who does
+ * not exist. Every video published without a feed post got a link that went
+ * nowhere, on a page a client is shown.
+ *
+ * Checked against the Graph API rather than reasoned about: a real Page's
+ * videos return `permalink_url: "/reel/<id>/"`.
+ */
 export function facebookPermalink(postId: string | null): string | null {
   if (!postId) return null;
-  // Meta returns either "<pageId>_<postId>" or a bare id depending on the
-  // endpoint; both resolve from the same path.
-  return `https://www.facebook.com/${postId.replace("_", "/posts/")}`;
+  return postId.includes("_")
+    ? `https://www.facebook.com/${postId.replace("_", "/posts/")}`
+    : `https://www.facebook.com/reel/${postId}/`;
 }
 
 /**

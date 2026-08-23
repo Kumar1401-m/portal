@@ -122,16 +122,18 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 {
   const wa = readFileSync(`${SRC}/lib/whatsapp-approvals.ts`, "utf8");
 
-  // “Ready to post” asked for status <> 'posted' alone, so it counted
-  // anything the publisher had put out — which sets posting_status and leaves
-  // the workflow status where it was — for ever. The tile read “Ready to
-  // post: 1” about something already on the client’s page.
-  has(wa, "COALESCE(d.posting_status,'') <> 'posted'", "the publisher’s column counts");
-  has(
-    wa,
-    "d.status NOT IN ('posted','completed','cancelled','rejected')",
-    "and so does everything else that is finished"
-  );
+  /*
+   * “Ready to post” asked for status <> 'posted' alone, so it counted
+   * anything the publisher had put out — which sets posting_status and
+   * leaves the workflow status where it was — for ever. Patched once with
+   * posting_status; the tile is gone now, replaced by one that counts what
+   * is actually on Instagram, which is the question it was always asking.
+   */
+  has(wa, "COALESCE(SUM(d.instagram_status = 'posted'),0) AS posted", "Posted counts Instagram");
+  assert.ok(!wa.includes("ready_to_post"), "and the tile that could never clear is gone");
+  // The finished-work list is what that clause protected, and it still does
+  // — it just is not the approvals tile any more.
+  has(wa, "d.wa_status = 'failed'", "failures are still counted on their own");
   assert.ok(
     !wa.includes("d.wa_status = 'approved' AND d.status <> 'posted'"),
     "the half-check is gone"

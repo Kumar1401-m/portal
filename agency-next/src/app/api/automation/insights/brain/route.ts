@@ -32,8 +32,11 @@ export async function GET(request: Request) {
   await recordRun(
     "ai_insights",
     true,
-    `${result.found} findings across ${result.clients} clients` +
-      (result.cleared ? `, ${result.cleared} cleared` : "")
+    // The reason, when there is one — see refreshInsights. A nightly job that
+    // reports nothing and does not say why is a job nobody can fix.
+    result.skipped ??
+      `${result.found} findings across ${result.clients} clients` +
+        (result.cleared ? `, ${result.cleared} cleared` : "")
   ).catch(() => {});
 
   return ok(result);

@@ -132,10 +132,22 @@ export default async function ReportsPage({
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {/*
+                * Two empty states, because they mean different things.
+                *
+                * The columns of this table are the content categories that saw
+                * work — so a month with no work has no columns, and the table
+                * rendered as a list of client names under S.No, Category and
+                * nothing else. Every client present, every number absent, and
+                * no word anywhere about why. It read as a broken report rather
+                * than an empty month.
+                */}
+              {rows.length === 0 || categories.length === 0 ? (
                 <tr>
                   <td colSpan={cols} className="px-3 py-10 text-center text-muted-foreground">
-                    Nothing recorded for this month.
+                    {rows.length === 0
+                      ? "No clients to report on."
+                      : "No work recorded for this month yet — the columns here are the content categories that were produced, and there are none."}
                   </td>
                 </tr>
               ) : (

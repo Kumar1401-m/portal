@@ -13,6 +13,14 @@ import { finish } from "./finish.mjs";
 import { pathToFileURL } from "node:url";
 
 const SRC = process.env.PORTAL_SRC;
+
+/*
+ * Set before the modules are loaded, because `lib/env.ts` reads the
+ * environment once at import and freezes it. Assigning it inside a test
+ * changes nothing the code under test can see — which is its own small trap,
+ * and cost a confusing failure here before it was understood.
+ */
+process.env.META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || "agency-token";
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
 const a = await load("lib/analytics.ts");
 const db = await load("lib/db.ts");
@@ -317,5 +325,105 @@ const post = (o = {}) => ({
     await clean();
   }
   ok("archiving a client takes their numbers off the analytics board");
+}
+
+/* ---------------- a weak client token falls back to the agency's ---------------- */
+{
+  /*
+   * A per-client token exists for the client who will not add the agency to
+   * their Business Manager, and it is whatever they were able to issue —
+   * often `instagram_basic` and nothing else. That reads the post list
+   * perfectly and is refused every insight.
+   *
+   * The sync took the client's token whenever one existed and never looked at
+   * the agency's again. So one weak credential on one client produced a board
+   * of real captions with a reach of nought, and a nightly job that reported
+   * itself failed every morning, while a token that could read the whole
+   * account sat unused in the environment.
+   */
+  const clean = async () => {
+    await db.execute("DELETE FROM post_insights WHERE media_id LIKE 'ZZ_FB_%'");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ fallback'");
+  };
+  await clean();
+  const cid = Number(
+    (await db.execute(
+      `INSERT INTO clients (company_name, status, ig_user_id, ig_access_token)
+       VALUES ('ZZ fallback','active','17800000000009','weak-client-token')`
+    )).insertId
+  );
+
+  const posted = new Date(Date.now() - 3600_000).toISOString();
+  const realFetch = global.fetch;
+  const seen = [];
+  global.fetch = async (url) => {
+    const u = String(url);
+    const token = decodeURIComponent(u.split("access_token=")[1] ?? "");
+    seen.push(token);
+    // The client's token lists posts and is refused insights — the real shape
+    // of a token holding instagram_basic alone.
+    if (u.includes("/insights")) {
+      return {
+        json: async () =>
+          token === "agency-token"
+            ? { data: [{ name: "reach", values: [{ value: 119 }] }] }
+            : { error: { message: "(#10) Application does not have permission" } },
+      };
+    }
+    return {
+      json: async () => ({
+        data: [{
+          id: "ZZ_FB_1", media_type: "VIDEO", media_product_type: "REELS",
+          permalink: null, caption: null, timestamp: posted,
+          like_count: 4, comments_count: 0,
+        }],
+      }),
+    };
+  };
+
+  try {
+    const r = await a.syncClientPosts(cid);
+    assert.equal(r.ok, true, "the sync succeeds on the agency token");
+    assert.ok(seen.includes("weak-client-token"), "the client's own token is tried first");
+    assert.ok(seen.includes("agency-token"), "and the agency's when theirs is refused");
+
+    const [row] = await db.query("SELECT reach FROM post_insights WHERE media_id = 'ZZ_FB_1'");
+    assert.equal(Number(row.reach), 119, "and the reach that was there all along is stored");
+  } finally {
+    global.fetch = realFetch;
+    await clean();
+  }
+  ok("a client token that cannot read insights no longer costs the whole client");
+}
+
+/* ---------------- "All clients" says who is not in it ---------------- */
+{
+  /*
+   * Everything on the board comes from clients with an Instagram account id.
+   * A roster of four where one is configured showed that one's numbers under
+   * the words "All clients" — a figure not so much wrong as about somebody
+   * else, with nothing on the page to say so.
+   */
+  const clean = async () => {
+    await db.execute("DELETE FROM clients WHERE company_name LIKE 'ZZ noig%'");
+  };
+  await clean();
+  try {
+    await db.execute("INSERT INTO clients (company_name, status, ig_user_id) VALUES ('ZZ noig set','active','17841000000000000')");
+    await db.execute("INSERT INTO clients (company_name, status, ig_user_id) VALUES ('ZZ noig blank','active','')");
+    await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ noig null','active')");
+    await db.execute("INSERT INTO clients (company_name, status) VALUES ('ZZ noig gone','churned')");
+
+    const missing = (await a.clientsWithoutInstagram()).filter((n) => n.startsWith("ZZ noig"));
+    assert.deepEqual(
+      missing,
+      ["ZZ noig blank", "ZZ noig null"],
+      "a blank id and a missing one both count; a set one does not"
+    );
+    assert.ok(!missing.includes("ZZ noig gone"), "and an archived client is not anybody's gap");
+  } finally {
+    await clean();
+  }
+  ok("the board names the clients it cannot see");
 }
 await finish(pass);

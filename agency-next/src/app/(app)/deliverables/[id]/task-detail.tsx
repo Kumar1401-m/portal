@@ -12,6 +12,7 @@ import { serviceOf } from "@/lib/services";
 import { label, fmtDate } from "@/lib/utils";
 import { getItems } from "@/lib/revision-tasks";
 import { RevisionChecklist } from "./revision-checklist";
+import { isFinished } from "@/lib/constants";
 import { CaptionStudio } from "./caption-studio";
 import { WorkflowControls } from "./workflow-controls";
 import { VideoUpload } from "../video-upload";
@@ -78,6 +79,17 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
   const editingOnly = user.role === "video_editor";
   // A crm manages the relationship, not the footage — same rule as the tasks list.
   const canUploadVideo = user.role !== "crm";
+  /*
+   * Published work is read-only.
+   *
+   * The upload box and the caption editor stayed open on a reel that was
+   * already on the client's account, so a new cut or a rewritten caption
+   * could be saved over the record of what actually went out — changing
+   * nothing on Instagram and losing what was posted. `isFinished` is the
+   * same test the rest of the portal uses: publishing always moves the
+   * workflow status on, and completed counts too.
+   */
+  const locked = isFinished(d.status);
   const isPoster = service === "poster_designing";
 
   return (
@@ -128,7 +140,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             had nowhere to do it. It also sits directly above the AI panel,
             which does nothing until a video exists.
           */}
-          {canUploadVideo && !isPoster ? (
+          {canUploadVideo && !isPoster && !locked ? (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Finished video</CardTitle>
@@ -270,9 +282,18 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
 
         {/* Caption studio */}
         <div className="lg:col-span-2">
+          {/*
+            * Keyed on the caption so a new one remounts the editor.
+            *
+            * `initialCaption` is exactly that — initial. The component keeps
+            * its own state from then on, so a caption applied from the panel
+            * above arrived in the database and never on the screen.
+            */}
           <CaptionStudio
+            key={d.caption || ""}
             deliverableId={d.id}
             initialCaption={d.caption || ""}
+            locked={locked}
             defaultLanguage={d.language || "English"}
             isPoster={isPoster}
           />

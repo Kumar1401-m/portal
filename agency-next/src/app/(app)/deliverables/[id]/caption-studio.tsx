@@ -47,11 +47,14 @@ export function CaptionStudio({
   initialCaption,
   defaultLanguage,
   isPoster,
+  locked = false,
 }: {
   deliverableId: number;
   initialCaption: string;
   defaultLanguage: string;
   isPoster: boolean;
+  /** The work is published; this is the record of it, not a draft. */
+  locked?: boolean;
 }) {
   const [genState, genAction] = useActionState<CaptionState, FormData>(
     generateCaptionAction,
@@ -93,6 +96,35 @@ export function CaptionStudio({
     openai: "OpenAI",
     heuristic: "Draft (no AI key)",
   };
+
+  /*
+   * Once it is out, this is the record of what went out.
+   *
+   * The editor stayed open on a published reel, so a rewritten caption could
+   * be saved over the one actually on Instagram — changing nothing there and
+   * losing what was posted. Shown rather than hidden, because what the
+   * caption said is worth reading back.
+   */
+  if (locked) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            Caption
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            This went out with the post. It is kept as the record of what was published.
+          </p>
+          <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 font-mono text-[13px] leading-relaxed">
+            {initialCaption || "No caption was saved."}
+          </pre>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>

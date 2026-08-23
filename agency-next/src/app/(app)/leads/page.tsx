@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { crmClientIds } from "@/lib/crm";
+import { getClientsMini } from "@/lib/deliverables";
+import { ClientFilter } from "@/components/admin/client-filter";
 import { Target, TriangleAlert, Flame, Trophy, IndianRupee } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES, ADMIN_ROLES } from "@/lib/auth";
 import { query, queryOne } from "@/lib/db";
@@ -25,7 +28,7 @@ export const dynamic = "force-dynamic";
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ stage?: string; closed?: string; q?: string }>;
+  searchParams: Promise<{ stage?: string; closed?: string; q?: string; client?: string }>;
 }) {
   const user = await requireUser(ADMIN_OR_CRM_ROLES);
   const sp = await searchParams;
@@ -55,12 +58,28 @@ export default async function LeadsPage({
   const stage: StageKey | undefined = sp.stage && isStage(sp.stage) ? sp.stage : undefined;
   const includeClosed = sp.closed === "1" || Boolean(stage);
 
+  /*
+   * Which client's leads, and which clients this user may see at all.
+   *
+   * A lead exists because an ad ran for somebody. Unfiltered, the board is
+   * every client's leads in one list — fine for a solo operator and useless
+   * to an agency, where the question is always "what did this month get
+   * *them*?". A crm sees only their own clients' leads either way.
+   */
+  const scope = await crmClientIds(user);
+  const clients = await getClientsMini(scope);
+  const wanted = Number(sp.client);
+  const clientId =
+    Number.isInteger(wanted) && clients.some((c) => c.id === wanted) ? wanted : null;
+
   const [leads, all, owners, todayRow] = await Promise.all([
-    getLeads({ stage, includeClosed, search: sp.q }),
+    getLeads({ stage, includeClosed, search: sp.q, clientId, clientIds: scope }),
     // The header counts every lead, whatever the list is filtered to — a
     // filtered pipeline total is a number that changes when you click a tab,
     // which is the fastest way to make people stop trusting it.
-    getLeads({ includeClosed: true }),
+    // The header counts this client's pipeline when one is picked, so the
+    // total and the list are answering the same question.
+    getLeads({ includeClosed: true, clientId, clientIds: scope }),
     query<{ id: number; name: string }>(
       `SELECT id, name FROM users
         WHERE role IN ('super_admin','admin','crm') AND COALESCE(is_active,1) = 1
@@ -83,7 +102,14 @@ export default async function LeadsPage({
 
   return (
     <div className="space-y-5">
-      <Header />
+      <Header>
+        <ClientFilter
+          clients={clients}
+          current={clientId}
+          basePath="/leads"
+          keep={{ stage: sp.stage, closed: sp.closed, q: sp.q }}
+        />
+      </Header>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -178,15 +204,18 @@ function StageChip({
   );
 }
 
-function Header() {
+function Header({ children }: { children?: React.ReactNode }) {
   return (
-    <div>
-      <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-        <Target className="h-6 w-6 text-primary" /> Leads
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Every enquiry, and who is chasing it — before it becomes a client.
-      </p>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <Target className="h-6 w-6 text-primary" /> Leads
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Every enquiry, and who is chasing it — before it becomes a client.
+        </p>
+      </div>
+      {children}
     </div>
   );
 }
