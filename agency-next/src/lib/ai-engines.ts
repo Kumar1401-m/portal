@@ -277,10 +277,9 @@ export const switchKey = (key: EngineKey) => `ai_engine_${key}`;
  * Is there a model behind any of this?
  *
  * One key for every engine. Two providers are supported and either will do —
- * `lib/ai.ts` already knows which to prefer, and this only asks whether one
- * of them exists at all.
+ * There is one provider now, so this is one question: is there a key.
  */
-export const modelConfigured = () => env.openai.enabled || env.gemini.enabled;
+export const modelConfigured = () => env.gemini.enabled;
 
 /**
  * Whether an engine may run, and if not, which of the three reasons it is.

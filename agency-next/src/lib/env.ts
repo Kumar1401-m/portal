@@ -34,7 +34,43 @@ export const env = {
     user: process.env.DB_USER || "root",
     password: process.env.DB_PASSWORD || "",
     database: process.env.DB_NAME || "agency_erp",
-    connectionLimit: toInt(process.env.DB_CONNECTION_LIMIT, 10),
+    /*
+     * Two, not ten — and capped however the environment is set.
+     *
+     * Ten is a sensible pool for one long-running server. This is not one:
+     * Vercel runs a fresh instance per concurrent request, each with its own
+     * pool, so ten here is ten *times however many instances are warm* against
+     * a database that will have a connection limit of its own. Past that
+     * limit MySQL closes new connections immediately, which arrives as the
+     * same "the server closed the connection" as a stale socket — and no
+     * amount of retrying fixes being over the limit.
+     *
+     * A serverless instance serves one request at a time. It does not need
+     * ten.
+     */
+    connectionLimit: Math.min(4, Math.max(1, toInt(process.env.DB_CONNECTION_LIMIT, 2))),
+    /*
+     * The clock the database answers `NOW()` and `CURDATE()` with.
+     *
+     * This has always been Indian time — not by configuration but because the
+     * server it ran on was — and the whole portal is built on it: due dates,
+     * "overdue", posting windows, the footage slots, month keys. Nothing
+     * converts; it is simply assumed.
+     *
+     * A managed host defaults to UTC, so moving without setting this would
+     * shift every one of those by five and a half hours. Nothing would error.
+     * Posts would go out at the wrong time and tasks would look due on the
+     * wrong day, and it would take a while to notice why.
+     *
+     * Set explicitly so it is the same wherever the database lives.
+     */
+    timeZone: process.env.DB_TIME_ZONE || "+05:30",
+    /*
+     * Managed hosts require TLS and close the connection without it — which
+     * arrives as the same unhelpful "connection lost" as everything else.
+     * Off for a database on this machine, on for anything else.
+     */
+    ssl: (process.env.DB_SSL || "").toLowerCase() === "on",
   },
 
   jwt: {
@@ -53,15 +89,39 @@ export const env = {
 
   bcryptRounds: toInt(process.env.BCRYPT_ROUNDS, 12),
 
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY || "",
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    enabled: Boolean(process.env.OPENAI_API_KEY),
-  },
-
+  /**
+   * The one model provider. Gemini is gone.
+   *
+   * Three models rather than one, because the three jobs are not alike and
+   * paying for the biggest on all of them would empty a small balance in a
+   * week:
+   *
+   *   `model`      writing and reading — captions, the group assistant, the
+   *                video analyser. A reasoning model, thought about below.
+   *   `fastModel`  the short, frequent, cheap calls where a client is waiting
+   *                in a chat and a considered answer that arrives a minute
+   *                later is worse than a plain one now.
+   *   `transcribeModel`  what was said. Takes an mp4 whole, so a reel needs no
+   *                audio extraction and the portal needs no ffmpeg.
+   */
+  /**
+   * The model, and which one for which job.
+   *
+   * `model` writes: captions, scripts, anything going onto a client's feed.
+   * `fastModel` answers: a client's question in a WhatsApp group, a voice
+   * note to transcribe — work where a reply in two seconds is worth more than
+   * a better sentence in twenty.
+   *
+   * Both default to a flash model rather than a pro one. Pro is refused
+   * outright on a free key, and a caption reading a dozen high-detail frames
+   * is the most expensive call this portal makes — so the default is the one
+   * that works on the key an agency is most likely to have, and the override
+   * is there for the day it is worth paying for.
+   */
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || "",
-    model: process.env.GEMINI_MODEL || "gemini-flash-lite-latest",
+    model: process.env.GEMINI_MODEL || "gemini-3-flash-preview",
+    fastModel: process.env.GEMINI_FAST_MODEL || "gemini-3-flash-preview",
     enabled: Boolean(process.env.GEMINI_API_KEY),
   },
 

@@ -2,14 +2,14 @@
  * AI Caption Generator v3 (server-only) — ported from the original portal's
  * aiService + ai.routes caption endpoint.
  *
- * Flow: build a rich brief from the deliverable + client → ask Gemini (or OpenAI)
+ * Flow: build a rich brief from the deliverable + client → ask OpenAI
  * for structured JSON (best caption + 5 styled alternates + hashtags + SEO +
  * scores) → compose the final, ready-to-post caption (body + contact block +
  * keyword block + hashtags). Posters get a clean, engagement-only caption.
  * Falls back to a deterministic draft when no API key / the model is unavailable.
  */
 import "server-only";
-import { env } from "./env";
+import { ask } from "./model";
 
 /* ------------------------------ Types ------------------------------ */
 
@@ -96,7 +96,7 @@ type V3Result = {
 type V3Brief = ReturnType<typeof v3Brief>;
 
 export type ComposedCaption = {
-  provider: "openai" | "gemini" | "heuristic";
+  provider: "gemini" | "heuristic";
   caption: string;
   sections_below: string;
   hashtags: string;
@@ -121,104 +121,74 @@ const asObj = (v: unknown): Record<string, unknown> => {
 };
 
 const str = (v: unknown): string => (v == null ? "" : String(v));
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Server-suggested retry delay (seconds) from a 429 body; clamp 1–5s. */
-function retryDelayMs(text: string): number {
-  const m = text.match(/retry(?:Delay)?["':\s]*([\d.]+)s/i);
-  const sec = m ? parseFloat(m[1]) : 2.5;
-  return Math.min(Math.max(sec || 2.5, 1), 5) * 1000 + 300;
-}
 
 /* ------------------------- Provider calls -------------------------- */
 
-async function callGemini(
-  systemPrompt: string,
-  userPrompt: string
-): Promise<Record<string, unknown> | null> {
-  if (!env.gemini.enabled) return null;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.gemini.model}:generateContent?key=${env.gemini.apiKey}`;
-  const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-    generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
-  });
-  const MAX = 3;
-  for (let attempt = 1; attempt <= MAX; attempt++) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      if (res.status === 429 && attempt < MAX) {
-        await sleep(retryDelayMs(await res.text()));
-        continue;
-      }
-      if (!res.ok) return null;
-      const data = await res.json();
-      const text: string = (data?.candidates?.[0]?.content?.parts || [])
-        .map((p: { text?: string }) => p.text || "")
-        .join("");
-      return text ? JSON.parse(text) : null;
-    } catch {
-      if (attempt >= MAX) return null;
-      await sleep(800);
-    }
-  }
-  return null;
-}
-
-async function callOpenAI(
-  systemPrompt: string,
-  userPrompt: string
-): Promise<Record<string, unknown> | null> {
-  if (!env.openai.enabled) return null;
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.openai.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: env.openai.model,
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return JSON.parse(data.choices[0].message.content);
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Ask whichever provider is configured for a JSON object, OpenAI first.
- * Exported so other AI features (analytics recommendations) share one place
- * that knows about keys, models and fallbacks. Returns a null `data` when no
- * provider is available or every one of them failed — callers are expected to
- * have a non-AI fallback rather than to treat this as fatal.
+ * Ask the model for a JSON object.
+ *
+ * Exported so every AI feature that wants structured JSON — captions here, the
+ * analytics recommendations, the strategist — shares one place that knows
+ * about the key, the model and what to do when it says no.
+ *
+ * Two things changed when this stopped being a hand-rolled fetch:
+ *
+ * **It thinks.** `medium` effort, because this is copy going onto a real
+ * client's feed. The old call was temperature 0.7 and whatever came to mind
+ * first, which is how a caption studio produces something fluent that
+ * describes a different video.
+ *
+ * **The retry loop is gone**, along with its 429 parsing. `ask` already knows
+ * which failures are worth repeating; a second opinion about that in every
+ * caller is how the four of them ended up disagreeing.
+ *
+ * A null `data` is not fatal — callers here all have a non-AI draft to fall
+ * back to, which is what keeps the studio usable on a dead key.
  */
 export async function callJSON(
   systemPrompt: string,
   userPrompt: string
-): Promise<{ data: Record<string, unknown> | null; provider: "openai" | "gemini" | null }> {
-  if (env.openai.enabled) {
-    const data = await callOpenAI(systemPrompt, userPrompt);
-    if (data) return { data, provider: "openai" };
+): Promise<{ data: Record<string, unknown> | null; provider: "gemini" | null }> {
+  const res = await ask<Record<string, unknown>>({
+    system: systemPrompt,
+    user: userPrompt,
+    /*
+     * Free-form JSON rather than a schema. The caption reply carries a
+     * scores object whose keys are invented per platform, and a strict
+     * schema cannot describe "an object of objects of numbers" without
+     * naming every one of them — so this is the one call that still asks
+     * rather than compels, and `readJson` below cleans up after it.
+     */
+    schema: undefined,
+    effort: "medium",
+    maxTokens: 6000,
+  });
+  if (!res.ok) return { data: null, provider: null };
+  const data = readJson(res.text);
+  return data ? { data, provider: "gemini" } : { data: null, provider: null };
+}
+
+/**
+ * JSON out of a reply that was asked for JSON and may have added manners.
+ *
+ * A code fence, a "Here you go:", a trailing note. Without a schema the model
+ * is only being polite, and the alternative — failing the whole caption
+ * because of a markdown fence — throws away work already paid for.
+ */
+function readJson(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
   }
-  if (env.gemini.enabled) {
-    const data = await callGemini(systemPrompt, userPrompt);
-    if (data) return { data, provider: "gemini" };
-  }
-  return { data: null, provider: null };
 }
 
 /* ------------------------- Brief building -------------------------- */
@@ -491,7 +461,7 @@ async function generateCaptionV3(
    * optional.
    */
   rules?: string | null
-): Promise<{ result: V3Result; provider: "openai" | "gemini" | "heuristic" }> {
+): Promise<{ result: V3Result; provider: "gemini" | "heuristic" }> {
   const system = rules ? `${CAPTION_V3_SYSTEM}\n\n${rules}` : CAPTION_V3_SYSTEM;
   const { data, provider } = await callJSON(system, JSON.stringify(brief, null, 2));
   if (data && (data.best_caption || data.recommended_caption || data.alternate_captions)) {

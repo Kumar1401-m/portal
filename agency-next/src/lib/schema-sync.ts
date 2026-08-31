@@ -42,6 +42,97 @@ type ColumnSpec = {
 };
 
 const EXPECTED: ColumnSpec[] = [
+  /*
+   * How long people actually watched, which is the outcome that matters most
+   * for a reel and the one nothing was keeping.
+   *
+   * Reach says how many were shown it; these say whether they stayed. Meta
+   * returns both in milliseconds on `ig_reels_avg_watch_time` and
+   * `ig_reels_video_view_total_time`, and with `deliverables.video_duration`
+   * already on the row, average watch over duration is retention — without
+   * which "this one did well" is a guess about a number nobody has.
+   */
+  {
+    table: "post_insights",
+    column: "avg_watch_ms",
+    definition: "avg_watch_ms BIGINT NULL AFTER views",
+    purpose: "Average time a reel was watched for, in milliseconds.",
+  },
+  {
+    table: "post_insights",
+    column: "total_watch_ms",
+    definition: "total_watch_ms BIGINT NULL AFTER avg_watch_ms",
+    purpose: "Total time a reel was watched for, across everyone who saw it.",
+  },
+  /*
+   * Whether a person is on screen — the one feature in the list the portal
+   * could not already answer, and the one an agency argues about most.
+   *
+   * The model is already watching the whole video to write the caption, so
+   * this costs nothing extra to ask for; it is a field in a reply that was
+   * being made anyway.
+   */
+  /*
+   * How a model with no video input still watches a video.
+   *
+   * The model takes images and audio, never a video file. So the browser — which
+   * is holding the file anyway, at the moment it uploads it — decodes frames
+   * across the whole runtime and puts them in R2, and the speech is read out
+   * of the same mp4 by the transcription endpoint. These two columns are what
+   * makes that repeatable: an analysis can be re-run months later without the
+   * browser, and a retry never pays to transcribe the same audio twice.
+   */
+  {
+    table: "video_analysis",
+    column: "frames_json",
+    definition: "frames_json LONGTEXT NULL",
+    purpose:
+      "R2 keys of the frames decoded from this video, in order, so what the model looked at can be looked at again.",
+  },
+  {
+    table: "video_analysis",
+    column: "transcript",
+    definition: "transcript LONGTEXT NULL",
+    purpose: "What is actually said in the video, in the language it was said in.",
+  },
+  /*
+   * When a caption was actually written for this video, so it can be capped.
+   *
+   * A generation reads a dozen high-detail frames at the highest reasoning
+   * effort the portal buys anywhere — by far its most expensive call. A
+   * "Regenerate" button next to it and no ceiling is an open tab against a
+   * prepaid balance, and the honest ceiling is per video rather than per day:
+   * three attempts is more than enough to get one reel's copy right, and a
+   * fourth is somebody hoping a different answer falls out.
+   */
+  /*
+   * Where a Page post actually lives, in Meta's own words.
+   *
+   * A Page video is published to /videos, which answers with a bare video id
+   * and no post id at all — so a link assembled from that id is a guess about
+   * which surface it lives on, and the guess opened somebody else's content.
+   * Meta will say exactly where it is if asked, so it is asked and the answer
+   * kept.
+   */
+  {
+    table: "deliverables",
+    column: "facebook_permalink",
+    definition: "facebook_permalink VARCHAR(500) DEFAULT NULL",
+    purpose: "The Facebook Page post's own link, as Meta reports it.",
+  },
+  {
+    table: "video_analysis",
+    column: "gen_log",
+    definition: "gen_log VARCHAR(500) NULL",
+    purpose:
+      "When captions were written for this video (UTC), so it can be limited to three in 48 hours.",
+  },
+  {
+    table: "video_analysis",
+    column: "has_face",
+    definition: "has_face TINYINT(1) NULL AFTER mood",
+    purpose: "Whether a person appears on camera, as read from the video.",
+  },
   {
     table: "clients",
     column: "is_personal",
@@ -189,10 +280,44 @@ const EXPECTED: ColumnSpec[] = [
   },
   {
     table: "clients",
+    column: "provides_footage",
+    definition: "provides_footage TINYINT(1) NOT NULL DEFAULT 1",
+    purpose:
+      "Whether this client sends us raw footage at all. Off for one we film ourselves, or whose work is posters and ads — their group is then never asked for rushes that were never going to exist.",
+  },
+  {
+    table: "clients",
     column: "auto_payment_reminders",
     definition: "auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0",
     purpose:
       "Chase this client's overdue invoices on WhatsApp automatically, with a payment link. Off unless chosen.",
+  },
+  /*
+   * The three kinds of message that had no switch at all.
+   *
+   * Approvals, footage and payments already had one each; the monthly report,
+   * the "your post is live" link and the assistant's replies went to everybody
+   * whether they wanted them or not. A client asking for less had nothing to
+   * turn off. All default to 1 — nothing changes for anybody until somebody
+   * unticks a box.
+   */
+  {
+    table: "clients",
+    column: "send_reports",
+    definition: "send_reports TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Send this client their monthly report.",
+  },
+  {
+    table: "clients",
+    column: "send_posted_links",
+    definition: "send_posted_links TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Message this client the link when a post of theirs goes live.",
+  },
+  {
+    table: "clients",
+    column: "ai_replies",
+    definition: "ai_replies TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Let the assistant answer ordinary messages in this client's groups.",
   },
   {
     table: "clients",
@@ -314,6 +439,168 @@ const EXPECTED: ColumnSpec[] = [
     column: "wa_group_id",
     definition: "wa_group_id VARCHAR(64) DEFAULT NULL",
     purpose: "Which WhatsApp group the video was sent to.",
+  },
+  /*
+   * What a client's group is *for*.
+   *
+   * A client is often in more than one group with us, and the people who sign
+   * off the work are rarely the people who pay for it. Every one of these
+   * defaults to 1, so a database that applies them keeps behaving exactly as
+   * it did until somebody unticks a box.
+   */
+  /*
+   * The columns an ad table is actually read for.
+   *
+   * `engagement` and `ad_status` had no home at all; `reach_window` has one
+   * of its own because reach is the single metric that cannot be added up —
+   * see the note on it below.
+   */
+  {
+    table: "ad_performance",
+    column: "engagement",
+    definition: "engagement INT NULL",
+    purpose: "Post engagements — reactions, comments, shares, saves, taps.",
+  },
+  {
+    table: "ad_performance",
+    column: "ad_status",
+    definition: "ad_status VARCHAR(32) DEFAULT NULL",
+    purpose: "Whether the ad is still delivering: ACTIVE, PAUSED, and so on.",
+  },
+  {
+    table: "ad_performance",
+    column: "reach_window",
+    /*
+     * Reach for the whole sync window, as Meta counts it — not a sum.
+     *
+     * Reach is people, and the same person reached on Monday and Tuesday is
+     * one person. Adding the daily figures produces a bigger, wronger number
+     * that looks exactly like the right one, and there is no way to recover
+     * the true figure from stored daily rows. So Meta is asked for the window
+     * without `time_increment`, which is the number Ads Manager itself shows,
+     * and it is stored against the window it describes.
+     */
+    definition: "reach_window INT NULL",
+    purpose: "Deduplicated reach for the sync window — never a sum of daily reach.",
+  },
+  {
+    table: "ad_performance",
+    column: "reach_window_days",
+    definition: "reach_window_days INT NULL",
+    purpose: "How many days reach_window covers, so it is never shown for a range it does not fit.",
+  },
+  {
+    table: "ad_performance",
+    column: "adset_id",
+    definition: "adset_id VARCHAR(40) DEFAULT NULL",
+    purpose: "Which ad set the ad belongs to — targeting lives there, not on the ad.",
+  },
+  {
+    table: "ad_performance",
+    column: "locations",
+    /* Where it ran, in words. Two ads with identical numbers are completely
+       different pieces of work if one was Hyderabad and the other all India. */
+    definition: "locations VARCHAR(500) DEFAULT NULL",
+    purpose: "Where the ad was aimed — the cities, regions or countries in its targeting.",
+  },
+  {
+    table: "ad_performance",
+    column: "link_clicks",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "link_clicks INT NULL",
+    purpose: "Clicks through to the link — the client's own question, not spend.",
+  },
+  {
+    table: "ad_performance",
+    column: "video_views",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "video_views INT NULL",
+    purpose: "How many people watched the video, from Meta's own action count.",
+  },
+  {
+    table: "ad_performance",
+    column: "profile_visits",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "profile_visits INT NULL",
+    purpose: "How many went and looked at the profile afterwards.",
+  },
+  /*
+   * Reach for the account, over the window, as Meta counts it.
+   *
+   * The daily `reach` column cannot be added up and neither can the per-ad
+   * one: reach is people, the same person reached twice is one person, and two
+   * ads reaching overlapping audiences do not add either. Only Meta can
+   * deduplicate it, so it is asked for at account level over the whole window
+   * and stored with the window it describes.
+   */
+  {
+    table: "ad_insights",
+    column: "reach_window",
+    definition: "reach_window INT NULL",
+    purpose: "Accounts reached over the sync window — never a sum of daily or per-ad reach.",
+  },
+  {
+    table: "ad_insights",
+    column: "reach_window_days",
+    definition: "reach_window_days INT NULL",
+    purpose: "How many days reach_window covers, so it is never quoted for another period.",
+  },
+  {
+    table: "ad_insights",
+    column: "link_clicks",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "link_clicks INT NULL",
+    purpose: "Clicks through to the link — the client's own question, not spend.",
+  },
+  {
+    table: "ad_insights",
+    column: "video_views",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "video_views INT NULL",
+    purpose: "How many people watched the video, from Meta's own action count.",
+  },
+  {
+    table: "ad_insights",
+    column: "profile_visits",
+    /* NULL, not 0. Meta does not report every action type on every account,
+       and a confident zero reads to a client as "nobody did it". */
+    definition: "profile_visits INT NULL",
+    purpose: "How many went and looked at the profile afterwards.",
+  },
+  {
+    table: "whatsapp_groups",
+    column: "for_approvals",
+    definition: "for_approvals TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Send approvals, the 12-hour chase and footage requests to this group.",
+  },
+  {
+    table: "whatsapp_groups",
+    column: "for_footage",
+    definition: "for_footage TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Ask this group for raw footage before a shoot is due.",
+  },
+  {
+    table: "whatsapp_groups",
+    column: "for_payments",
+    definition: "for_payments TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Send invoices and overdue reminders to this group.",
+  },
+  {
+    table: "whatsapp_groups",
+    column: "for_updates",
+    definition: "for_updates TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Send the month's plan, reports and 'your post is live' to this group.",
+  },
+  {
+    table: "whatsapp_groups",
+    column: "for_chat",
+    definition: "for_chat TINYINT(1) NOT NULL DEFAULT 1",
+    purpose: "Let the assistant answer ordinary messages in this group.",
   },
   {
     table: "deliverables",
@@ -465,6 +752,29 @@ const EXPECTED: ColumnSpec[] = [
 type TableSpec = { table: string; purpose: string; ddl: string };
 
 const EXPECTED_TABLES: TableSpec[] = [
+  {
+    table: "client_month_plans",
+    purpose:
+      "What one client owes in one particular month — the video and poster counts and the amount. The client record holds one set of numbers for every month there will ever be, so a month that is agreed differently in advance had nowhere to live.",
+    ddl: `CREATE TABLE IF NOT EXISTS client_month_plans (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      month_key  CHAR(7) NOT NULL,
+      videos     INT NOT NULL DEFAULT 0,
+      posters    INT NOT NULL DEFAULT 0,
+      amount     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      note       VARCHAR(500) DEFAULT NULL,
+      /* The invoice this plan raised, so saving again never raises a second. */
+      invoice_id BIGINT UNSIGNED DEFAULT NULL,
+      created_by BIGINT UNSIGNED DEFAULT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      /* One plan per client per month: a month is a decision, not a log. */
+      UNIQUE KEY uniq_client_month (client_id, month_key),
+      KEY idx_cmp_month (month_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
   {
     table: "audience_snapshots",
     purpose:
@@ -746,12 +1056,46 @@ const EXPECTED_TABLES: TableSpec[] = [
       reach       BIGINT UNSIGNED NOT NULL DEFAULT 0,
       clicks      BIGINT UNSIGNED NOT NULL DEFAULT 0,
       leads       INT UNSIGNED NOT NULL DEFAULT 0,
+      link_clicks    INT NULL,
+      video_views    INT NULL,
+      profile_visits INT NULL,
       synced_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       -- The upsert key. One row per client per day is what lets a re-sync
       -- correct a figure Meta has restated instead of adding a second copy.
       UNIQUE KEY uniq_client_day (client_id, date),
       KEY idx_date (date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  },
+  {
+    table: "ad_performance",
+    purpose:
+      "One row per ad per day — which individual ad is working and which is burning money. " +
+      "`ad_insights` only ever held the account's daily total, so nothing could name an ad.",
+    ddl: `CREATE TABLE IF NOT EXISTS ad_performance (
+      id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id     BIGINT UNSIGNED NOT NULL,
+      ad_id         VARCHAR(40) NOT NULL,
+      date          DATE NOT NULL,
+      ad_name       VARCHAR(255) DEFAULT NULL,
+      campaign_name VARCHAR(255) DEFAULT NULL,
+      spend         DECIMAL(14,2) NOT NULL DEFAULT 0,
+      currency      VARCHAR(8) NOT NULL DEFAULT 'INR',
+      impressions   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      reach         BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      clicks        BIGINT UNSIGNED NOT NULL DEFAULT 0,
+      leads         INT UNSIGNED NOT NULL DEFAULT 0,
+      link_clicks    INT NULL,
+      video_views    INT NULL,
+      profile_visits INT NULL,
+      adset_id      VARCHAR(40) DEFAULT NULL,
+      locations     VARCHAR(500) DEFAULT NULL,
+      synced_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      -- Same reason as ad_insights: Meta restates figures as attribution
+      -- settles, so a re-sync must correct a row rather than add a second.
+      UNIQUE KEY uniq_ad_day (ad_id, date),
+      KEY idx_ap_client_date (client_id, date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   },
   {
@@ -782,7 +1126,8 @@ const EXPECTED_TABLES: TableSpec[] = [
   },
   {
     table: "whatsapp_groups",
-    purpose: "Which WhatsApp group belongs to which client — how a reply is attributed.",
+    purpose:
+      "Which WhatsApp group belongs to which client, and what each group is for.",
     ddl: `CREATE TABLE IF NOT EXISTS whatsapp_groups (
       id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       client_id   BIGINT UNSIGNED NOT NULL,
@@ -790,6 +1135,11 @@ const EXPECTED_TABLES: TableSpec[] = [
       group_name  VARCHAR(190) DEFAULT NULL,
       is_default  TINYINT(1) NOT NULL DEFAULT 1,
       is_active   TINYINT(1) NOT NULL DEFAULT 1,
+      for_approvals TINYINT(1) NOT NULL DEFAULT 1,
+      for_footage   TINYINT(1) NOT NULL DEFAULT 1,
+      for_payments  TINYINT(1) NOT NULL DEFAULT 1,
+      for_updates   TINYINT(1) NOT NULL DEFAULT 1,
+      for_chat      TINYINT(1) NOT NULL DEFAULT 1,
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),

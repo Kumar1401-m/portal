@@ -83,6 +83,28 @@ async function main() {
   await addColumn('clients', 'placeholder_values', 'placeholder_values JSON DEFAULT NULL');
   await addColumn('clients', 'caption_template', 'caption_template TEXT DEFAULT NULL');
 
+  /* ---- Cluster B2: what a client owes in one particular month ---- */
+  await run('client_month_plans table', `
+    CREATE TABLE IF NOT EXISTS client_month_plans (
+      id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      client_id  BIGINT UNSIGNED NOT NULL,
+      month_key  CHAR(7) NOT NULL,
+      videos     INT NOT NULL DEFAULT 0,
+      posters    INT NOT NULL DEFAULT 0,
+      amount     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      note       VARCHAR(500) DEFAULT NULL,
+      /* The invoice this plan raised, so saving again never raises a second. */
+      invoice_id BIGINT UNSIGNED DEFAULT NULL,
+      created_by BIGINT UNSIGNED DEFAULT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      /* One plan per client per month: a month is a decision, not a log. */
+      UNIQUE KEY uniq_client_month (client_id, month_key),
+      KEY idx_cmp_month (month_key),
+      CONSTRAINT fk_cmp_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   /* ---- Cluster C: learned client fingerprints ---- */
   await run('client_fingerprints table', `
     CREATE TABLE IF NOT EXISTS client_fingerprints (
@@ -231,6 +253,9 @@ async function main() {
   await addColumn('clients', 'content_approval', 'content_approval TINYINT(1) NOT NULL DEFAULT 1');
 
   // Automatic invoice chasing is per client, and off unless chosen.
+  // Off for a client we film ourselves, or whose work is posters and ads — their
+  // group is then never chased for rushes that were never going to exist.
+  await addColumn('clients', 'provides_footage', 'provides_footage TINYINT(1) NOT NULL DEFAULT 1');
   await addColumn('clients', 'auto_payment_reminders', 'auto_payment_reminders TINYINT(1) NOT NULL DEFAULT 0');
 
   // Reading ad spend needs a User/System User token with ads_read — a Page
@@ -326,6 +351,23 @@ async function main() {
      services) and a category (reuses the existing `content_category` column).
      `video_type` is left untouched so the poster workflow, reports and the
      client portal keep working exactly as before. */
+  // Watch time is the outcome a reel is actually judged on, and nothing kept
+  // it. With deliverables.video_duration already on the row, average watch
+  // over duration is retention.
+  await addColumn('post_insights', 'avg_watch_ms', 'avg_watch_ms BIGINT NULL AFTER views');
+  await addColumn('post_insights', 'total_watch_ms', 'total_watch_ms BIGINT NULL AFTER avg_watch_ms');
+  // The one feature the portal could not already answer for itself.
+  // Frames the browser decoded, and the speech read out of the same file — how a
+  // model that cannot take video still watches one.
+  await addColumn('video_analysis', 'frames_json', 'frames_json LONGTEXT NULL');
+  await addColumn('video_analysis', 'transcript', 'transcript LONGTEXT NULL');
+  // When a caption was actually written, so one video can be capped at three
+  // generations in 48 hours. The call reads a dozen high-detail frames at the
+  // highest reasoning effort the portal buys, and a Regenerate button beside
+  // it with no ceiling is an open tab against a prepaid balance.
+  await addColumn('video_analysis', 'gen_log', 'gen_log VARCHAR(500) NULL');
+  await addColumn('video_analysis', 'has_face', 'has_face TINYINT(1) NULL AFTER mood');
+
   await addColumn('deliverables', 'service', "service VARCHAR(40) DEFAULT NULL AFTER content_type");
   await addColumn('clients', 'services', 'services JSON DEFAULT NULL');
 
@@ -502,6 +544,10 @@ async function main() {
   // deliverable to the live post.
   await addColumn('deliverables', 'instagram_media_id', 'instagram_media_id VARCHAR(64) DEFAULT NULL');
   await addColumn('deliverables', 'instagram_permalink', 'instagram_permalink VARCHAR(500) DEFAULT NULL');
+  // The Page link, as Meta itself reports it. A Page video is posted to
+  // /videos and comes back as a bare video id with no post id, so a link built
+  // from that id by guessing the shape opens the wrong surface.
+  await addColumn('deliverables', 'facebook_permalink', 'facebook_permalink VARCHAR(500) DEFAULT NULL');
   await addColumn('deliverables', 'instagram_posted_at', 'instagram_posted_at DATETIME DEFAULT NULL');
 
   // Retry bookkeeping. `post_attempts` is the budget the publisher spends;
@@ -841,6 +887,14 @@ async function main() {
       KEY idx_wag_client (client_id),
       CONSTRAINT fk_wag_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+  // What each group is for. A client's approvers and their accounts team are
+  // usually different people in different chats, and neither wants the
+  // other's messages. Defaults to 1 everywhere, so an existing install keeps
+  // behaving exactly as it did until somebody unticks a box.
+  for (const col of ['for_approvals', 'for_footage', 'for_payments', 'for_updates', 'for_chat']) {
+    await addColumn('whatsapp_groups', col, `${col} TINYINT(1) NOT NULL DEFAULT 1`);
+  }
 
   // Every inbound group message, whether or not it was a command. Kept in full
   // because "the client says they approved it" is a dispute that gets settled
