@@ -2,20 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { queryOne, transaction, type ResultSetHeader } from "@/lib/db";
+import { queryOne, transaction } from "@/lib/db";
 import { requireUser, SUPER_ADMIN_ROLES, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { notifyClientById } from "@/lib/notify";
-import { sendInvoiceEmail, sendPaidInvoiceEmail } from "@/lib/email";
-import { paymentLinkForInvoice } from "@/lib/payment-links";
+import { raiseInvoice } from "@/lib/invoicing";
 import { getInvoiceDocument } from "@/lib/payments";
 import { invoiceLink } from "@/lib/doc-link";
 import { groupForClient } from "@/lib/reminder-outbox";
 import { sendDocumentToGroup } from "@/lib/whatsapp-service-client";
-import { getAgencyInbox } from "@/lib/settings";
 import { money } from "@/lib/utils";
 
-const round2 = (x: number) => Math.round(x * 100) / 100;
 const METHODS = ["bank", "upi", "cash", "other"];
 
 /* ----------------------------- Create invoice ----------------------------- */
@@ -35,95 +32,29 @@ export async function createInvoice(formData: FormData): Promise<void> {
     redirect("/payments/new?error=amount");
   }
 
-  const client = await queryOne<{ id: number; company_name: string; email: string | null }>(
-    "SELECT id, company_name, email FROM clients WHERE id = ?",
-    [clientId]
-  );
+  const client = await queryOne<{ id: number }>("SELECT id FROM clients WHERE id = ?", [clientId]);
   if (!client) redirect("/payments/new?error=client");
 
-  const total = round2(amount + tax + processingFee);
-  const lineItems: { description: string; qty: number; rate: number }[] = [
-    { description, qty: 1, rate: amount },
-  ];
-  if (processingFee > 0) {
-    lineItems.push({ description: "Processing fee", qty: 1, rate: processingFee });
-  }
-
-  let invoiceNo = "";
-  // Kept from the transaction rather than looked up again afterwards — the
-  // row was just inserted, so its id is already known.
-  let newInvoiceId = 0;
-  try {
-    ({ invoiceNo, newInvoiceId } = await transaction(async (conn) => {
-      const year = new Date().getFullYear();
-      const [seq] = await conn.execute(
-        "SELECT COUNT(*) AS n FROM invoices WHERE invoice_no LIKE ?",
-        [`INV-${year}-%`]
-      );
-      const nextN = Number((seq as unknown as { n: number }[])[0].n) + 1;
-      const no = `INV-${year}-${String(nextN).padStart(4, "0")}`;
-
-      const [inv] = await conn.execute(
-        `INSERT INTO invoices
-          (invoice_no, client_id, amount, tax, processing_fee, total, status, issue_date, due_date, period_month, notes, line_items, created_by)
-         VALUES (?,?,?,?,?,?,'sent',CURDATE(),?,DATE_FORMAT(CURDATE(),'%Y-%m'),?,?,?)`,
-        [
-          no,
-          clientId,
-          amount,
-          tax,
-          processingFee,
-          total,
-          dueDate,
-          notes,
-          JSON.stringify(lineItems),
-          user.id,
-        ]
-      );
-      const invoiceId = (inv as ResultSetHeader).insertId;
-      await conn.execute(
-        "INSERT INTO payments (invoice_id, client_id, amount, status) VALUES (?,?,?,'pending')",
-        [invoiceId, clientId, total]
-      );
-      return { invoiceNo: no, newInvoiceId: invoiceId };
-    }));
-  } catch {
-    redirect("/payments/new?error=failed");
-  }
-
-  // The portal notification always goes out — it's the client's record of the
-  // invoice. The email is opt-out, ticked by default on the form.
-  await notifyClientById(
-    clientId,
-    "payment_pending",
-    `New invoice ${invoiceNo}`,
-    `Amount: ${money(total)}. View and pay from your portal.`,
-    "/portal/invoices",
-    false
-  );
   /*
-   * The invoice goes out with a link that can actually be paid.
+   * The invoice itself is `raiseInvoice`, which the month plan also calls.
    *
-   * The same link the weekly WhatsApp chase uses, minted here instead so it
-   * exists from the first message rather than the fourth — the moment a client
-   * is most willing to pay is the moment the invoice lands, and until now that
-   * was the one message that asked them to remember a portal password first.
-   *
-   * Cached on the invoice, so the reminder a week later carries this same
-   * link. Awaited rather than fired off: the email needs it, and it is one
-   * request. Failure falls back to the portal page inside `paymentLinkForInvoice`,
-   * so a Razorpay outage delays nobody's invoice.
+   * The number sequence, the invoice row, the pending payment and the
+   * client's notification were all written out here, for this form. A second place that decides to bill would have needed its
+   * own copy — and two implementations of `INV-2026-0007` mint the same number
+   * twice on the same day. What stays here is what is genuinely this form's:
+   * reading a FormData, and where to go afterwards.
    */
-  if (formData.get("send_email") !== null) {
-    const link = newInvoiceId ? await paymentLinkForInvoice(newInvoiceId) : null;
-    sendInvoiceEmail(client!, {
-      invoice_no: invoiceNo,
-      total,
-      due_date: dueDate,
-      payUrl: link?.url ?? null,
-      payable: link?.payable ?? false,
-    }).catch(() => {});
-  }
+  const raised = await raiseInvoice({
+    clientId,
+    amount,
+    tax,
+    processingFee,
+    description,
+    dueDate,
+    notes,
+    createdBy: user.id,
+  }).catch(() => null);
+  if (!raised) redirect("/payments/new?error=failed");
 
   revalidatePath("/payments");
   redirect("/payments");
@@ -180,35 +111,6 @@ export async function markPaid(formData: FormData): Promise<void> {
     "/portal/invoices",
     false
   );
-  // Receipt to the client, plus a copy to the agency's own inbox — unless the
-  // "Email receipt" box was unticked (paid in cash, receipt handed over, etc).
-  if (formData.get("send_email") === null) {
-    revalidatePath("/payments");
-    return;
-  }
-  const agencyInbox = await getAgencyInbox();
-  sendPaidInvoiceEmail(
-    {
-      company_name: payment!.company_name,
-      contact_person: payment!.contact_person,
-      email: payment!.email,
-    },
-    {
-      invoice_no: payment!.invoice_no,
-      amount: payment!.inv_amount,
-      tax: payment!.inv_tax,
-      processing_fee: payment!.inv_fee,
-      total: payment!.amount,
-      method,
-      paid_on: new Date().toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      }),
-    },
-    agencyInbox
-  ).catch(() => {});
-
   revalidatePath("/payments");
 }
 
@@ -308,7 +210,7 @@ export async function sendInvoicePdf(invoiceId: number): Promise<SendInvoiceStat
     return { ok: false, message: "That client isn't one of yours." };
   }
 
-  const group = await groupForClient(inv.client_id);
+  const group = await groupForClient(inv.client_id, "payments");
   if (!group) {
     return {
       ok: false,

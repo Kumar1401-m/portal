@@ -101,22 +101,6 @@ export function InvoiceForm({ clients }: { clients: ClientMini[] }) {
             <span className="text-xl font-semibold tabular-nums">{money(total)}</span>
           </div>
 
-          {/* Whether the client hears about this by email is the super admin's
-              call — sometimes the invoice is raised here and sent elsewhere. */}
-          <label className="flex items-start gap-2.5 rounded-lg border border-border px-4 py-3 text-sm">
-            <input
-              type="checkbox"
-              name="send_email"
-              defaultChecked
-              className="mt-0.5 h-4 w-4 rounded border-input accent-[var(--primary)]"
-            />
-            <span>
-              <span className="font-medium">Email this invoice to the client</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                Untick to raise the invoice quietly. It still appears in their portal either way.
-              </span>
-            </span>
-          </label>
         </CardContent>
       </Card>
 

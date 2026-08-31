@@ -3,16 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
-import { queryOne } from "@/lib/db";
 import {
   generateMonthTasks,
   shiftMonthDates,
-  setTaskDate,
   safeMonth,
   removeTasks,
   respaceMonth,
 } from "@/lib/task-plan";
-import { fmtDate } from "@/lib/utils";
+import { fmtDate, money as fmtMoney } from "@/lib/utils";
+import { monthRangeLabel } from "@/lib/date-range";
+import { saveMonthPlan, clearMonthPlan, monthPlanFor, claimMonthInvoice } from "@/lib/month-plans";
+import { raiseInvoice } from "@/lib/invoicing";
 
 export type PlanState = {
   ok?: boolean;
@@ -136,35 +137,6 @@ export async function respaceMonthAction(
   }
 }
 
-/** Change one task's due date, from the row it sits on. */
-export async function setTaskDateAction(
-  _prev: PlanState,
-  formData: FormData
-): Promise<PlanState> {
-  const ok = await guard(formData);
-  if (!ok) return { error: "You can't change this task." };
-
-  const taskId = Math.trunc(Number(formData.get("task_id")));
-  const raw = String(formData.get("due_date") || "").trim();
-
-  // The task must belong to the client this form was checked against,
-  // otherwise the access check above proves nothing about the row being moved.
-  const owns = await queryOne<{ id: number }>(
-    "SELECT id FROM deliverables WHERE id = ? AND client_id = ?",
-    [taskId, ok.clientId]
-  );
-  if (!owns) return { error: "That task isn't this client's." };
-
-  try {
-    const done = await setTaskDate(taskId, raw || null);
-    if (!done) return { error: "Could not change the date." };
-    refresh(ok.clientId);
-    return { ok: true, message: raw ? "Date changed." : "Date cleared." };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not change the date." };
-  }
-}
-
 /**
  * Add or remove an exact number of tasks, ignoring the contract.
  *
@@ -241,4 +213,130 @@ export async function adjustTasksAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not change the tasks." };
   }
+}
+
+/* ------------------------- A month agreed in advance ------------------------- */
+
+/**
+ * Set what one month owes, and bill it.
+ *
+ * The contract holds one pair of numbers for every month there will ever be,
+ * so "next month they want twelve videos and two extra posters" could only be
+ * recorded by editing the contract — which then reported twelve for the month
+ * just closed as well. This writes the month, and the month is what the
+ * generator fills to and what the progress bars read.
+ *
+ * ## The invoice goes out, once
+ *
+ * Saving a month raises its invoice and sends it — no draft, no second button.
+ * That makes the guard the important part rather than the sending: the invoice
+ * is claimed with a conditional UPDATE on `invoice_id IS NULL`, so a save
+ * pressed twice, a double-click, or a retry after a timeout all find the month
+ * already claimed and send nothing. Only the call that wins the UPDATE bills.
+ *
+ * Correcting a month that has already been billed is deliberately allowed —
+ * the counts and the amount are rewritten and the invoice is left standing.
+ * A wrong invoice is cancelled and reissued on the Payments page, where
+ * invoices live; silently voiding a client's invoice from a planning screen
+ * would be a worse surprise than the one it is fixing.
+ */
+export async function saveMonthPlanAction(
+  _prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  const ok = await guard(formData);
+  if (!ok) return { error: "You can't change this client's plan." };
+
+  const month = safeMonth(String(formData.get("month") || ""));
+  const videos = Math.trunc(Number(formData.get("videos")));
+  const posters = Math.trunc(Number(formData.get("posters")));
+  const amount = Number(formData.get("amount"));
+  const note = String(formData.get("note") || "").trim() || null;
+
+  if (!Number.isFinite(videos) || videos < 0) return { error: "How many videos this month?" };
+  if (!Number.isFinite(posters) || posters < 0) return { error: "How many posters this month?" };
+  if (videos + posters === 0) return { error: "A month with no videos and no posters is not a plan." };
+  if (videos + posters > 200) return { error: "That's more than 200 pieces in one month — check the numbers." };
+  if (!Number.isFinite(amount) || amount < 0) return { error: "Enter the amount for this month." };
+
+  try {
+    const saved = await saveMonthPlan({
+      clientId: ok.clientId,
+      month,
+      videos,
+      posters,
+      amount,
+      note,
+      createdBy: ok.user.id,
+    });
+    if (!saved) {
+      return {
+        error:
+          "The month-plans table isn't there yet. Apply it from Settings → Database, then save again.",
+      };
+    }
+
+    /*
+     * Bill it, if nobody has. `claimMonthInvoice` is what decides — an UPDATE
+     * that only matches while `invoice_id` is null — so this is safe to reach
+     * twice and only one invoice can ever be sent for a month.
+     *
+     * The invoice is raised first and the claim taken after, which is the
+     * order that can only ever fail safe: a crash between them leaves an
+     * invoice that exists and a month that will try again, and a duplicate
+     * caught on the Payments page beats a client billed for a month the portal
+     * thinks it never billed.
+     */
+    const existing = await monthPlanFor(ok.clientId, month);
+    let billed: string | null = existing?.invoiceNo ?? null;
+    let alreadyBilled = Boolean(existing?.invoiceId);
+
+    if (!alreadyBilled && amount > 0) {
+      const raised = await raiseInvoice({
+        clientId: ok.clientId,
+        amount,
+        description: `Content plan — ${monthRangeLabel(month)}`,
+        periodMonth: month,
+        createdBy: ok.user.id,
+      }).catch(() => null);
+
+      if (raised) {
+        const claimed = await claimMonthInvoice(ok.clientId, month, raised.id);
+        // Lost the race to a save a moment earlier: that one's invoice stands
+        // and this one is reported so somebody can void it.
+        if (!claimed) alreadyBilled = true;
+        billed = raised.invoiceNo;
+      }
+    }
+
+    refresh(ok.clientId);
+    const shape = `${videos} video${videos === 1 ? "" : "s"}, ${posters} poster${posters === 1 ? "" : "s"}`;
+    return {
+      ok: true,
+      message:
+        billed && !alreadyBilled
+          ? `${monthRangeLabel(month)}: ${shape}. Invoice ${billed} sent for ${fmtMoney(amount)}.`
+          : billed
+            ? `${monthRangeLabel(month)}: ${shape}. Invoice ${billed} was already raised for this month.`
+            : `${monthRangeLabel(month)}: ${shape}.`,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save the plan." };
+  }
+}
+
+/** Drop a month's own plan, so it follows the contract again. */
+export async function clearMonthPlanAction(
+  _prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  const ok = await guard(formData);
+  if (!ok) return { error: "You can't change this client's plan." };
+
+  const month = safeMonth(String(formData.get("month") || ""));
+  const done = await clearMonthPlan(ok.clientId, month);
+  if (!done) return { error: "Could not clear the plan." };
+  refresh(ok.clientId);
+  // The invoice it raised is untouched and deliberately so — see above.
+  return { ok: true, message: `${monthRangeLabel(month)} follows the contract again.` };
 }

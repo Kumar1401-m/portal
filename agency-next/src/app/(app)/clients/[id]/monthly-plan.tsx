@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import {
   CalendarRange,
@@ -10,26 +10,28 @@ import {
   Loader2,
   Plus,
   Minus,
+  Pencil,
 } from "lucide-react";
 import {
   respaceMonthAction,
   generateMonthAction,
   shiftMonthAction,
-  setTaskDateAction,
   adjustTasksAction,
+  saveMonthPlanAction,
+  clearMonthPlanAction,
   type PlanState,
 } from "./plan-actions";
 import type { MonthPlan, PlannedTask } from "@/lib/task-plan";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { DateField } from "@/components/ui/date-field";
+import { TaskDate } from "../../deliverables/task-date";
 import { Select } from "@/components/ui/select";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { MonthStepper } from "@/components/ui/month-stepper";
 import { monthRangeLabel } from "@/lib/date-range";
-import { label } from "@/lib/utils";
+import { label, money } from "@/lib/utils";
 
 /**
  * The day generated tasks land on: the first of the month, or today if that
@@ -67,35 +69,154 @@ function Note({ state }: { state: PlanState }) {
 }
 
 /**
- * One task's due date, changed where it sits.
+ * What this particular month owes, and what it costs.
  *
- * Saves as soon as a date is picked rather than behind a button: the row is
- * already the thing being edited, and a save button per row is fifteen buttons
- * on a full month, fourteen of which are always wrong to press.
+ * The contract on the client record holds one pair of numbers standing for
+ * every month there will ever be. A client who wants twelve videos in
+ * September instead of the usual eight, and two extra posters, could only be
+ * recorded by editing it — which then reported twelve for August too, and for
+ * every month already closed.
+ *
+ * So a month can be agreed on its own, and agreed *ahead*: step the month
+ * forward and write next month's plan now. Everything else on this card then
+ * reads those numbers instead of the contract's.
+ *
+ * Nothing is calculated. There is no rate table because what a month is worth
+ * is settled in a conversation, and a month with two extra posters is not
+ * reliably a month costing two posters more.
  */
-function TaskDate({ clientId, task }: { clientId: number; task: PlannedTask }) {
-  const [state, action, pending] = useActionState<PlanState, FormData>(setTaskDateAction, {});
-  const form = useRef<HTMLFormElement>(null);
+function AgreeMonth({
+  clientId,
+  plan,
+  contract,
+}: {
+  clientId: number;
+  plan: MonthPlan;
+  /** What the contract says, shown as the placeholder when nothing is agreed. */
+  contract: { videos: number; posters: number; amount: number };
+}) {
+  const [state, save, saving] = useActionState<PlanState, FormData>(saveMonthPlanAction, {});
+  const [clearState, clear, clearing] = useActionState<PlanState, FormData>(
+    clearMonthPlanAction,
+    {}
+  );
+  const [open, setOpen] = useState(false);
+  const agreed = plan.agreed;
 
   return (
-    <form ref={form} action={action} className="flex items-center gap-2">
-      <input type="hidden" name="client_id" value={clientId} />
-      <input type="hidden" name="task_id" value={task.id} />
-      <DateField
-        name="due_date"
-        defaultValue={task.due_date ? String(task.due_date).slice(0, 10) : ""}
-        onChange={() => form.current?.requestSubmit()}
-        aria-label={`Posting date for ${task.title}`}
-        className="w-[11rem]"
-      />
-      {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
-      {!pending && state.ok ? <Check className="h-3.5 w-3.5 text-success" /> : null}
-      {!pending && state.error ? (
-        <span title={state.error}>
-          <TriangleAlert className="h-3.5 w-3.5 text-destructive" />
-        </span>
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">This month</p>
+          <p className="text-sm">
+            {agreed ? (
+              <>
+                <b className="tabular-nums">{money(agreed.amount)}</b> agreed for{" "}
+                {plan.videoTarget} video{plan.videoTarget === 1 ? "" : "s"} and{" "}
+                {plan.posterTarget} poster{plan.posterTarget === 1 ? "" : "s"}
+                {agreed.invoiceNo ? (
+                  <span className="text-muted-foreground"> · invoice {agreed.invoiceNo}</span>
+                ) : null}
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                Following the contract — {contract.videos} video
+                {contract.videos === 1 ? "" : "s"}, {contract.posters} poster
+                {contract.posters === 1 ? "" : "s"}
+                {contract.amount ? `, ${money(contract.amount)}` : ""}.
+              </span>
+            )}
+          </p>
+          {agreed?.note ? <p className="mt-1 text-xs text-muted-foreground">{agreed.note}</p> : null}
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={buttonClasses({ variant: "ghost", size: "sm" })}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {agreed ? "Change" : "Agree this month"}
+        </button>
+      </div>
+
+      {open ? (
+        <>
+          <form action={save} className="mt-3 space-y-2">
+            <input type="hidden" name="client_id" value={clientId} />
+            <input type="hidden" name="month" value={plan.month} />
+            <div className="grid gap-2 sm:grid-cols-3">
+              <label className="space-y-1 text-xs">
+                <span className="text-muted-foreground">Videos</span>
+                <Input
+                  name="videos"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={agreed ? plan.videoTarget : contract.videos}
+                />
+              </label>
+              <label className="space-y-1 text-xs">
+                <span className="text-muted-foreground">Posters</span>
+                <Input
+                  name="posters"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={agreed ? plan.posterTarget : contract.posters}
+                />
+              </label>
+              <label className="space-y-1 text-xs">
+                <span className="text-muted-foreground">Amount for this month (₹)</span>
+                <Input
+                  name="amount"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={agreed ? agreed.amount : contract.amount || ""}
+                />
+              </label>
+            </div>
+            <Input name="note" placeholder="What was agreed (optional)" defaultValue={agreed?.note ?? ""} />
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="submit" disabled={saving} className={buttonClasses({ size: "sm" })}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Save this month
+              </button>
+              {/*
+                Said plainly, because it is the part that reaches the client.
+                Saving raises the invoice and sends it; saving again never
+                sends a second one — the month is claimed by the first.
+              */}
+              <span className="text-xs text-muted-foreground">
+                {agreed?.invoiceNo
+                  ? `Invoice ${agreed.invoiceNo} already sent for this month — saving again won't send another.`
+                  : "The invoice goes to the client when you save."}
+              </span>
+            </div>
+          </form>
+          <Note state={state} />
+
+          {agreed ? (
+            <form action={clear} className="mt-2">
+              <input type="hidden" name="client_id" value={clientId} />
+              <input type="hidden" name="month" value={plan.month} />
+              <button
+                type="submit"
+                disabled={clearing}
+                className={buttonClasses({ variant: "ghost", size: "sm" })}
+              >
+                {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Back to the contract
+              </button>
+              <span className="ml-2 text-xs text-muted-foreground">
+                Any invoice already raised stays — cancel it on the Payments page.
+              </span>
+            </form>
+          ) : null}
+          <Note state={clearState} />
+        </>
       ) : null}
-    </form>
+    </div>
   );
 }
 
@@ -112,12 +233,15 @@ export function MonthlyPlan({
   plan,
   tasks,
   canForce = false,
+  contract,
 }: {
   clientId: number;
   plan: MonthPlan;
   tasks: PlannedTask[];
   /** Super admin only — deleting work somebody has started. */
   canForce?: boolean;
+  /** What the client record says, for the months that follow it. */
+  contract: { videos: number; posters: number; amount: number };
 }) {
   const [genState, generate, generating] = useActionState<PlanState, FormData>(
     generateMonthAction,
@@ -169,6 +293,13 @@ export function MonthlyPlan({
       </CardHeader>
 
       <CardContent className="space-y-4 text-sm">
+        {/*
+          Above the targets, not inside them: a client with nothing on their
+          contract can still be agreed a month, and that is exactly the client
+          the branch below tells to go and edit their contract.
+        */}
+        <AgreeMonth clientId={clientId} plan={plan} contract={contract} />
+
         {noTargets ? (
           <p className="text-xs text-muted-foreground">
             This client has no monthly video or poster count set, so there is nothing to plan
@@ -407,7 +538,7 @@ export function MonthlyPlan({
                   <Badge tone={statusTone(t.status)}>{label(t.status)}</Badge>
                 </TD>
                 <TD>
-                  <TaskDate clientId={clientId} task={t} />
+                  <TaskDate taskId={t.id} title={t.title} dueDate={t.due_date} compact={false} />
                 </TD>
               </TR>
             ))}

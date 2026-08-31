@@ -10,11 +10,6 @@ import { env } from "./env";
 const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
-const money = (n: number | string) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(
-    Number(n || 0)
-  );
-
 function wrap(title: string, bodyHtml: string) {
   return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;background:#fff;border:1px solid #eee;border-radius:12px;overflow:hidden">
     <div style="background:linear-gradient(135deg,#ea580c,#f59e0b);padding:20px 24px;color:#fff">
@@ -120,42 +115,6 @@ export async function sendStaffWelcomeEmail(
 }
 
 /**
- * The invoice itself, when it is first raised.
- *
- * `payUrl` is a real payment link when one could be made, and the portal
- * otherwise. It used to always be the portal, which asked a client to remember
- * a password in order to give us money — at the one moment they were most
- * willing to. The WhatsApp reminder chasing this same invoice a week later
- * carried a payable link, so the friction was worst on the first message and
- * best on the fourth.
- */
-export async function sendInvoiceEmail(
-  client: { company_name: string; email?: string | null },
-  invoice: {
-    invoice_no: string;
-    total: number | string;
-    due_date?: string | null;
-    payUrl?: string | null;
-    payable?: boolean;
-  }
-) {
-  const payable = Boolean(invoice.payable && invoice.payUrl);
-  return sendEmail(
-    client.email,
-    `Invoice ${invoice.invoice_no}`,
-    `Invoice ${invoice.invoice_no}`,
-    `<p>Hi ${esc(client.company_name)},</p>
-     <p>Your invoice <b>${esc(invoice.invoice_no)}</b> for <b>${money(invoice.total)}</b> is ready${
-       invoice.due_date ? ` (due ${esc(invoice.due_date)})` : ""
-     }.</p>` +
-      button(invoice.payUrl || "/portal", payable ? "Pay now" : "View & pay") +
-      (payable
-        ? `<p style="color:#6b7280;font-size:13px">Opens straight into UPI, card or net banking — no login needed.</p>`
-        : "")
-  );
-}
-
-/**
  * Asks the client to approve work. Used for both gates — the content brief
  * (`stage: "content"`) and the finished deliverable (`stage: "final"`).
  */
@@ -181,75 +140,6 @@ export async function sendApprovalRequestEmail(
      ${button(item.link || "/portal", "Review & approve")}
      <p style="color:#6b7280;font-size:13px">Nothing moves forward until you approve, so we'll hold here until we hear from you.</p>`
   );
-}
-
-/**
- * Paid invoice / receipt, sent once a payment succeeds. Goes to the client and
- * to the agency's own inbox, so both sides keep a record. `agencyEmail` is the
- * company address from Settings, falling back to the super admin's login.
- */
-export async function sendPaidInvoiceEmail(
-  client: { company_name: string; contact_person?: string | null; email?: string | null },
-  invoice: {
-    invoice_no?: string | null;
-    amount?: number | string | null;
-    tax?: number | string | null;
-    processing_fee?: number | string | null;
-    total: number | string;
-    method?: string | null;
-    reference?: string | null;
-    paid_on?: string | null;
-  },
-  agencyEmail?: string | null
-): Promise<{ client: boolean; agency: boolean }> {
-  const row = (l: string, v: string, strong = false) =>
-    `<tr>
-       <td style="padding:6px 0;color:#6b7280">${esc(l)}</td>
-       <td style="padding:6px 0;text-align:right;${strong ? "font-weight:700;font-size:16px" : ""}">${v}</td>
-     </tr>`;
-
-  const lines = [
-    invoice.invoice_no ? row("Invoice", esc(invoice.invoice_no)) : "",
-    invoice.amount != null && Number(invoice.amount) > 0 ? row("Amount", money(invoice.amount)) : "",
-    invoice.tax != null && Number(invoice.tax) > 0 ? row("Tax", money(invoice.tax)) : "",
-    invoice.processing_fee != null && Number(invoice.processing_fee) > 0
-      ? row("Processing fee", money(invoice.processing_fee))
-      : "",
-    row("Total paid", money(invoice.total), true),
-    invoice.method ? row("Method", esc(invoice.method.toUpperCase())) : "",
-    invoice.reference ? row("Reference", esc(invoice.reference)) : "",
-    invoice.paid_on ? row("Paid on", esc(invoice.paid_on)) : "",
-  ]
-    .filter(Boolean)
-    .join("");
-
-  const table = `<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">${lines}</table>`;
-  const label = invoice.invoice_no ? `Invoice ${invoice.invoice_no}` : "Payment";
-
-  const toClient = await sendEmail(
-    client.email,
-    `${label} — paid`,
-    "Payment received ✓",
-    `<p>Hi ${esc(client.contact_person || client.company_name)},</p>
-     <p>Thank you — we've received your payment. Here's your receipt:</p>
-     ${table}
-     <p>Keep this email for your records. You can also see it any time in your portal.</p>
-     ${button("/portal/invoices", "View invoices")}`
-  );
-
-  // Agency copy — same figures, framed as an internal record.
-  const toAgency = agencyEmail
-    ? await sendEmail(
-        agencyEmail,
-        `${label} paid — ${client.company_name}`,
-        "Payment received ✓",
-        `<p><b>${esc(client.company_name)}</b> has paid.</p>
-         ${table}
-         ${button("/payments", "Open payments")}`
-      )
-    : false;
-
-  return { client: toClient, agency: toAgency };
 }
 
 /**
