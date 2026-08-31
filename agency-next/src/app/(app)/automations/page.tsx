@@ -1,5 +1,16 @@
 import Link from "next/link";
-import { Workflow, Bot, Hand, ChevronRight, CircleDot } from "lucide-react";
+import {
+  Workflow,
+  Bot,
+  Hand,
+  ChevronRight,
+  CircleDot,
+  Sparkles,
+  Wrench,
+  TriangleAlert,
+  CheckCircle2,
+} from "lucide-react";
+import { publishBlockers } from "@/lib/instagram";
 import { requireUser, ADMIN_ROLES } from "@/lib/auth";
 import {
   NODES,
@@ -7,6 +18,8 @@ import {
   liveCounts,
   jobStatuses,
   HEALTH_TEXT,
+  AI_STEPS,
+  whyLate,
   type Health,
   type NodeKey,
 } from "@/lib/automation-map";
@@ -53,7 +66,20 @@ export default async function AutomationsPage() {
 
   // The clock is read inside `jobStatuses` — a component may not call
   // `Date.now()` during render, and "overdue" must not change on a re-render.
-  const [counts, jobs] = await Promise.all([liveCounts(), jobStatuses()]);
+  const [counts, jobs, blockers] = await Promise.all([
+    liveCounts(),
+    jobStatuses(),
+    /*
+     * Why nothing is going out, which the heartbeats above cannot say.
+     *
+     * A run that finds nothing due reports success and looks perfectly
+     * healthy — because from its own point of view it is. Everything that
+     * stops a post is a condition the queue simply filters on, so the work
+     * disappears silently and the only symptom is a client noticing their
+     * feed went quiet.
+     */
+    publishBlockers().catch(() => []),
+  ]);
 
   const node = (key: NodeKey) => NODES.find((n) => n.key === key)!;
   const automated = EDGES.filter((e) => e.automated).length;
@@ -68,6 +94,66 @@ export default async function AutomationsPage() {
           Where the work is sitting, what moves it on, and whether that is still running.
         </p>
       </div>
+
+      {/*
+        First on the page, above the pipeline, because it is the answer to the
+        question somebody opens this page with.
+      */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            {blockers.length ? (
+              <TriangleAlert className="h-4 w-4 text-warning" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 text-success" />
+            )}
+            Why work is not going out
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Approved work the publisher will pass over, and the reason. A run with nothing to do
+            reports success — so an empty queue and a broken setup look identical from the
+            heartbeats below.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {blockers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing is stuck. Everything approved either has its slot and is waiting for it, or
+              has already gone out.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {blockers.map((b) => (
+                <div key={b.key} className="rounded-lg border border-border p-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-medium">{b.reason}</p>
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
+                      {b.count} {b.count === 1 ? "task" : "tasks"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{b.fix}</p>
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                    {b.examples.map((e) => (
+                      <Link
+                        key={e.id}
+                        href={`/deliverables/${e.id}`}
+                        className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-primary hover:underline"
+                      >
+                        {e.company} — {e.title}
+                      </Link>
+                    ))}
+                    {b.count > b.examples.length ? (
+                      <span className="text-xs text-muted-foreground">
+                        +{b.count - b.examples.length} more
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -173,10 +259,28 @@ export default async function AutomationsPage() {
                     {j.run?.ran_at ? `Last ran ${prettyLocal(j.run.ran_at)}` : "No run recorded yet"}
                     {j.run?.summary ? ` — ${j.run.summary}` : ""}
                   </p>
+                  {/*
+                    What to actually do about it.
+
+                    "Overdue" names the symptom and stops, which is how a red
+                    badge sits on a page for a month. The cause has never yet
+                    been in this codebase — it is that nothing is calling the
+                    endpoint often enough — and that is not a thing anybody
+                    guesses from the word "Overdue".
+                  */}
+                  {whyLate(j.key, j.health) ? (
+                    <p className="mt-1 flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
+                      <Wrench className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>{whyLate(j.key, j.health)}</span>
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {/* The badge carries the word, not just the colour. */}
                   <Badge tone={HEALTH_TONE[j.health]}>{HEALTH_TEXT[j.health]}</Badge>
+                  {j.key === "publishing" ? (
+                    <RunNow job="publishing" label="Published what was due" />
+                  ) : null}
                   {j.key === "insights_sync" ? (
                     <RunNow job="insights_sync" label="Read from Instagram" />
                   ) : null}
@@ -197,6 +301,42 @@ export default async function AutomationsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        What the AI does, written down.
+
+        The calls are scattered across a dozen modules; some fire on a
+        schedule, some when a button is pressed, and none of them announce
+        themselves — so "AI" had become a word meaning something unspecified
+        was happening somewhere. Only real call sites are listed: a list that
+        flattered the portal would cost the credibility of the rest of it the
+        first time somebody went looking for one.
+      */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4 text-primary" />
+            What the AI does
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Every place a model is used, in the order work meets them. Nothing else in the portal
+            calls one.
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          {AI_STEPS.map((step) => (
+            <Link
+              key={step.label}
+              href={step.href}
+              className="rounded-lg border border-border p-3 transition-colors hover:bg-muted/50"
+            >
+              <p className="text-sm font-medium">{step.label}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{step.does}</p>
+              <p className="mt-1.5 text-xs text-muted-foreground/80">{step.when}</p>
+            </Link>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

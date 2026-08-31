@@ -148,7 +148,8 @@ export const JOBS: { key: string; label: string; hint: string; everyMinutes: num
   {
     key: "publishing",
     label: "Publishing",
-    hint: "Puts approved reels on Instagram and Facebook when their slot arrives",
+    hint:
+      "Puts approved reels on Instagram and Facebook when their slot arrives, and keeps the 12h/24h approval clock",
     everyMinutes: 15,
   },
   {
@@ -194,6 +195,16 @@ export const JOBS: { key: string; label: string; hint: string; everyMinutes: num
     everyMinutes: 60 * 24 * 31,
   },
 ];
+
+/**
+ * The jobs whose silence actually costs something.
+ *
+ * Not every job here is worth interrupting a morning for — a late ad sync
+ * means a stale number, and the board says so itself. These three are the ones
+ * whose stopping means work the agency promised is simply not happening:
+ * nothing publishes, nothing is chased, and nothing scheduled goes out.
+ */
+export const CRITICAL_JOBS = ["publishing", "whatsapp_outbox", "whatsapp_reminders"];
 
 export type Health = "ok" | "late" | "never" | "failing";
 
@@ -286,4 +297,114 @@ export async function jobStatuses(): Promise<JobStatus[]> {
     const run = runs[j.key];
     return { ...j, run, health: health(run, j.everyMinutes, now) };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * What the AI actually does
+ * ------------------------------------------------------------------ */
+
+/**
+ * Every place a model is called, in the order work meets them.
+ *
+ * Written because somebody who runs this agency said, plainly, that they could
+ * not tell what the AI was doing. That is a fair thing not to know: the calls
+ * are scattered across a dozen modules, some fire on a schedule, some when a
+ * button is pressed, and none of them announce themselves. "AI" had become a
+ * word that meant something unspecified was happening somewhere.
+ *
+ * So it is written down once, next to the machine it belongs to. Only real
+ * call sites are listed — a list that flatters the portal with things it does
+ * not do would be worse than no list, because the first time somebody looked
+ * for one of them they would stop believing the rest.
+ */
+export type AiStep = {
+  label: string;
+  /** What it does, in the words somebody would use out loud. */
+  does: string;
+  /** What sets it off. */
+  when: string;
+  /** Where the result shows up. */
+  href: string;
+};
+
+export const AI_STEPS: AiStep[] = [
+  {
+    label: "Watches the video",
+    does:
+      "Frames from across the whole runtime and the sound track go to the model, and it says " +
+      "what is in the video — what happens, whether a person is on screen, what is said.",
+    when: "When a video is uploaded, and again overnight for anything that was missed.",
+    href: "/deliverables",
+  },
+  {
+    label: "Writes the caption",
+    does:
+      "From what it saw, plus the client's own brief — their audience, tone, banned words, the " +
+      "city they trade in — it writes the caption and the hashtags. It never invents an owner, " +
+      "a business name or a contact detail that is not in the brief.",
+    when: "Straight after it has watched the video, and whenever Regenerate is pressed.",
+    href: "/deliverables",
+  },
+  {
+    label: "Suggests what to post",
+    does: "Content ideas and poster briefs for a client, built from what that client is for.",
+    when: "In the Studio, when somebody asks for ideas.",
+    href: "/studio",
+  },
+  {
+    label: "Answers the client in WhatsApp",
+    does:
+      "Ordinary messages in a client's group get a reply — but only in groups ticked for it, " +
+      "and never for an approval command, which is handled by the rules and not by a model.",
+    when: "When a client writes in a group where Assistant replies is ticked.",
+    href: "/settings/whatsapp",
+  },
+  {
+    label: "Answers you",
+    does:
+      "The portal assistant. It is given a snapshot already filtered to what you are allowed " +
+      "to see, and never the database — so it cannot be talked into another client's numbers.",
+    when: "When you ask it something.",
+    href: "/assistant",
+  },
+  {
+    label: "Works out what changed",
+    does:
+      "The Marketing Brain reads each client's numbers and says what moved and what it thinks " +
+      "caused it, and the night shift turns that into what needs you tomorrow.",
+    when: "Overnight.",
+    href: "/ai",
+  },
+];
+
+/**
+ * What to actually do about a job that is not running.
+ *
+ * "Overdue" and "Never run" name the symptom and stop there, which is how a
+ * red badge sits on a page for a month. In every case seen so far the cause
+ * has been the same and it is not in this codebase: nothing is calling the
+ * endpoint often enough. Vercel's free plan fires two cron jobs, once a day
+ * each, and the schedule this map expects is quarter-hourly — so a job can be
+ * perfectly written, perfectly deployed, and still only run at breakfast.
+ */
+export function whyLate(key: string, state: Health): string | null {
+  if (state === "ok") return null;
+
+  const clock =
+    "Nothing is calling this often enough. Vercel's free plan only fires two cron jobs and " +
+    "only once a day — set up the Apps Script clock in automation/apps-script/ to call it " +
+    "every 15 minutes, or run it by hand with the button above.";
+
+  if (state === "never") {
+    return (
+      "This has never run at all. Either the schedule was never wired up, or every attempt " +
+      "failed before it could record itself. " + clock
+    );
+  }
+  if (state === "failing") {
+    return "It ran and could not finish. The reason is in the line above — fix that, then run it by hand.";
+  }
+  return key === "publishing" || key === "whatsapp_outbox"
+    ? "This is the one that has to be frequent — it is what makes a scheduled time mean anything. " + clock
+    : clock;
 }

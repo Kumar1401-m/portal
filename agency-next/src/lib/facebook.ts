@@ -21,13 +21,20 @@
 import "server-only";
 import { execute, hasColumn, queryOne } from "./db";
 import { env } from "./env";
-import { resolveVideoUrl } from "./storage";
+import { resolveVideoUrl, directDownloadUrl } from "./storage";
 import { composeCaption, mediaTypeFor } from "./instagram";
 
 const GRAPH = "https://graph.facebook.com";
 
 export type FacebookOutcome =
-  | { ok: true; postId: string }
+  /**
+   * `permalink` is Meta's own answer for where it went; null if it would not say.
+   *
+   * `onFeed` is whether a story was created on the Page. False means the media
+   * is in the Page's library and not on its timeline — posted, and invisible
+   * to anybody who did not go looking for it.
+   */
+  | { ok: true; postId: string; permalink: string | null; onFeed: boolean }
   /** Nothing was attempted — no Page configured. Not a failure. */
   | { ok: false; skipped: true; reason: string }
   | { ok: false; skipped?: false; error: string };
@@ -55,11 +62,15 @@ type Input = {
 /**
  * Post to the Page, and record the outcome either way.
  *
- * `/{page-id}/videos` with `file_url` is deliberately chosen over the Reels
- * API. Both put a video on the Page; this one hands Meta a URL and lets it
- * fetch the bytes, which is the one shape a serverless function can do — the
- * Reels endpoint is a three-phase resumable upload of the file itself, which
- * is the same reason YouTube had to move to n8n.
+ * A video is offered as a **Reel** first and only falls back to
+ * `/{page-id}/videos`. That order is the whole point of `publishReel` below —
+ * `/videos` frequently takes the file and creates no post for it, which is
+ * indistinguishable from success on our side and invisible on the Page.
+ *
+ * The fallback stays because not every video is a Reel: too long, too wide,
+ * too small, and Meta refuses. A video in the Page's library is worse than a
+ * Reel and better than nothing, and when that is what happened the row says
+ * so and somebody is told.
  */
 export async function publishToPage(input: Input): Promise<FacebookOutcome> {
   const { deliverableId, pageId, token, mediaUrl, mediaType, caption } = input;
@@ -73,6 +84,34 @@ export async function publishToPage(input: Input): Promise<FacebookOutcome> {
   }
 
   const v = env.meta.apiVersion;
+
+  /*
+   * A video is a Reel first, and a library upload only if that is refused.
+   *
+   * A published Reel is a post on the Page — it has a story, it is on the
+   * timeline, and it is the surface Facebook actually shows video on now.
+   * `/videos` gives none of that reliably, which is the bug this exists to
+   * fix; see `publishReel`.
+   *
+   * A photo skips all of it. `/photos` has always come back with a `post_id`
+   * and has never had this problem.
+   */
+  let reelError: string | null = null;
+  if (mediaType !== "IMAGE") {
+    const reel = await publishReel(pageId, token, mediaUrl, caption);
+    if ("videoId" in reel) {
+      // Meta's own address for it if it will give one; the reel URL built from
+      // the id if not. `facebookPermalink` already knew this shape.
+      const permalink =
+        (await pagePermalink(reel.videoId, token)) ?? facebookPermalink(reel.videoId);
+      await record(deliverableId, "posted", reel.videoId, null, permalink);
+      return { ok: true, postId: reel.videoId, permalink, onFeed: true };
+    }
+    // Kept, not thrown away: if the fallback also disappoints, the reason the
+    // Reel was refused is the more useful half of the explanation.
+    reelError = reel.error;
+  }
+
   // A photo takes `url` + `caption`; a video takes `file_url` + `description`.
   // Same two facts, different spelling, and getting it the wrong way round
   // fails with a message about a missing parameter rather than the real cause.
@@ -97,15 +136,47 @@ export async function publishToPage(input: Input): Promise<FacebookOutcome> {
       error?: { message?: string; code?: number; error_subcode?: number };
     };
 
-    const postId = json.post_id || json.id;
+    /*
+     * `post_id` is a story on the Page. `id` alone is not.
+     *
+     * These are two different outcomes and this treated them as one. A photo
+     * comes back with both, and the `post_id` is the feed story everybody can
+     * see. A video can come back with `id` and no `post_id` at all — Meta has
+     * taken the file into the Page's **video library** and created no story
+     * for it, so nothing appears on the Page's timeline and nobody scrolling
+     * past ever sees it.
+     *
+     * Recorded as posted either way, because the media genuinely is on the
+     * Page and calling it a failure would invite a retry that posts to
+     * Instagram a second time. What changes is that we stop *claiming* a feed
+     * post that does not exist: the client is not told it is live there, and
+     * somebody is told why it is not.
+     */
+    const feedStory = json.post_id ?? null;
+    const postId = feedStory || json.id;
     if (!res.ok || json.error || !postId) {
       const message = explain(json.error?.message, json.error?.code);
-      await record(deliverableId, "failed", null, message);
-      return { ok: false, error: message };
+      // Both refusals, because they are usually different and the Reel's is
+      // usually the one worth acting on.
+      const full = reelError ? `${message} As a Reel: ${reelError}` : message;
+      await record(deliverableId, "failed", null, full);
+      return { ok: false, error: full };
     }
 
-    await record(deliverableId, "posted", postId, null);
-    return { ok: true, postId };
+    const permalink = await pagePermalink(postId, token);
+    await record(
+      deliverableId,
+      "posted",
+      postId,
+      feedStory
+        ? null
+        : "Facebook took the video into the Page's video library but created no post on the " +
+          "Page, so it is not on the timeline. It was offered as a Reel first and refused" +
+          (reelError ? ` — ${reelError}` : ".") +
+          " Post it from Meta Business Suite.",
+      permalink
+    );
+    return { ok: true, postId, permalink, onFeed: Boolean(feedStory) };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Facebook did not answer.";
     await record(deliverableId, "failed", null, message);
@@ -171,22 +242,151 @@ export function explain(message: string | undefined, code: number | undefined): 
  * migration still records posted-or-failed and simply does not keep the
  * detail, which is better than a publish that throws on an UPDATE.
  */
+/**
+ * Where the post actually lives, asked rather than assembled.
+ *
+ * Publishing a photo answers with a `post_id` shaped `{page}_{post}`, which
+ * makes a working /posts/ link. Publishing a VIDEO answers with a bare video
+ * id and no post id at all — there is nothing in it to say which surface it
+ * is on, and a link built by guessing sent people to unrelated content on a
+ * client's own account.
+ *
+ * `permalink_url` is Meta's answer to exactly that question, and it costs one
+ * request at the moment of publishing. Best-effort: a failure here must never
+ * turn a published post into a failed one, and the id is still stored either
+ * way.
+ */
+/**
+ * One video, published as a Reel, in the three phases Meta requires.
+ *
+ * ## Why this exists
+ *
+ * `/{page-id}/videos` puts the file on the Page and frequently creates no
+ * post for it: Meta answers with an `id` and no `post_id`, the video lands in
+ * the Page's video library, and nothing appears on the timeline. Every screen
+ * in this portal read that as a successful Facebook post, because it was
+ * recorded as one — and the client, who only ever looks at the Page, saw
+ * nothing there for weeks and eventually asked why.
+ *
+ * A Reel is not a file on a Page, it is a post. Phase three publishes it,
+ * and video on Facebook is shown as Reels now, so it lands where somebody
+ * scrolling will actually pass it.
+ *
+ * ## Three phases, and still not one byte through us
+ *
+ * The comment this replaces ruled the Reels API out as "a three-phase
+ * resumable upload of the file itself" — true of one of its two modes. The
+ * other is a **hosted file**: phase two posts to the URL phase one hands
+ * back, carrying the media's own address in a `file_url` header, and Meta
+ * fetches the bytes itself. That is the same shape `/videos` used and the
+ * same URL Instagram has just been given, so this stays inside what a
+ * serverless function can do.
+ *
+ * Never throws. A refused Reel has a fallback waiting, and a fallback that
+ * only runs when the failure was tidy is not a fallback.
+ */
+async function publishReel(
+  pageId: string,
+  token: string,
+  mediaUrl: string,
+  caption: string
+): Promise<{ videoId: string } | { error: string }> {
+  type Reply = {
+    video_id?: string;
+    upload_url?: string;
+    success?: boolean;
+    error?: { message?: string; code?: number };
+  };
+  const send = async (url: string, init: RequestInit): Promise<Reply> =>
+    (await (await fetch(url, init)).json().catch(() => ({}))) as Reply;
+
+  const v = env.meta.apiVersion;
+  const reels = `${GRAPH}/${v}/${pageId}/video_reels`;
+
+  try {
+    const started = await send(reels, {
+      method: "POST",
+      body: new URLSearchParams({ upload_phase: "start", access_token: token }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!started.video_id || !started.upload_url) {
+      return { error: explain(started.error?.message, started.error?.code) };
+    }
+
+    /*
+     * The address, not the file — and Meta fetches it during this call, so
+     * this is the slow phase. The same two minutes `/videos` is given, for
+     * the same reason.
+     */
+    const sent = await send(started.upload_url, {
+      method: "POST",
+      headers: { Authorization: `OAuth ${token}`, file_url: mediaUrl },
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (sent.error || sent.success === false) {
+      return { error: explain(sent.error?.message, sent.error?.code) };
+    }
+
+    // Nothing is on the Page until this. A start and an upload with no finish
+    // leaves a draft nobody can see, which is the outcome being fixed.
+    const done = await send(reels, {
+      method: "POST",
+      body: new URLSearchParams({
+        upload_phase: "finish",
+        video_id: started.video_id,
+        video_state: "PUBLISHED",
+        description: caption,
+        access_token: token,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (done.error || done.success === false) {
+      return { error: explain(done.error?.message, done.error?.code) };
+    }
+    return { videoId: started.video_id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Facebook did not answer." };
+  }
+}
+
+async function pagePermalink(postId: string, token: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${GRAPH}/${env.meta.apiVersion}/${postId}?fields=permalink_url&access_token=${encodeURIComponent(token)}`,
+      { signal: AbortSignal.timeout(15_000) }
+    );
+    const json = (await res.json().catch(() => ({}))) as { permalink_url?: string };
+    const url = json.permalink_url;
+    if (!url) return null;
+    // Meta returns some of these relative to facebook.com.
+    return url.startsWith("http") ? url : `https://www.facebook.com${url}`;
+  } catch {
+    return null;
+  }
+}
+
 async function record(
   deliverableId: number,
   status: "posted" | "failed",
   postId: string | null,
-  error: string | null
+  error: string | null,
+  permalink: string | null = null
 ): Promise<void> {
   try {
-    const [hasId, hasError] = await Promise.all([
+    const [hasId, hasError, hasLink] = await Promise.all([
       hasColumn("deliverables", "facebook_post_id"),
       hasColumn("deliverables", "facebook_error"),
+      hasColumn("deliverables", "facebook_permalink"),
     ]);
     const sets = ["facebook_status = ?"];
     const params: (string | null)[] = [status];
     if (hasId) {
       sets.push("facebook_post_id = ?");
       params.push(postId);
+    }
+    if (hasLink) {
+      sets.push("facebook_permalink = ?");
+      params.push(permalink);
     }
     if (hasError) {
       sets.push("facebook_error = ?");
@@ -324,6 +524,34 @@ export async function checkPageConnection(clientId: number): Promise<PageConnect
  * Checked against the Graph API rather than reasoned about: a real Page's
  * videos return `permalink_url: "/reel/<id>/"`.
  */
+/**
+ * The best Facebook link we have for a row.
+ *
+ * What Meta said, when we asked it — and only otherwise a link derived from a
+ * stored id, which works for a photo and is impossible for a video. Every
+ * reader goes through here so none of them has to remember that.
+ */
+export function facebookLinkOf(row: {
+  facebook_permalink?: string | null;
+  facebook_post_id?: string | null;
+}): string | null {
+  return row.facebook_permalink || facebookPermalink(row.facebook_post_id ?? null);
+}
+
+/**
+ * The fallback, for rows published before the real link was kept.
+ *
+ * Both branches are what the note above established against the real Graph
+ * API, and they are left exactly as they were: rows from before
+ * `facebook_permalink` existed have nothing else, and replacing a link that
+ * works with none would be worse than the problem being fixed.
+ *
+ * What changed is that this is no longer the *only* answer. Deriving an
+ * address from an id means knowing which surface Meta filed the post under,
+ * and that is knowledge with a shelf life — the same id can be a Reel or a
+ * feed post depending on how Meta handled it that day, and nothing in the id
+ * says which. New posts ask outright and keep the answer; see `pagePermalink`.
+ */
 export function facebookPermalink(postId: string | null): string | null {
   if (!postId) return null;
   return postId.includes("_")
@@ -356,6 +584,8 @@ export async function publishToPageNow(
     caption: string | null;
     hashtags: string | null;
     content_category: string | null;
+    service: string | null;
+    video_type: string | null;
     cloud_video_url: string | null;
     cloud_video_key: string | null;
     edited_link: string | null;
@@ -363,7 +593,7 @@ export async function publishToPageNow(
     fb_page_id: string | null;
     ig_access_token: string | null;
   }>(
-    `SELECT d.id, d.caption, d.hashtags, d.content_category,
+    `SELECT d.id, d.caption, d.hashtags, d.content_category, d.service, d.video_type,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
             d.facebook_status, c.fb_page_id, c.ig_access_token
        FROM deliverables d JOIN clients c ON c.id = d.client_id
@@ -383,11 +613,13 @@ export async function publishToPageNow(
     return { ok: false, skipped: true, reason: "This is already on the Page." };
   }
 
+  // Same resolution the publish queue uses, Drive rewrite included — a poster
+  // submitted as a Drive link is postable, a Canva link is a web page.
   const mediaUrl =
     (await resolveVideoUrl(row.cloud_video_key, row.cloud_video_url, 6 * 60 * 60)) ||
-    row.edited_link;
+    directDownloadUrl(row.edited_link);
   if (!mediaUrl) {
-    return { ok: false, error: "There is no finished video on this task to post." };
+    return { ok: false, error: "There is no finished file on this task to post." };
   }
 
   return publishToPage({
@@ -397,7 +629,7 @@ export async function publishToPageNow(
     mediaUrl,
     // The same rule the Instagram queue uses, so a poster does not get sent to
     // the video endpoint because it was posted from a different button.
-    mediaType: mediaTypeFor(row.cloud_video_key || mediaUrl, row.content_category),
+    mediaType: mediaTypeFor(row.cloud_video_key || mediaUrl, row.content_category, row),
     caption: composeCaption(row.caption, row.hashtags),
   });
 }

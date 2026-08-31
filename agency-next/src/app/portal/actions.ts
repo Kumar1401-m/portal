@@ -2,14 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { queryOne, execute, hasColumn } from "@/lib/db";
-import { publishHandoff } from "@/lib/instagram";
+import { approvalHandoff } from "@/lib/instagram";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { notifyAdmins } from "@/lib/notify";
-import { nextBestPostTime, AUTO_SCHEDULE_CATEGORIES } from "@/lib/posting";
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/razorpay";
-import { sendPaidInvoiceEmail } from "@/lib/email";
 import { ACCEPTS_RAW, rawUploadStatus } from "@/lib/portal";
-import { getAgencyInbox } from "@/lib/settings";
 
 export type PortalActionState = { ok: boolean; error?: string; message?: string };
 
@@ -85,54 +82,22 @@ async function clientTransition(
   }
   updates.status = effective;
 
-  // Final approval (not the content gate) of an auto-postable Instagram Reel:
-  // hold it as "scheduled" for the client's best local engagement time
-  // instead of posting the moment it's approved. The publish runner only
-  // picks up rows once `scheduled_at` has actually arrived.
+  /*
+   * A final approval hands the reel to the publisher, and the conditions for
+   * that are `approvalHandoff`'s — the same ones the desk and the WhatsApp
+   * group now ask. They used to be written out here, and only here, which is
+   * how the other two paths came to ask something different.
+   */
   let scheduledFor: string | null = null;
   if (effective === "approved") {
-    const isVideoService =
-      d.service === "video_editing" ||
-      (d.service == null && String(d.video_type ?? "").toLowerCase() !== "poster");
-    /*
-     * Every condition the publisher will later insist on, checked here.
-     *
-     * `auto_publish` was the one missing, and its absence was worse than a
-     * video not posting: approval marked the row `instagram_status =
-     * 'scheduled'`, so the board showed it queued and the client was told it
-     * was going out — and then the publish queue, which requires
-     * `auto_publish = 1`, never returned it. It sat looking scheduled for
-     * ever. A video nobody opted in to publish should stay plainly approved,
-     * waiting for someone to post it by hand.
-     */
-    const autoPostable =
-      isVideoService &&
-      d.content_category != null &&
-      AUTO_SCHEDULE_CATEGORIES.includes(d.content_category) &&
-      Boolean(d.ig_user_id) &&
-      Number(d.auto_publish) === 1 &&
-      Boolean(d.edited_link || d.cloud_video_key);
-    if (autoPostable) {
-      const ph = (d.placeholder_values && typeof d.placeholder_values === "object"
-        ? d.placeholder_values
-        : {}) as Record<string, unknown>;
-      const country = typeof ph.country === "string" ? ph.country : null;
-      // A time set by hand wins — only fall back to the automatic best slot
-      // when nobody has chosen one.
-      scheduledFor = d.scheduled_at
-        ? String(d.scheduled_at).slice(0, 19).replace("T", " ")
-        : nextBestPostTime(country);
-      updates.status = "scheduled";
-      updates.scheduled_at = scheduledFor;
-      /*
-       * The same handoff the admin path uses. `posting_status` alone was never
-       * enough: the publish queue selects on `instagram_status`, so a client
-       * approving their video used to schedule something the publisher could
-       * not see — the one moment in the whole flow where auto-posting is
-       * supposed to begin.
-       */
-      Object.assign(updates, publishHandoff({ ...d, scheduled_at: scheduledFor }));
-    }
+    Object.assign(updates, await approvalHandoff(id));
+    // The time to tell them about: the one just picked, or the one somebody
+    // had already set and the handoff deliberately left alone.
+    scheduledFor =
+      updates.status === "scheduled"
+        ? updates.scheduled_at ??
+          (d.scheduled_at ? String(d.scheduled_at).slice(0, 19).replace("T", " ") : null)
+        : null;
   }
 
   const keys = Object.keys(updates);
@@ -282,53 +247,12 @@ export async function verifyInvoicePayment(
     await execute("UPDATE invoices SET status = 'paid' WHERE id = ?", [payment.invoice_id]);
   }
 
-  const client = await queryOne<{
-    company_name: string;
-    contact_person: string | null;
-    email: string | null;
-  }>("SELECT company_name, contact_person, email FROM clients WHERE id = ?", [payment.client_id]);
-
-  const invoice = payment.invoice_id
-    ? await queryOne<{
-        invoice_no: string;
-        amount: string;
-        tax: string;
-        processing_fee: string;
-      }>(
-        "SELECT invoice_no, amount, tax, processing_fee FROM invoices WHERE id = ?",
-        [payment.invoice_id]
-      )
-    : null;
-
   await notifyAdmins(
     "payment_received",
     "Payment received",
     `₹${Number(payment.amount).toLocaleString("en-IN")} received via Razorpay.`,
     "/payments"
   );
-
-  // Receipt to the client, plus a copy to the agency's own inbox.
-  if (client) {
-    const agencyInbox = await getAgencyInbox();
-    sendPaidInvoiceEmail(
-      client,
-      {
-        invoice_no: invoice?.invoice_no ?? null,
-        amount: invoice?.amount ?? null,
-        tax: invoice?.tax ?? null,
-        processing_fee: invoice?.processing_fee ?? null,
-        total: payment.amount,
-        method: "razorpay",
-        reference: paymentId,
-        paid_on: new Date().toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        }),
-      },
-      agencyInbox
-    ).catch(() => {});
-  }
 
   revalidatePath("/portal/invoices");
   revalidatePath("/portal");

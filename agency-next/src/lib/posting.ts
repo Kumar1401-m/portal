@@ -91,7 +91,7 @@ function normalizeCountryKey(country: string): string {
   return country.toLowerCase().replace(/[^a-z]/g, "");
 }
 
-function bestPostingTimeFor(country: string | null | undefined): PostTiming {
+export function bestPostingTimeFor(country: string | null | undefined): PostTiming {
   if (!country) return DEFAULT_TIMING;
   const key = normalizeCountryKey(country);
   for (const [k, timing] of Object.entries(COUNTRY_BEST_TIME)) {
@@ -208,13 +208,24 @@ export const MAX_WINDOW_HOURS = Math.max(
 /** A picked date plus that country's evening slot, as a MySQL DATETIME in UTC. */
 export function scheduleDateToUtc(
   date: string,
-  country: string | null | undefined
+  country: string | null | undefined,
+  /**
+   * The hour to land on, when the caller knows a better one than the table's.
+   *
+   * `best-time.ts` learns the hour this account's own posts have actually done
+   * best at, and a slot placed on a chosen *day* should still use it. The
+   * country row keeps supplying the timezone either way — translating a local
+   * hour into an instant is the one thing the table has always been good at.
+   */
+  hour?: number
 ): string | null {
   const m = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
   const [, y, mo, d] = m.map(Number) as unknown as number[];
   const t = bestPostingTimeFor(country);
-  const utcMs = Date.UTC(y, mo - 1, d, t.hour, t.minute ?? 0) - t.utcOffsetMinutes * 60000;
+  const atHour = Number.isFinite(hour) ? Number(hour) : t.hour;
+  const atMinute = Number.isFinite(hour) ? 0 : t.minute ?? 0;
+  const utcMs = Date.UTC(y, mo - 1, d, atHour, atMinute) - t.utcOffsetMinutes * 60000;
   return new Date(utcMs).toISOString().slice(0, 19).replace("T", " ");
 }
 
@@ -310,5 +321,69 @@ export function bothClocks(utc: string | null, country: string | null | undefine
   return `${theirs} ${zone} · ${clockOnly(utc, "india")} ${ours.zone}`;
 }
 
-/** Categories treated as "post to Instagram automatically once approved". */
-export const AUTO_SCHEDULE_CATEGORIES = ["Instagram Reel"];
+/**
+ * What a task publishes as, or `null` when it does not publish by itself.
+ *
+ * This was `AUTO_SCHEDULE_CATEGORIES = ["Instagram Reel"]` — one category
+ * name, compared with `===` in three places. It answered the question for
+ * videos and answered it wrongly for everything else, so a poster could be
+ * approved, marked scheduled, and never posted: the queue wants a media kind
+ * and a poster had no way to be one.
+ *
+ * A kind rather than a boolean, because the two answers are needed together
+ * and were previously worked out apart. Instagram's container takes
+ * `image_url` for a photo and `video_url` for a reel, Facebook takes
+ * `/photos` or `/videos`, and YouTube takes only the reel — three decisions
+ * that must agree, and did not.
+ *
+ * ## Read off the service, not the category name
+ *
+ * Categories are edited by admins in Settings, so a hard-coded list of poster
+ * names would go stale the first time somebody renamed one. `service` is the
+ * portal's own tag for what kind of work this is, and `video_type` is where
+ * the same fact lived before that column existed.
+ *
+ * ## Two posters that are not posts
+ *
+ * A thumbnail is made for a YouTube video and a banner for a website. Both
+ * are poster work and neither belongs on a client's feed, so both are named
+ * here — the only two places a category name is still read, and both are read
+ * loosely enough to survive a rename like "Banner (web)".
+ */
+/**
+ * Poster work or video work.
+ *
+ * `service` is the portal's own tag and answers outright; `video_type` is
+ * where the same fact lived before that column existed, so a row from then is
+ * read from it instead.
+ *
+ * Its own export because "is this a poster" and "does this post itself as a
+ * photo" are different questions with different answers — a banner is poster
+ * work and does not go on a feed — and code that wants the first was reaching
+ * for the second.
+ */
+export function isPosterWork(row: {
+  service?: string | null;
+  video_type?: string | null;
+}): boolean {
+  return (
+    row.service === "poster_designing" ||
+    (row.service == null && String(row.video_type ?? "").toLowerCase() === "poster")
+  );
+}
+
+export function autoPostKind(row: {
+  service?: string | null;
+  video_type?: string | null;
+  content_category?: string | null;
+}): "REELS" | "IMAGE" | null {
+  const category = String(row.content_category ?? "").toLowerCase();
+
+  if (isPosterWork(row)) {
+    if (category.includes("thumbnail") || category.includes("banner")) return null;
+    return "IMAGE";
+  }
+  // Video work posts to Instagram as a reel, and only what was labelled one:
+  // a long YouTube cut and a podcast are video too, and neither is a reel.
+  return row.content_category === "Instagram Reel" ? "REELS" : null;
+}

@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/automation/publish/run",
-      "schedule": "15 13 * * *"
+      "schedule": "35 11 * * *"
     }
   ]
 }

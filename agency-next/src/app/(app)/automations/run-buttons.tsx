@@ -4,10 +4,21 @@ import { useTransition } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { runInsightsSyncAction, queueReportsAction, type RunState } from "./actions";
+import {
+  runInsightsSyncAction,
+  queueReportsAction,
+  runPublisherAction,
+  type RunState,
+} from "./actions";
+
+const JOBS = {
+  insights_sync: runInsightsSyncAction,
+  monthly_reports: queueReportsAction,
+  publishing: runPublisherAction,
+} as const;
 
 /** Kick one of the portal's own jobs off by hand. */
-export function RunNow({ job, label }: { job: "insights_sync" | "monthly_reports"; label: string }) {
+export function RunNow({ job, label }: { job: keyof typeof JOBS; label: string }) {
   const [pending, start] = useTransition();
   const toast = useToast();
 
@@ -17,8 +28,7 @@ export function RunNow({ job, label }: { job: "insights_sync" | "monthly_reports
       disabled={pending}
       onClick={() =>
         start(async () => {
-          const res: RunState =
-            job === "insights_sync" ? await runInsightsSyncAction() : await queueReportsAction();
+          const res: RunState = await JOBS[job]();
           toast({
             title: res.ok ? label : "That didn't finish",
             description: res.message,

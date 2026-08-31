@@ -20,10 +20,9 @@
  * Body: { "deliverable_id": 12, "channels"?: ["email","whatsapp"] }
  *   or   { "client_id": 4, "title": "…", "permalink": "…" }
  */
-import { readAuthorized, ok, fail, asInt, asStr, asDateTime } from "@/lib/automation-api";
-import { facebookPermalink } from "@/lib/facebook";
-import { queryOne } from "@/lib/db";
-import { sendPostPublishedEmail } from "@/lib/email";
+import { readAuthorized, ok, fail, asInt, asStr } from "@/lib/automation-api";
+import { facebookLinkOf } from "@/lib/facebook";
+import { queryOne, hasColumn } from "@/lib/db";
 import { sendPostPublishedWhatsApp } from "@/lib/whatsapp";
 import { notifyClientById } from "@/lib/notify";
 
@@ -40,6 +39,7 @@ type Target = {
   permalink: string | null;
   /** The Facebook post, when the reel went there and not to Instagram. */
   facebook_post_id: string | null;
+  facebook_permalink?: string | null;
   posted_at: string | null;
 };
 
@@ -57,12 +57,19 @@ export async function POST(request: Request) {
   // the workflow shouldn't be able to send a client's notification to an
   // address of its own choosing, and the stored permalink is the one that was
   // actually published.
+  /*
+   * Named only when it exists — a column from a later migration listed
+   * unconditionally is a hard SQL error on a database that has not run it,
+   * and this route is how a client is told their post is live.
+   */
+  const hasFbLink = await hasColumn("deliverables", "facebook_permalink");
   const target = deliverableId
     ? await queryOne<Target>(
         `SELECT c.id AS client_id, c.company_name, c.contact_person, c.email,
                 COALESCE(NULLIF(c.whatsapp_number,''), c.phone) AS whatsapp,
                 d.title, d.caption, d.instagram_permalink AS permalink,
                 d.facebook_post_id,
+                ${hasFbLink ? "d.facebook_permalink," : ""}
                 COALESCE(d.instagram_posted_at, d.posted_at) AS posted_at
            FROM deliverables d JOIN clients c ON c.id = d.client_id
           WHERE d.id = ?`,
@@ -88,13 +95,15 @@ export async function POST(request: Request) {
    * This sent `instagram_permalink` and nothing else, so a reel published to
    * the client's Facebook Page and not to Instagram arrived with no link at
    * all — a message telling somebody their post is live and giving them no
-   * way to look at it. The platform in the button followed the same
-   * assumption and said Instagram either way.
+   * way to look at it.
+   *
+   * The platform name and the posted-at time went with the email. Both existed
+   * only to fill its template, and neither the WhatsApp message nor the portal
+   * notification uses either — so they are gone rather than left computed and
+   * unread.
    */
-  const fbLink = facebookPermalink(target.facebook_post_id);
+  const fbLink = facebookLinkOf(target);
   const permalink = asStr(body.permalink) || target.permalink || fbLink;
-  const platform = target.permalink || asStr(body.permalink) ? "Instagram" : fbLink ? "Facebook" : "Instagram";
-  const postedAt = asDateTime(body.posted_at) || target.posted_at;
 
   const requested = Array.isArray(body.channels)
     ? body.channels.map((c) => String(c).toLowerCase())
@@ -102,16 +111,17 @@ export async function POST(request: Request) {
 
   const result: Record<string, unknown> = {};
 
+  /*
+   * Email is accepted as a channel and does nothing, on purpose.
+   *
+   * A client is mailed once, at onboarding, and nothing after that — so this
+   * reports honestly rather than pretending. Silently dropping the request
+   * would leave whoever wired the caller believing an email went out, and
+   * removing the channel outright would break every existing caller that
+   * still names it.
+   */
   if (requested.includes("email")) {
-    const sent = await sendPostPublishedEmail(
-      {
-        company_name: target.company_name,
-        contact_person: target.contact_person,
-        email: target.email,
-      },
-      { title, permalink, caption: target.caption, postedAt, platform }
-    );
-    result.email = { sent, to: target.email };
+    result.email = { sent: false, skipped: "clients are only emailed at onboarding" };
   }
 
   if (requested.includes("whatsapp")) {
@@ -124,8 +134,8 @@ export async function POST(request: Request) {
     result.whatsapp = { sent: wa.sent, message_id: wa.messageId ?? null, error: wa.error ?? null };
   }
 
-  // In-app notification too, with mail off — the formal email above already
-  // went out and a second generic copy would just be noise.
+  // The in-app notification, which with the email gone is now the record
+  // the client keeps. The WhatsApp message above is the one they read.
   await notifyClientById(
     target.client_id,
     "general",

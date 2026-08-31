@@ -20,7 +20,7 @@
  * recovered from the audit trail before any new one is created.
  */
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, hasColumn } from "./db";
 import { env } from "./env";
 import {
   claimForPublish,
@@ -32,8 +32,9 @@ import {
   type PublishQueueItem,
 } from "./instagram";
 import { sendTextToGroup } from "./whatsapp-service-client";
+import { clientWants } from "./client-messages";
 import { notifyAdmins } from "./notify";
-import { publishToPage, facebookPermalink } from "./facebook";
+import { publishToPage, publishToPageNow, facebookPermalink } from "./facebook";
 
 const GRAPH = "https://graph.facebook.com";
 
@@ -111,11 +112,23 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
   let containerId = await existingContainer(item.deliverable_id);
 
   if (!containerId) {
+    /*
+     * A photo container takes `image_url`; a video one takes `video_url`.
+     *
+     * This sent `video_url` whatever it was holding, so the only kind of post
+     * it could ever make was a reel. A poster reached here with `media_type:
+     * "IMAGE"` and was offered to Instagram as a video with no video in it:
+     * Meta answers with a missing-parameter error about `video_url`, which
+     * names the field that *was* sent and says nothing about the one that
+     * should have been. Four attempts, then failed, on a poster the client had
+     * already approved.
+     */
     const body = new URLSearchParams({
-      video_url: item.video_url,
+      ...(item.media_type === "IMAGE"
+        ? { image_url: item.video_url }
+        : { video_url: item.video_url, media_type: "REELS" }),
       caption: item.caption,
       access_token: token,
-      ...(item.media_type === "REELS" ? { media_type: "REELS" } : {}),
     });
 
     const created = await graph(`${GRAPH}/${v}/${item.ig_user_id}/media`, {
@@ -302,7 +315,40 @@ export async function publishClaimed(item: PublishQueueItem, runId: string): Pro
     ).catch(() => {});
   }
 
-  await tellTheClient(item, permalink, fb.ok ? fb.postId : null);
+  /*
+   * Accepted by the Page, and still on nobody's timeline.
+   *
+   * Meta can take a video into the Page's video library and create no story
+   * for it. The API call succeeds, an id comes back, and the post exists at an
+   * address — but it is not in the feed, so no follower scrolling past ever
+   * sees it. From every screen in this portal that looked exactly like a
+   * successful Facebook post, because it was recorded as one.
+   *
+   * It is not a failure to retry: the file is on the Page, and retrying would
+   * publish to Instagram a second time. It is something a person has to
+   * finish, so a person is told.
+   */
+  if (fb.ok && !fb.onFeed) {
+    console.warn(`[publish] ${item.deliverable_id} is in the Page's video library, not on its feed`);
+    await notifyAdmins(
+      "publish_partial",
+      `${item.client_name}: on Facebook, but not on the Page`,
+      `"${item.title}" went into the Page's video library and Facebook made no post for it, so ` +
+        `it is not on the timeline and nobody will see it there. Post it from Meta Business ` +
+        `Suite, or publish it as a Reel.`,
+      `/deliverables/${item.deliverable_id}`
+    ).catch(() => {});
+  }
+
+  await tellTheClient(
+    item,
+    permalink,
+    fb.ok ? fb.permalink ?? facebookPermalink(fb.postId) : null,
+    // Only when it is actually on the Page. Telling a client their post is
+    // live on Facebook when it is sitting in a video library is the version of
+    // this message worth never sending.
+    fb.ok && fb.onFeed
+  );
 
   return { ok: true, deliverableId: item.deliverable_id, mediaId: published.id, permalink };
 }
@@ -325,12 +371,25 @@ async function tellTheClient(
    * was handed one address and left to find the other themselves, on the
    * account they pay us to run. Both links or neither claim.
    */
-  facebookPostId: string | null
+  /** The Page link itself, already resolved — not an id to guess a link from. */
+  fbLink: string | null,
+  /*
+   * Whether it reached the Page at all, which is a separate question from
+   * whether we have a link to it. Meta occasionally will not give a permalink
+   * for a video it has just accepted, and saying "live on Instagram" about a
+   * post that is also on Facebook is the wrong half of the truth.
+   */
+  onFacebook: boolean
 ): Promise<void> {
   if (!item.wa_chat_id) return;
+  /*
+   * Some clients would rather not hear every time something goes out — they
+   * see the post itself. The publish still happens and the portal still
+   * records it; this only decides whether their phone buzzes about it.
+   */
+  if (!(await clientWants(item.client_id, "posted"))) return;
   try {
     const who = item.contact_person || item.client_name;
-    const fbLink = facebookPermalink(facebookPostId);
 
     /*
      * One line per place, each with its own address.
@@ -346,7 +405,7 @@ async function tellTheClient(
       fbLink ? `Facebook: ${fbLink}` : null,
     ].filter(Boolean);
 
-    const where = facebookPostId ? "Instagram and Facebook" : "Instagram";
+    const where = onFacebook ? "Instagram and Facebook" : "Instagram";
     const text =
       `Hi ${who},\n\nYour post "${item.title}" is now live on ${where}. 🎉` +
       (lines.length ? `\n\n${lines.join("\n")}` : "");
@@ -449,8 +508,82 @@ export type RunSummary = {
   posted: number;
   pending: number;
   failed: number;
+  /** Posts that were already live on Instagram and reached the Page this run. */
+  facebookCaughtUp: number;
   results: { deliverableId: number; outcome: string; detail?: string }[];
 };
+
+/**
+ * The Facebook half of a post that already went to Instagram.
+ *
+ * Facebook rides along at the end of a publish run, which covers every post
+ * whose client had a Page id **at the moment it went out**. The gap is the
+ * other order, and it is the common one: the reel goes out, the client asks
+ * for Facebook too, the Page id is filled in a day later — and there is
+ * nothing left to schedule, because the Instagram half is done and the
+ * publisher only looks at what is due.
+ *
+ * That gap is silent. No Page id means Facebook is skipped rather than
+ * failed, which is correct — most clients here are Instagram only and a
+ * warning every quarter hour about a Page they will never have is noise —
+ * but it leaves nothing on any screen for the case where a Page *was* wanted.
+ *
+ * ## Only what was never attempted, and only recently
+ *
+ * `not_posted` is the untouched state: a row that has been tried is `posted`
+ * or `failed` and is never picked up here again, so a Page refusing a video
+ * cannot become a retry every quarter hour for ever. A failure has a reason a
+ * person has to fix — usually a token without `pages_manage_posts` — and the
+ * button on the task page is what fixes it.
+ *
+ * The three days matter as much. Without them, the first run after this
+ * shipped would have posted every video this portal has ever published to
+ * every Page it can reach — a year of backlog onto a client's timeline in one
+ * afternoon. Three days covers "the Page id arrived a bit late" and nothing
+ * else.
+ */
+async function catchUpFacebook(limit: number): Promise<RunSummary["results"]> {
+  const [statusCol, postedAtCol] = await Promise.all([
+    hasColumn("deliverables", "facebook_status"),
+    hasColumn("deliverables", "instagram_posted_at"),
+  ]);
+  if (!statusCol || !postedAtCol) return [];
+
+  /*
+   * Our clock, not the database's. `instagram_posted_at` is written by the app
+   * in UTC and this database keeps IST, so `NOW() - INTERVAL 3 DAY` would draw
+   * the line five and a half hours off.
+   */
+  const cutoff = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+
+  const rows = await query<{ id: number }>(
+    `SELECT d.id
+       FROM deliverables d
+       JOIN clients c ON c.id = d.client_id
+      WHERE d.instagram_status = 'posted'
+        AND d.facebook_status = 'not_posted'
+        AND d.instagram_posted_at >= ?
+        AND c.fb_page_id IS NOT NULL AND TRIM(c.fb_page_id) <> ''
+      ORDER BY d.instagram_posted_at ASC
+      LIMIT ${Number(limit) || 2}`,
+    [cutoff]
+  ).catch(() => []);
+
+  const results: RunSummary["results"] = [];
+  for (const row of rows) {
+    const out = await publishToPageNow(row.id).catch((err) => ({
+      ok: false as const,
+      error: err instanceof Error ? err.message : "Facebook failed.",
+    }));
+    if ("skipped" in out && out.skipped) continue;
+    results.push(
+      out.ok
+        ? { deliverableId: row.id, outcome: "facebook", detail: out.permalink ?? undefined }
+        : { deliverableId: row.id, outcome: "facebook failed", detail: out.error }
+    );
+  }
+  return results;
+}
 
 /**
  * One pass over whatever is due.
@@ -464,7 +597,14 @@ export async function runPublisher(limit = 3): Promise<RunSummary> {
   const { getPublishQueue } = await import("./instagram");
   const due = await getPublishQueue(limit);
 
-  const summary: RunSummary = { considered: due.length, posted: 0, pending: 0, failed: 0, results: [] };
+  const summary: RunSummary = {
+    considered: due.length,
+    posted: 0,
+    pending: 0,
+    failed: 0,
+    facebookCaughtUp: 0,
+    results: [],
+  };
 
   for (const item of due) {
     const claim = await claimForPublish(item.deliverable_id, runId);
@@ -498,6 +638,16 @@ export async function runPublisher(limit = 3): Promise<RunSummary> {
     }
   }
 
-  void query;
+  /*
+   * After the queue, never instead of it, and never able to spoil it.
+   *
+   * A post that is due is the job; a Page that got missed is tidying up. Two
+   * of them per run keeps the run inside the platform's minute even when
+   * every one of them is a slow video upload.
+   */
+  const caughtUp = await catchUpFacebook(2).catch(() => []);
+  summary.facebookCaughtUp = caughtUp.filter((r) => r.outcome === "facebook").length;
+  summary.results.push(...caughtUp);
+
   return summary;
 }

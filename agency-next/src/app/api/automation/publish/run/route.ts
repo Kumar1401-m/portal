@@ -21,6 +21,7 @@ import { ok } from "@/lib/automation-api";
 import { publishingReadiness } from "@/lib/instagram";
 import { runPublisher } from "@/lib/instagram-publish";
 import { recordRun } from "@/lib/automation-runs";
+import { runApprovalClock } from "@/lib/whatsapp-reminders";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -52,12 +53,33 @@ export async function GET(request: Request) {
    * "Ran and posted nothing" is a success — most runs have nothing to do.
    * Failure is reserved for a run that tried and could not.
    */
+  // Said out loud, because a Page caught up quietly is the same shape of
+  // problem as a Page missed quietly.
+  const alsoFacebook = summary.facebookCaughtUp
+    ? ` ${summary.facebookCaughtUp} caught up on Facebook.`
+    : "";
   await recordRun(
     "publishing",
     summary.failed === 0,
-    summary.considered === 0
+    (summary.considered === 0
       ? "Nothing was due."
-      : `${summary.posted} posted, ${summary.pending} still encoding, ${summary.failed} failed.`
+      : `${summary.posted} posted, ${summary.pending} still encoding, ${summary.failed} failed.`) +
+      alsoFacebook
   );
-  return ok(summary);
+  /*
+   * The approval clock, on the way past.
+   *
+   * "Approve within 24 hours or we go ahead" is a promise with an hour on it,
+   * and the nightly reminder run is too coarse to keep it — a video sent at
+   * 10am is decided somewhere between 24 and 48 hours later, and the twelve
+   * hour warning can land in the same run as the decision. This job already
+   * runs every quarter hour and its whole purpose is the queue that
+   * approving feeds, so it does both here.
+   *
+   * Best-effort and last: everything above is already recorded, and a
+   * WhatsApp outage must not turn a successful publish run into a failed one.
+   */
+  const clock = await runApprovalClock().catch(() => null);
+
+  return ok(clock && (clock.chased || clock.approved) ? { ...summary, ...clock } : summary);
 }

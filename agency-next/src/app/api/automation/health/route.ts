@@ -80,7 +80,7 @@ export async function GET(request: Request) {
     meta_token: env.meta.enabled,
     whatsapp: env.whatsapp.enabled,
     email_smtp: env.mail.enabled,
-    ai_provider: env.openai.enabled || env.gemini.enabled,
+    ai_provider: env.gemini.enabled,
   };
 
   return ok({

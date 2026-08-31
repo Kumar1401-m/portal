@@ -33,8 +33,18 @@ const clean = async () => {
 await clean();
 
 const month = new Date().toISOString().slice(0, 7);
-/** Two hours ago, in the app's UTC — past the card's 30-minute grace. */
-const late = new Date(Date.now() - 2 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+/**
+ * Forty-five minutes ago, in the app's UTC.
+ *
+ * Past the card's 30-minute grace, and still inside every country's posting
+ * window — which matters now that a post beyond its window is given a
+ * different reason. Two hours was outside India's, so these fixtures started
+ * reporting "its window closed" instead of whatever each case was testing.
+ */
+const late = new Date(Date.now() - 45 * 60_000).toISOString().slice(0, 19).replace("T", " ");
+
+/** Long past any window, for the one case that is about exactly that. */
+const wayLate = new Date(Date.now() - 30 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
 
 const mkClient = async (name, cols = {}) => {
   const keys = ["company_name", "status", ...Object.keys(cols)];
@@ -83,11 +93,16 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   const noVideo = await mkTask(c, "ZZ-MISS c", { content_category: "Instagram Reel" });
   assert.match(await reasonFor(noVideo), /No finished video/);
 
+  /*
+   * Reels and posters post by themselves; a long YouTube cut does not, and
+   * saying so by name is the point — "not scheduled" is not a reason anybody
+   * can act on.
+   */
   const wrongKind = await mkTask(c, "ZZ-MISS d", {
-    content_category: "Instagram Post",
+    content_category: "YouTube Long Video",
     edited_link: "https://x/v.mp4",
   });
-  assert.match(await reasonFor(wrongKind), /Only Instagram Reels post automatically/);
+  assert.match(await reasonFor(wrongKind), /Only reels and posters post automatically/);
   ok("a task with no video, or of a kind that never auto-posts, says which");
 }
 
@@ -108,6 +123,28 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
     edited_link: "https://x/v.mp4",
   });
   assert.match(await reasonFor(id), /Nothing collected it/, "the schedule, not the row");
+
+  /*
+   * And the case that message used to swallow.
+   *
+   * Past its window the publisher stops offering the post on purpose — a reel
+   * going out at three in the morning reaches nobody. Nothing is wrong with
+   * the row and nothing is wrong with the schedule, so blaming the schedule
+   * sent somebody to look at the one thing that was working. Seen on a real
+   * post: seventeen hours late, cron healthy in the logs, screen saying to go
+   * and check the cron.
+   */
+  // `mkTask` sets `scheduled_at` itself, so this is moved afterwards rather
+  // than passed in — passing it duplicates the column and MySQL refuses.
+  const shut = await mkTask(c, "ZZ-MISS f", {
+    content_category: "Instagram Reel",
+    edited_link: "https://x/v.mp4",
+  });
+  await db.execute("UPDATE deliverables SET scheduled_at = ? WHERE id = ?", [wayLate, shut]);
+  const shutReason = await reasonFor(shut);
+  assert.match(shutReason, /window/i, "a post past its window says so");
+  assert.doesNotMatch(shutReason, /Nothing collected it/, "and does not blame the schedule");
+  assert.match(shutReason, /Post now/, "and says how it can still go out");
   ok("a video with nothing wrong with it says the publisher never came for it");
 }
 
@@ -322,12 +359,19 @@ const reasonFor = async (id) => (await q.getMissedPosts(null)).find((m) => m.id 
   const pub = read("lib/instagram-publish.ts");
   assert.match(pub, /`Instagram: \$\{permalink\}`/, "the Instagram link is labelled");
   assert.match(pub, /`Facebook: \$\{fbLink\}`/, "and so is the Facebook one");
-  assert.match(pub, /facebookPermalink\(facebookPostId\)/, "built from the Page post's id");
+    // Meta's own answer when we have it, and only otherwise derived from the id.
+  assert.ok(pub.includes("fb.permalink ?? facebookPermalink(fb.postId)"), "the link Meta gave, or one derived");
 
   // Facebook is claimed only when it actually went. Telling a client their
   // post is on a Page that refused it is the one version worth never sending.
-  assert.match(pub, /facebookPostId \? "Instagram and Facebook" : "Instagram"/);
-  assert.match(pub, /tellTheClient\(item, permalink, fb\.ok \? fb\.postId : null\)/);
+  assert.ok(
+    pub.includes('const where = onFacebook ? "Instagram and Facebook" : "Instagram";'),
+    "Facebook is named from whether it went, not from whether a link exists"
+  );
+  assert.ok(
+    pub.includes("fb.ok ? fb.permalink ?? facebookPermalink(fb.postId) : null"),
+    "and the link is Meta's own answer, falling back to one derived from the id"
+  );
   ok("the group is sent both links, and Facebook is named only when it went");
 }
 

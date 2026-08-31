@@ -30,7 +30,7 @@ import "server-only";
 import { onTheFloor } from "./client-status";
 import { query, execute, queryOne, transaction, hasColumn } from "./db";
 import { resolveVideoUrl } from "./storage";
-import { nowUtc } from "./posting";
+import { nowUtc, autoPostKind } from "./posting";
 // Both from the Instagram publisher on purpose: the same window and the same
 // caption, so the two platforms are due in the same minute and read alike.
 import { composeCaption, PUBLISH_WINDOW_HOURS } from "./instagram";
@@ -508,12 +508,22 @@ export async function retryYouTube(deliverableId: number): Promise<boolean> {
  * Returns nothing at all unless the client is opted in and the column exists,
  * so a portal that has never been near YouTube writes exactly what it wrote
  * before. Already posted is left alone: that is history, not a queue entry.
+ *
+ * And only for a video. Posters became schedulable when they started posting
+ * to Instagram, and nothing here would have stopped one being queued for a
+ * YouTube channel — the upload queue filters on `youtube_status` and a media
+ * kind is not among its conditions, so a JPEG would have been handed to it as
+ * a Short.
  */
 export function youtubeHandoff(current: {
   youtube_enabled?: number | null;
   youtube_status?: string | null;
+  service?: string | null;
+  video_type?: string | null;
+  content_category?: string | null;
 }): Record<string, string> {
   if (Number(current.youtube_enabled) !== 1) return {};
   if (current.youtube_status === "posted") return {};
+  if (autoPostKind(current) === "IMAGE") return {};
   return { youtube_status: "scheduled" };
 }

@@ -75,11 +75,126 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   has(lib, "{ url: mediaUrl, caption, access_token: token }", "which wants url + caption");
   has(lib, "{ file_url: mediaUrl, description: caption, access_token: token }", "and a video wants file_url + description");
 
-  // /{page}/videos with file_url is chosen over the Reels API because Meta
-  // fetches the bytes — the Reels endpoint is a resumable upload, the one
-  // shape a serverless function cannot do. Same reason YouTube runs on n8n.
-  assert.ok(!/video_reels/.test(lib), "the resumable Reels upload is not used here");
+  /*
+   * `/videos` is the fallback now, not the choice.
+   *
+   * It was the choice, on the reasoning that the Reels API is a resumable
+   * upload of the file and a serverless function cannot do that. Half true:
+   * that is one of its two modes, and the other hands Meta a `file_url` and
+   * lets it fetch the bytes, exactly as `/videos` does. The reasoning cost a
+   * client a month of an empty Page — see the block below.
+   */
+  has(lib, "/video_reels`", "a video is offered as a Reel");
+  assert.ok(
+    lib.indexOf("publishReel(pageId") < lib.indexOf('mediaType === "IMAGE" ? "photos" : "videos"'),
+    "and that happens before the library upload, not after it"
+  );
   ok("a poster and a video each go to the endpoint that takes them");
+}
+
+/* ---------------- a video is a Reel, and a Reel is a post -------------- */
+{
+  /*
+   * The bug this is the fix for: `/{page}/videos` takes the file, answers with
+   * an `id` and no `post_id`, and creates no story. The video sits in the
+   * Page's library, every screen here reads it as posted, and the client —
+   * who only ever looks at the Page — sees nothing there. It took a client in
+   * Australia asking why their Facebook was empty to find it.
+   *
+   * Driven rather than grepped: the three phases have to happen in order and
+   * the third is the one that publishes. A start and an upload with no finish
+   * is a draft, which is the same invisible post wearing a different hat.
+   */
+  const reply = (o) =>
+    new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+
+  const run = async (handler, input) => {
+    const calls = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      return handler(String(url), init) ?? reply({});
+    };
+    try {
+      return { out: await fb.publishToPage(input), calls };
+    } finally {
+      globalThis.fetch = real;
+    }
+  };
+
+  const video = {
+    deliverableId: 0, // no such row; `record` swallows its own failures
+    pageId: "PAGE",
+    token: "TOK",
+    mediaUrl: "https://example.test/v.mp4",
+    mediaType: "REELS",
+    caption: "hello",
+  };
+
+  const asReel = (u, init) => {
+    if (u.endsWith("/video_reels")) {
+      return String(init.body ?? "").includes("upload_phase=start")
+        ? reply({ video_id: "REEL1", upload_url: "https://rupload.facebook.com/x" })
+        : reply({ success: true });
+    }
+    if (u.startsWith("https://rupload.facebook.com/")) return reply({ success: true });
+    if (u.includes("fields=permalink_url")) return reply({ permalink_url: "/reel/REEL1/" });
+    return reply({ error: { message: "nothing else should be called" } });
+  };
+
+  {
+    const { out, calls } = await run(asReel, video);
+    assert.equal(out.ok, true);
+    assert.equal(out.postId, "REEL1");
+    assert.equal(out.onFeed, true, "a published Reel is on the timeline, not in a library");
+    assert.equal(out.permalink, "https://www.facebook.com/reel/REEL1/");
+
+    const phases = calls.filter((c) => c.url.endsWith("/video_reels") || c.url.includes("rupload"));
+    assert.equal(phases.length, 3, "three phases, no more");
+    assert.ok(String(phases[0].init.body).includes("upload_phase=start"), "start first");
+
+    // The address, not the bytes. This is the whole reason the Reels API is
+    // usable from a serverless function at all.
+    assert.equal(phases[1].init.headers.file_url, video.mediaUrl, "the file is handed over as a URL");
+    assert.equal(phases[1].init.headers.Authorization, "OAuth TOK");
+
+    const finishBody = String(phases[2].init.body);
+    assert.ok(finishBody.includes("upload_phase=finish"), "and then finish");
+    assert.ok(finishBody.includes("video_state=PUBLISHED"), "which publishes it");
+    assert.ok(finishBody.includes("video_id=REEL1"), "the one that was started");
+    assert.ok(finishBody.includes("hello"), "carrying the caption");
+
+    assert.ok(!calls.some((c) => c.url.endsWith("/videos")), "the library upload is not touched");
+  }
+
+  {
+    // Not every video is Reel-shaped: too long, too wide, too small. A video
+    // in the library is worse than a Reel and better than nothing.
+    const { out, calls } = await run((u, init) => {
+      if (u.endsWith("/video_reels") && String(init.body ?? "").includes("start")) {
+        return reply({ error: { message: "Video is too long for a Reel.", code: 100 } });
+      }
+      if (u.endsWith("/videos")) return reply({ id: "VID9", post_id: "PAGE_9" });
+      if (u.includes("fields=permalink_url")) return reply({ permalink_url: "/x/posts/9" });
+      return reply({});
+    }, video);
+
+    assert.equal(out.ok, true, "a refused Reel falls back rather than failing");
+    assert.equal(out.postId, "PAGE_9");
+    assert.ok(calls.some((c) => c.url.endsWith("/videos")), "to the library endpoint");
+  }
+
+  {
+    // A photo has never had this problem — /photos always comes back with a
+    // post_id — so it does not pay for three phases to find that out.
+    const { calls } = await run(
+      (u) => (u.endsWith("/photos") ? reply({ id: "P1", post_id: "PAGE_1" }) : reply({})),
+      { ...video, mediaType: "IMAGE" }
+    );
+    assert.ok(!calls.some((c) => c.url.includes("video_reels")), "a poster is not a Reel");
+  }
+
+  ok("a video goes up as a published Reel, and falls back to the library only if refused");
 }
 
 /* ---------------- and a failure says what to change ---------------- */
@@ -96,7 +211,15 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   // Recorded either way, on whatever columns exist.
   has(lib, 'hasColumn("deliverables", "facebook_post_id")', "the detail columns are gated");
   has(lib, 'await record(deliverableId, "failed", null, message)', "a refusal is written down");
-  has(lib, 'await record(deliverableId, "posted", postId, null)', "and so is a success");
+  /*
+   * A success now carries whether there is a post on the Page at all: a photo
+   * comes back with a `post_id`, a video can come back with only an `id` —
+   * taken into the Page's video library with no story made for it, so nothing
+   * appears on the timeline. Both are "posted"; only one is visible, and the
+   * note on the row is what says which. See facebook-link.mjs.
+   */
+  has(lib, 'await record(\n      deliverableId,\n      "posted",\n      postId,', "a success is written down too");
+  has(lib, "permalink\n    );", "with the link Meta gave");
 
   assert.equal(fb.facebookPermalink(null), null, "no id, no link");
   assert.equal(
@@ -110,10 +233,11 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 /* ---------------- the client is told only what is true ---------------- */
 {
   const pub = readFileSync(`${SRC}/lib/instagram-publish.ts`, "utf8");
-  // The id, not a boolean — the message carries the Page link now, and a link
-  // that exists is the same evidence as a flag saying it worked.
-  has(pub, 'facebookPostId ? "Instagram and Facebook" : "Instagram"', "the message names Facebook only when it worked");
-  has(pub, "await tellTheClient(item, permalink, fb.ok ? fb.postId : null);", "using the outcome, not the intent");
+  // A flag, not the link. Meta will occasionally accept a video and decline
+  // to say where it put it, and "live on Instagram" about a post that is also
+  // on Facebook is the wrong half of the truth.
+  has(pub, 'onFacebook ? "Instagram and Facebook" : "Instagram"', "the message names Facebook only when it worked");
+  has(pub, "fb.ok ? fb.permalink ?? facebookPermalink(fb.postId) : null", "using the outcome, not the intent");
 
   const panel = readFileSync(`${SRC}/app/(app)/deliverables/[id]/publish-status.tsx`, "utf8");
   has(panel, "info.facebook ?", "the panel shows it only for a client who uses it");
@@ -312,6 +436,50 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
     "the platform in the button is no longer assumed"
   );
   ok("a post that went to Facebook is linked to on Facebook");
+}
+
+/* ---------------- a Page id filled in later still gets the post -------- */
+{
+  const pub = readFileSync(`${SRC}/lib/instagram-publish.ts`, "utf8");
+  has(pub, "async function catchUpFacebook(", "the run tidies up after itself");
+
+  /*
+   * The gap it closes is the common order, not the exotic one: the reel goes
+   * out, the client asks for Facebook too, the Page id is filled in the next
+   * day — and nothing is left to schedule, because the publisher only looks
+   * at what is due and the Instagram half is done. Silent, because no Page id
+   * is a skip rather than a failure, which is right for the many clients here
+   * who are Instagram only.
+   */
+  has(pub, "d.facebook_status = 'not_posted'", "only what was never attempted");
+  assert.ok(
+    !/facebook_status\s*(IN|=)\s*\(?'failed'/.test(pub),
+    "a failure is not retried every quarter hour for ever"
+  );
+  has(pub, "c.fb_page_id IS NOT NULL AND TRIM(c.fb_page_id) <> ''", "and only where there is a Page");
+
+  /*
+   * Three days, and the reason is not politeness. Without a floor the first
+   * run after this shipped would have posted every video the portal has ever
+   * published to every Page it can reach — a year of backlog onto a client's
+   * timeline in one afternoon.
+   */
+  has(pub, "3 * 86_400_000", "bounded to the last three days");
+  assert.ok(
+    !/instagram_posted_at\s*>=\s*NOW\(\)/.test(pub),
+    "measured on our clock, not the database's — this one keeps IST and the column is UTC"
+  );
+
+  // After the queue and unable to spoil it: a post that is due is the job,
+  // a Page that got missed is tidying up.
+  const loopEnd = pub.indexOf("const caughtUp = await catchUpFacebook(");
+  assert.ok(loopEnd > pub.indexOf("const due = await getPublishQueue(limit)"), "it runs after the queue");
+  has(pub, "await catchUpFacebook(2).catch(() => [])", "and cannot fail the run");
+
+  // Not silently, which is the whole shape of the bug being fixed.
+  const route = fs2.readFileSync(`${SRC}/app/api/automation/publish/run/route.ts`, "utf8");
+  assert.ok(route.includes("summary.facebookCaughtUp"), "the run says when it caught one up");
+  ok("a Page id added after the reel went out is picked up on the next run");
 }
 
 await finish(pass);

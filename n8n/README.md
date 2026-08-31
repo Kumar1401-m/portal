@@ -20,6 +20,14 @@ What n8n does is **pull the trigger, often enough**:
 
 One run a day cannot serve an evening posting window. That is the whole job.
 
+The Vercel cron is the backstop and fires at **11:35 UTC — 5:05 PM IST**, five minutes
+into India's window. It used to fire at 13:15, fifteen minutes before that window
+shuts, which is long enough to start a reel encoding and not long enough to come back
+for it: the next look was the following day, by which time the slot had gone and the
+video was on the missed-posts board. Moving it buys the backstop two hours instead of
+fifteen minutes — but it is still one run, and one run only ever covers one country.
+If this workflow stops, every non-Indian client stops posting silently.
+
 The VPS matters as much as n8n does — see `../deploy/README.md`. It gives the WhatsApp
 service a fixed address, replacing the cloudflared tunnel whose URL changed on every
 restart.
