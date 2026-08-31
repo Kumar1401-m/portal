@@ -14,6 +14,7 @@ import {
 import {
   pendingReminders,
   recentlySent,
+  sentByClient,
   unreachableClients,
 } from "@/lib/whatsapp-reminders";
 import { lastRuns, type JobRun } from "@/lib/automation-runs";
@@ -157,7 +158,7 @@ export default async function RemindersPage() {
    * would raise the wrong question — "why isn't Ortho in this list?" is harder
    * to answer than "Ortho — no WhatsApp group", which says what to fix.
    */
-  const [clients, scheduled, history, status, pending, runs, week, unreachable] =
+  const [clients, scheduled, history, status, pending, runs, week, unreachable, byClient] =
     await Promise.all([
       query<{ id: number; company_name: string; group_count: number }>(
         `SELECT c.id, c.company_name,
@@ -174,6 +175,9 @@ export default async function RemindersPage() {
       lastRuns(),
       recentlySent(7),
       unreachableClients(),
+      // Who actually got messaged, which is the question the counts above
+      // cannot answer and the one somebody comes here with.
+      sentByClient(7),
     ]);
 
   const connected = status.ok && status.connected;
@@ -243,6 +247,78 @@ export default async function RemindersPage() {
       <ScheduleList scheduled={scheduled.map(toItem)} history={history.map(toItem)} />
 
       <AutomaticPanel status={automatic} />
+
+      {/*
+        Who heard from us, and how much.
+        
+        The panel above counts messages by kind, which answers "is the machine
+        running". This answers "did we pester that client", which is what
+        somebody asks after a client says we did — and it is the only place
+        that claim can be checked rather than argued about.
+      */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="border-b border-border px-4 py-3">
+            <p className="text-sm font-medium">Who we messaged — last 7 days</p>
+            <p className="text-xs text-muted-foreground">
+              Newest first. <b>Today</b> is what the daily ceiling of four counts against; past
+              it, everything for that client waits until tomorrow.
+            </p>
+          </div>
+          {byClient.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">
+              Nothing automatic has gone out in the last week.
+            </p>
+          ) : (
+            <div className="max-h-96 overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 border-b border-border bg-muted/60 backdrop-blur">
+                  <tr className="text-xs text-muted-foreground">
+                    <th className="px-3 py-2 text-left font-medium">Client</th>
+                    <th className="px-3 py-2 text-left font-medium">About</th>
+                    <th className="px-3 py-2 text-right font-medium">Today</th>
+                    <th className="px-3 py-2 text-right font-medium">Week</th>
+                    <th className="px-3 py-2 text-left font-medium">Last</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byClient.map((r) => (
+                    <tr
+                      key={`${r.clientId}-${r.kind}`}
+                      className="border-b border-border last:border-0"
+                    >
+                      <td className="px-3 py-1.5">
+                        {r.clientId ? (
+                          <Link
+                            href={`/clients/${r.clientId}`}
+                            className="transition-colors hover:text-primary hover:underline"
+                          >
+                            {r.company}
+                          </Link>
+                        ) : (
+                          r.company
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-xs">
+                        {SENT_LABELS[r.kind] || r.kind.replace(/_/g, " ")}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {Number(r.today) || 0}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                        {Number(r.total) || 0}
+                      </td>
+                      <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                        {String(r.last).slice(5, 16).replace("T", " ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

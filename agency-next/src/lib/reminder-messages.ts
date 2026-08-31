@@ -20,7 +20,8 @@
  */
 import "server-only";
 import { query } from "./db";
-import { needsRawFootageSql } from "./raw-footage";
+import { footageChaseSql } from "./footage-scope";
+import { settledSql } from "./whatsapp-approvals";
 import { fmtDate, money } from "./utils";
 import { paymentLinkForInvoice } from "./payment-links";
 
@@ -323,7 +324,7 @@ async function composeFootage(clientId: number): Promise<Composed> {
     `SELECT title, due_date FROM deliverables
       WHERE client_id = ? AND status IN ('pending','waiting_for_raw')
         AND (raw_drive_link IS NULL OR raw_drive_link = '')
-        AND ${needsRawFootageSql("")}
+        AND ${await footageChaseSql("")}
       ORDER BY due_date IS NULL, due_date ASC, id ASC LIMIT 40`,
     [clientId]
   );
@@ -335,7 +336,7 @@ async function composeFootage(clientId: number): Promise<Composed> {
 async function composeApprovalChase(clientId: number): Promise<Composed> {
   const rows = await query<WaitingItem>(
     `SELECT title, video_code FROM deliverables
-      WHERE client_id = ? AND status IN ('content_review','review')
+      WHERE client_id = ? AND status = 'review' AND NOT ${settledSql()}
       ORDER BY due_date IS NULL, due_date ASC, id ASC LIMIT 40`,
     [clientId]
   );

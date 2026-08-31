@@ -136,21 +136,33 @@ await db.execute(
   ok("the prompt demands reasoning, and forbids inventing anything it was not given");
 }
 
-/* ---------------- the three ways it fails, and three answers ---------------- */
+/* ---------------- the two ways it fails, and two answers ---------------- */
 {
-  // A thinking budget is counted against the output cap, so the cap has to
-  // cover both — this was returning half a sentence to clients.
-  assert.match(src, /const MAX_OUTPUT_TOKENS = THINKING_BUDGET \+ 1024/);
-  assert.match(src, /maxOutputTokens: withThinking \? MAX_OUTPUT_TOKENS : 1024/);
+  /*
+   * The token cap covers the thinking as well as the reply.
+   *
+   * Reasoning tokens are spent out of the same budget, so a cap sized for the
+   * answer alone spends the lot working it out and returns half a sentence —
+   * which is exactly what a client once received: "…(if you were asking about
+   * V103" and nothing more. The provider changed; the trap did not.
+   */
+  assert.ok(src.includes("maxTokens: 3000"), "room for the thinking as well as the answer");
+  assert.ok(src.includes('attempt(env.gemini.model, "medium")'), "and it is told to think before it writes");
 
-  assert.match(src, /if \(first\.status === 400\) \{\s*\n\s*const plain = await ask\(REPLY_MODEL, false\)/,
-    "400 means the thinking budget — ask the same model plainly");
-  assert.match(src, /first\.status === 429 \|\| first\.status >= 500/);
-  assert.match(src, /const smaller = await ask\(FALLBACK_MODEL, false\)/,
-    "out of quota falls to the smaller model rather than giving up");
-  assert.match(src, /console\.warn\(`\[whatsapp-ai\] \$\{model\} returned/,
-    "and a refusal is logged rather than silently becoming a holding line");
-  ok("a rejected parameter, a spent quota and a bad minute each get their own answer");
+  /*
+   * Trying again only when trying again could work.
+   *
+   * A refused key or a malformed request fails identically on the smaller
+   * model, and spending a second call to prove it makes the client wait twice
+   * as long for the same holding line.
+   */
+  assert.match(src, /if \(!first\.retriable\) return null;/,
+    "a permanent failure is not retried on a second model");
+  assert.match(src, /const second = await attempt\(env.gemini.fastModel, "low"\)/,
+    "and a retriable one falls to the fast model rather than giving up");
+  assert.match(src, /console\.warn\(`\[whatsapp-ai\] \$\{env.gemini.model\}/,
+    "a refusal is logged rather than silently becoming a holding line");
+  ok("a bad minute and a bad key get different answers");
 
   // With no key at all there is no call to make, and no crash either.
   const facts = await ai.clientFacts(mine);

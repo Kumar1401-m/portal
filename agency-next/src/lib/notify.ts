@@ -72,7 +72,20 @@ export async function notifyClientById(
   title: string,
   body: string,
   link: string | null = null,
-  mail = true
+  /*
+   * Off, and this is the whole rule for client email now.
+   *
+   * Asked for directly: a client gets one email, when they are onboarded, and
+   * after that the portal and WhatsApp carry everything. This defaulted to
+   * true, so every portal notification — approvals, status changes, payments —
+   * also became an email. That is the pile that made a client stop reading
+   * them.
+   *
+   * Left as a parameter rather than removed: onboarding is a real exception,
+   * and a caller that genuinely needs to mail somebody should have to say so
+   * in its own line rather than inherit it.
+   */
+  mail = false
 ): Promise<void> {
   try {
     const rows = await query<{ id: number; email: string | null }>(

@@ -75,7 +75,21 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
     false,
     "an approval, which has its own handler"
   );
-  assert.equal(gate({ message: "x".repeat(900), addressed: true }).reply, false, "an essay");
+  /*
+   * An essay is answered now, and that is the change.
+   *
+   * It used to be silence: too long to send to the model, so nothing was sent
+   * to the client either. The two people most likely to write nine hundred
+   * characters are the one with a complicated request and the one who is
+   * annoyed, and both were the ones getting ignored.
+   *
+   * It is still not sent to the model — an answer drawn confidently from the
+   * wrong half of a long message is worse than none — so it is marked `hold`,
+   * which is the courteous acknowledgement plus a notification to the team.
+   */
+  const essay = gate({ message: "x".repeat(900), addressed: true });
+  assert.equal(essay.reply, true, "an essay is acknowledged rather than ignored");
+  assert.equal(essay.kind, "hold", "but never guessed at");
   ok("tagging us or replying to us gets an answer, cooldown or not");
 }
 
@@ -183,13 +197,28 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
   has(route, "Telugu, Hindi, Tamil, Kannada, English", "the languages clients actually use");
   has(route, "transliterated", "including romanised, which is how most of it arrives");
 
-  // Every failure — no key, bad JSON, a timeout — has to come back as "none"
-  // rather than an error, because the caller's fallback is to do nothing and
-  // that is the correct outcome.
-  for (const reason of ["no model", "too long", "empty", "unparsable", "error"]) {
+  /*
+   * Every failure — no key, a rate limit, a timeout — comes back as "none"
+   * rather than as an error, because the caller's fallback is to do nothing
+   * and doing nothing is the correct outcome. A classifier that is down must
+   * never look like a client saying no.
+   */
+  for (const reason of ["no model", "too long", "unavailable"]) {
     has(route, `"${reason}"`, `a ${reason} failure answers none rather than throwing`);
   }
   has(route, 'intent: "none", confidence: 0', "with no confidence attached to it");
+
+  /*
+   * "unparsable" is gone as a category, and that is the improvement.
+   *
+   * The reply is now decoded against a strict schema, so it cannot come back
+   * as prose, a code fence or a missing key — there is nothing left to repair,
+   * and every repair was a guess about what the model meant on the path that
+   * decides whether a client just approved their video.
+   */
+  has(route, 'schemaName: "intent"', "the reply is decoded against a schema");
+  has(route, "enum: INTENTS", "and an intent outside the list cannot be emitted");
+  has(route, 'console.warn("[whatsapp] intent unavailable:', "the real reason is logged, not a category");
   ok("every way this can fail comes back as 'not understood'");
 }
 
@@ -197,17 +226,24 @@ const has = (src, needle, why) => assert.ok(src.includes(needle), why);
 {
   const route = readFileSync(`${SRC}/app/api/whatsapp/transcribe/route.ts`, "utf8");
 
-  // The old budget was 400 tokens, which a minute of speech overruns — and an
-  // overrun comes back empty, not short, so it reads as "the client said
-  // nothing" rather than "we cut them off".
-  has(route, "maxOutputTokens: 1200", "the transcript has room");
-  has(route, "finishReason: cand?.finishReason", "and an empty one says why in the log");
+  /*
+   * The token budget that used to truncate a voice note is gone entirely.
+   *
+   * It was a general-purpose model asked to transcribe, so the transcript came
+   * out of an output budget shared with its own reasoning — and an overrun came
+   * back empty rather than short, which read as "the client said nothing"
+   * rather than "we cut them off". A transcription endpoint has no such
+   * budget: it returns the whole of what it heard, or an error saying why.
+   */
+  has(route, "transcribeBlob(", "the transcript comes from a transcription model");
+  assert.ok(!/maxOutputTokens/.test(route), "with no output budget left to truncate it");
+  has(route, 'console.warn("[whatsapp] transcription came back empty")', "and an empty one says so in the log");
   has(
     route,
-    "do not translate",
+    "Do not answer it, summarise it or comment on it.",
     "the words stay in the client's own language — the intent step reads them there"
   );
-  ok("a voice note is transcribed whole, and a truncated one is not silent");
+  ok("a voice note is transcribed whole, and a silent one is not mistaken for a failure");
 }
 
 /* ---------------- a change asked for by voice lands on the task ---------------- */

@@ -55,7 +55,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   const ai = readFileSync(`${SRC}/lib/whatsapp-ai.ts`, "utf8");
   assert.ok(ai.includes("facebook_post_id"), "the Facebook post is read from the row");
   assert.ok(
-    ai.includes("facebookLink: facebookPermalink(r.facebook_post_id)"),
+    ai.includes("facebookLink: facebookLinkOf(r)"),
     "and turned into a link the assistant can offer"
   );
   assert.ok(

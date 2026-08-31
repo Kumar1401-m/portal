@@ -29,22 +29,35 @@ const items = [
   { title: "Store walkthrough", due_date: "2026-08-17" },
 ];
 
-/* ---------------- three times a day, at the times asked for ---------------- */
+/* ---------------- once a day now, and why ---------------- */
 {
-  has('{ at: "10:00", key: "morning"', "morning");
-  has('{ at: "13:30", key: "midday"', "after lunch");
-  has('{ at: "18:00", key: "evening"', "end of day");
+  /*
+   * Three a day was the third wrong version, and the client is the one who
+   * said so: asked three times a day for something they already know they owe
+   * you, it stops reading as a reminder and starts reading as pestering — and
+   * then the group gets muted. A muted group is worse than a missed reminder,
+   * because approvals, the finished video and the invoice all go there too.
+   *
+   * Half past one: the middle of a working day, when somebody is at a desk and
+   * can actually go and find the file. Morning is too early to have looked;
+   * the end of the day is too late to act on it.
+   */
+  has('{ at: "13:30", key: "midday"', "the middle of the working day");
   const list = rem.slice(rem.indexOf("const FOOTAGE_SLOTS"), rem.indexOf("];", rem.indexOf("const FOOTAGE_SLOTS")));
-  assert.equal((list.match(/at: "/g) || []).length, 3, "exactly three");
+  assert.equal((list.match(/at: "/g) || []).length, 1, "exactly one");
 
-  // The n8n schedule has to actually fire at those times, or the code is
-  // right and nothing happens — which is what went wrong last time.
-  const wf = JSON.parse(readFileSync(`${SRC}/../../n8n/workflows/whatsapp-reminders.json`, "utf8"));
-  const crons = (wf.nodes ?? [])
-    .filter((n) => /schedule/i.test(n.type ?? ""))
-    .flatMap((n) => (n.parameters?.rule?.interval ?? []).map((i) => i.expression));
-  assert.deepEqual(crons, ["0 10 * * *", "30 13 * * *", "0 18 * * *"], "the workflow fires three times");
-  ok("three asks a day, and the schedule that fires them");
+  /*
+   * The schedule is deliberately not asserted any more.
+   *
+   * It used to be, because the code was right and nothing fired. That is no
+   * longer the failure mode: the runner is called every fifteen minutes by the
+   * portal's own clock, and this file decides which slot has passed. Extra
+   * runs are harmless by construction — the slot is claimed per client, per
+   * day, so the ninety-sixth call of the day sends nothing the first one
+   * already did.
+   */
+  has("const passed = FOOTAGE_SLOTS.filter((s) => now.hm >= s.at);", "the slot is the latest one passed");
+  ok("one ask a day, at a time somebody can do something about it");
 }
 
 /* ---------------- the clock is the database's ---------------- */
@@ -79,10 +92,16 @@ const items = [
   // Some clients would rather hear from a person. Every reminder reaches them
   // through one join, so the opt-out lives there — not repeated as a condition
   // in five queries, one of which somebody would forget.
-  has("async function ONE_GROUP()", "the join is computed, so it can be gated");
+  has("async function ONE_GROUP(purpose: Purpose)", "the join is computed, so it can be gated");
   has("AND client_id IN (SELECT id FROM clients WHERE auto_reminders = 1)", "opted-out clients drop out");
+  /*
+   * The join now also decides *which* of a client's groups a kind of message
+   * goes to, so it takes a purpose. It is still the one join every reminder
+   * passes through, which is what makes a single opt-out enough — a rule that
+   * picked its own group would also have to remember to check `auto_reminders`.
+   */
   assert.equal(
-    (rem.match(/JOIN \$\{await ONE_GROUP\(\)\} g/g) || []).length,
+    (rem.match(/JOIN \$\{await ONE_GROUP\([^)]*\)\} g/g) || []).length,
     5,
     "and every reminder kind goes through it"
   );
@@ -149,9 +168,20 @@ const items = [
     "app/api/whatsapp/footage/route.ts",
     "app/api/whatsapp/summary/route.ts",
   ];
+  /*
+   * Either name counts, because there is still only one rule.
+   *
+   * `footageChaseSql` is this rule with a second question after it — does this
+   * client send us footage at all — and the four callers that write into a
+   * client's group use it. The other four ask the task question bare, on
+   * purpose: accepting a link, and showing the agency what is outstanding,
+   * must not change because we stopped chasing somebody. `no-second-ask.mjs`
+   * holds that split; this holds the part both halves share.
+   */
   for (const p of ASKS) {
+    const src = readFileSync(`${SRC}/${p}`, "utf8");
     assert.ok(
-      readFileSync(`${SRC}/${p}`, "utf8").includes("needsRawFootageSql("),
+      src.includes("needsRawFootageSql(") || src.includes("footageChaseSql("),
       `${p} decides who to chase and must read the one rule`
     );
   }

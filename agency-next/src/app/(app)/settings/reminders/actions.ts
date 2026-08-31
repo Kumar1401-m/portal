@@ -15,6 +15,7 @@ import {
   groupForClient,
   REMINDER_TIMEZONE,
 } from "@/lib/reminder-outbox";
+import { purposeOfReminder } from "@/lib/whatsapp-groups";
 import { localTimeToUtc } from "@/lib/posting";
 
 const KINDS = new Set(SENDABLE.map((s) => s.kind));
@@ -54,7 +55,7 @@ export async function previewReminder(
   try {
     // Said before the message is composed, not after: there is no point
     // reading a chase for a client we have no way of reaching.
-    if (spec.perClient && clientId && !(await groupForClient(clientId))) {
+    if (spec.perClient && clientId && !(await groupForClient(clientId, purposeOfReminder(kind)))) {
       return {
         noGroup: true,
         error:
@@ -112,7 +113,7 @@ export async function sendReminderAction(
   let groupLabel: string;
   if (spec.perClient) {
     if (!clientId) return { error: "Pick a client." };
-    const target = await groupForClient(clientId);
+    const target = await groupForClient(clientId, purposeOfReminder(kind));
     if (!target) {
       return {
         error:

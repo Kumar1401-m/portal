@@ -17,9 +17,11 @@
  */
 import "server-only";
 import { query, queryOne, execute, transaction, hasColumn } from "./db";
+import { groupOrderSql, type Purpose } from "./whatsapp-groups";
 import { notifyAdmins, notifyUser } from "./notify";
 import { resolveVideoUrl, directDownloadUrl } from "./storage";
-import { composeCaption } from "./instagram";
+import { composeCaption, approvalHandoff } from "./instagram";
+import { isPosterWork } from "./posting";
 import { buildVideoPermalink } from "./video-link";
 
 /** How the WhatsApp conversation for one video is going. */
@@ -122,11 +124,27 @@ export type WhatsAppGroup = {
   company_name?: string;
 };
 
-export async function getGroupsForClient(clientId: number): Promise<WhatsAppGroup[]> {
+/**
+ * A client's groups, best first for the job in hand.
+ *
+ * Callers take `[0]`, so the ordering is the decision: a group ticked for
+ * this purpose wins, and where nothing is ticked it falls back to the default
+ * one — which is what this always returned.
+ */
+export async function getGroupsForClient(
+  clientId: number,
+  purpose: Purpose = "approvals"
+): Promise<WhatsAppGroup[]> {
   if (!(await approvalsReady())) return [];
   return query<WhatsAppGroup>(
-    `SELECT * FROM whatsapp_groups WHERE client_id = ? AND is_active = 1
-      ORDER BY is_default DESC, id`,
+    `SELECT g.*, COALESCE(NULLIF(g.group_name, ''), (
+              SELECT m.group_name FROM whatsapp_messages m
+               WHERE m.group_id = g.group_id AND NULLIF(m.group_name,'') IS NOT NULL
+               ORDER BY m.id DESC LIMIT 1
+            )) AS group_name
+       FROM whatsapp_groups g
+      WHERE g.client_id = ? AND g.is_active = 1
+      ORDER BY ${await groupOrderSql(purpose, "g")}`,
     [clientId]
   );
 }
@@ -237,6 +255,37 @@ export async function getDiscoveredGroups(): Promise<DiscoveredGroup[]> {
 
 /* ------------------------------ Sending state ------------------------------ */
 
+/**
+ * Answered — by anyone, anywhere — or already past the point of asking.
+ *
+ * The one rule, written once. Every place that decides whether to put a
+ * question in a client's group had grown its own version of it, and each
+ * version read a different column:
+ *
+ *   - `prepareSend` asked `wa_status`
+ *   - `awaitingReplyInGroup` asked `wa_status`
+ *   - the approval board asked `approval_status`
+ *
+ * A super admin approving inside the portal writes `status` and
+ * `approval_status` and never touches `wa_status`. So the video stayed, for
+ * ever, on the list of things that group still owed us an answer on — and the
+ * next thing anybody typed in there was answered with "more than one video is
+ * waiting here", listing one already approved. To a client that reads as the
+ * agency having lost track of its own work, which is the impression this whole
+ * feature exists to prevent.
+ *
+ * `changes_requested` counts as settled for the same reason `approved` does:
+ * the client has answered and the ball is ours. When the fix goes back to them
+ * it is sent afresh, which resets `wa_status` and puts it back on the list.
+ *
+ * @param p a qualified prefix ending in a dot, e.g. `"d."`, or "" for bare columns.
+ */
+export const settledSql = (p = ""): string => `(
+  ${p}wa_status = 'approved'
+  OR COALESCE(${p}approval_status,'') IN ('approved','changes_requested','rejected')
+  OR ${p}status IN ('approved','scheduled','posted','completed')
+)`;
+
 export type SendableVideo = {
   deliverableId: number;
   videoCode: string;
@@ -286,35 +335,30 @@ export async function prepareSend(
     hashtags: string | null;
     approval_status: string | null;
     status: string;
+    /** Poster or video — the caption rule below is only about videos. */
+    service: string | null;
+    video_type: string | null;
+    content_category: string | null;
+    /*
+     * Decided by the database, using the same expression the group-facing
+     * queries use. It was decided here instead, in TypeScript, and the two
+     * drifted the moment either was edited — which is the entire bug this
+     * function exists to prevent, reproduced one level down.
+     */
+    settled: number;
   }>(
     `SELECT d.id, d.client_id, d.title, c.company_name,
             d.cloud_video_url, d.cloud_video_key, d.edited_link,
             d.wa_status, d.video_code, d.caption, d.hashtags,
-            d.approval_status, d.status
+            d.approval_status, d.status, d.service, d.video_type, d.content_category,
+            ${settledSql("d.")} AS settled
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE d.id = ?`,
     [deliverableId]
   );
   if (!d) return { ok: false, error: "Task not found." };
 
-  /*
-   * Approved is approved, whoever said so and wherever they said it.
-   *
-   * This asked `wa_status` alone — which only knows about answers that came
-   * back through WhatsApp. A super admin approving inside the portal writes
-   * `status` and `approval_status` and never touches it, so the guard did not
-   * fire and the video went to the client's group asking them to approve
-   * something already approved. To a client that reads as the agency having
-   * lost track of its own work.
-   *
-   * The later statuses count too: a video already scheduled, posted or
-   * completed is well past the point of asking anybody's permission.
-   */
-  const settled =
-    d.wa_status === "approved" ||
-    d.approval_status === "approved" ||
-    ["approved", "scheduled", "posted", "completed"].includes(d.status);
-  if (settled) {
+  if (Number(d.settled) === 1) {
     return { ok: false, error: "This video has already been approved — there is nothing to ask." };
   }
 
@@ -342,7 +386,37 @@ export async function prepareSend(
   if (!videoUrl) {
     return {
       ok: false,
-      error: "This task has no uploaded video. Upload the finished file before sending.",
+      error: isPosterWork(d)
+        ? "This poster has no uploaded image. Upload the finished design before sending."
+        : "This task has no uploaded video. Upload the finished file before sending.",
+    };
+  }
+
+  /*
+   * No caption, no asking — for a video.
+   *
+   * The client is being asked to approve a post, and a video post is the clip
+   * and its words together. Sent without them they approve a clip, and the
+   * copy that actually goes out underneath it on their feed is copy they were
+   * never shown — which is the one thing this whole flow exists to prevent.
+   *
+   * It reads as a missing step rather than a rule: the caption is written
+   * from the video as it uploads, so an empty one means that either has not
+   * finished or it failed, and both are worth seeing before a client is
+   * messaged.
+   *
+   * **And it stopped every poster from being sent at all.** A poster has no
+   * caption to wait for: the words are *on it*, put there by the designer from
+   * the brief, and the AI writer watches a video — there is no path by which a
+   * poster ever gets one. So this rule, written about videos, silently held
+   * back a whole kind of work with a message telling somebody to wait for a
+   * caption that was never coming.
+   */
+  if (!isPosterWork(d) && !composeCaption(d.caption, d.hashtags).trim()) {
+    return {
+      ok: false,
+      error:
+        "This video has no caption yet — the client would be approving the video without the words that go with it. Wait for the AI caption, or write one, then send.",
     };
   }
 
@@ -358,7 +432,19 @@ export async function prepareSend(
       title: d.title,
       groupId: group.group_id,
       videoUrl,
-      watchUrl: d.cloud_video_key ? buildVideoPermalink(d.id, d.cloud_video_key) : d.edited_link,
+      /*
+       * The link that stands in for the file when it is too big to send.
+       *
+       * Ours when we have the bytes: `/v/<id>` is public, never expires, and
+       * mints a fresh signed URL on each visit. Otherwise the pasted link —
+       * put through the same rewrite the media above gets, so a Drive share
+       * address opens the file rather than a page about it. The two used to
+       * disagree: the file attached correctly and the link beside it was the
+       * raw share URL.
+       */
+      watchUrl: d.cloud_video_key
+        ? buildVideoPermalink(d.id, d.cloud_video_key)
+        : directDownloadUrl(d.edited_link),
       ...buildApprovalMessages(d.title, composeCaption(d.caption, d.hashtags)),
     },
   };
@@ -565,7 +651,15 @@ export async function recordSendStatus(input: {
 
 /* -------------------------------- Approvals -------------------------------- */
 
-/** Videos this group has been sent and hasn't answered yet, newest first. */
+/**
+ * Videos this group has been sent and hasn't answered yet, newest first.
+ *
+ * `wa_status` says what happened on WhatsApp and nothing else, so on its own it
+ * kept a video here for ever once a super admin approved it at a desk — and
+ * this list is what decides whether the group is asked to pick between several
+ * videos. `settledSql` is the second half of the question: has anybody, by any
+ * route, already answered it.
+ */
 export async function awaitingReplyInGroup(groupId: string): Promise<
   { id: number; video_code: string | null; title: string }[]
 > {
@@ -575,6 +669,7 @@ export async function awaitingReplyInGroup(groupId: string): Promise<
        FROM deliverables
       WHERE wa_group_id = ?
         AND wa_status IN ('queued','sending','sent','delivered','viewed')
+        AND NOT ${settledSql()}
       ORDER BY wa_sent_at DESC, id DESC
       LIMIT 10`,
     [groupId]
@@ -724,7 +819,6 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
    * just pointed at the thing they meant. It also hides which half is broken:
    * a reply that never arrived and a reply we could not match read the same.
    */
-  let quotedButUnknown = false;
   if (!videoCode) {
     /*
      * A reply to the video message is the answer, and it is exact.
@@ -754,13 +848,12 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
           input.quotedMessageId ?? "",
           // The stanza is the tail of the id we stored, so a suffix match
           // finds it whichever prefix the library gave the original.
-          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : " ",
+          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : "\0",
           input.quotedMessageId ?? "",
-          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : " ",
+          input.quotedStanzaId ? `%_${input.quotedStanzaId}` : "\0",
         ]
       );
       if (quoted?.video_code) videoCode = quoted.video_code;
-      else quotedButUnknown = true;
     }
 
     /*
@@ -1005,6 +1098,34 @@ export async function recordApproval(input: ApprovalInput): Promise<ApprovalResu
         `INSERT INTO feedback (deliverable_id, author_id, author_role, message)
          VALUES (?, NULL, 'client', ?)`,
         [d.id, body]
+      ).catch(() => {});
+    }
+  }
+
+  /*
+   * An approval on WhatsApp schedules the post, exactly as one at the desk does.
+   *
+   * It used to stop at `status = 'approved'` and nothing else happened. The
+   * whole apparatus that picks a time — the client's learned best hour, the
+   * country's evening window, the handoff that puts the row in the publishing
+   * queue — lived only where a *person* moved a task to Scheduled. So a client
+   * approving their reel at midnight produced a row marked approved and queued
+   * for nothing, and somebody had to open the task the next morning and move
+   * it along by hand. The client had already said yes; the only thing left was
+   * the clicking.
+   *
+   * The conditions are `approvalHandoff`'s, which is the point of it: this
+   * path once checked two of them and the client portal checked five, so a
+   * poster approved in a group — or a reel whose video had not been uploaded —
+   * was marked scheduled and handed to a queue that would never return it.
+   */
+  if (input.command === "approve") {
+    const updates = await approvalHandoff(d.id);
+    const cols = Object.keys(updates);
+    if (cols.length) {
+      await execute(
+        `UPDATE deliverables SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`,
+        [...cols.map((c) => updates[c]), d.id]
       ).catch(() => {});
     }
   }
@@ -1357,6 +1478,13 @@ export async function getPanel(deliverableId: number): Promise<{
   lastError: string | null;
   hasGroup: boolean;
   hasVideo: boolean;
+  /**
+   * A video post is the clip and its words; without them there is nothing to
+   * ask. True for a poster whatever its caption says — the words are on the
+   * design, so there is none to wait for and blocking on one held every poster
+   * back from ever reaching a client.
+   */
+  hasCaption: boolean;
 } | null> {
   if (!(await approvalsReady())) return null;
 
@@ -1373,11 +1501,16 @@ export async function getPanel(deliverableId: number): Promise<{
     cloud_video_key: string | null;
     cloud_video_url: string | null;
     edited_link: string | null;
+    caption: string | null;
+    hashtags: string | null;
+    service: string | null;
+    video_type: string | null;
     group_name: string | null;
   }>(
     `SELECT d.video_code, d.wa_status, d.wa_sent_at, d.wa_viewed_at, d.wa_responded_at,
             d.wa_approved_by, d.wa_comment, d.wa_last_error, d.client_id,
             d.cloud_video_key, d.cloud_video_url, d.edited_link,
+            d.caption, d.hashtags, d.service, d.video_type,
             g.group_name
        FROM deliverables d
        LEFT JOIN whatsapp_groups g
@@ -1400,6 +1533,9 @@ export async function getPanel(deliverableId: number): Promise<{
     lastError: d.wa_last_error,
     hasGroup: Boolean(d.group_name !== null || (await getGroupsForClient(d.client_id)).length),
     hasVideo: Boolean(d.cloud_video_key || d.cloud_video_url || d.edited_link),
+    // Composed and excused the same way `prepareSend` does it, so the button
+    // and the send cannot disagree about whether this can go.
+    hasCaption: isPosterWork(d) || Boolean(composeCaption(d.caption, d.hashtags).trim()),
   };
 }
 

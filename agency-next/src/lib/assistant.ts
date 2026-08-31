@@ -16,6 +16,7 @@ import { env } from "./env";
 import type { SessionUser } from "./auth";
 import { crmClientIds } from "./crm";
 import { needsRawFootageSql } from "./raw-footage";
+import { ask, modelReady } from "./model";
 import {
   getPosts,
   followerBoard,
@@ -478,9 +479,18 @@ function snapshotAsText(s: Snapshot): string {
   return lines.join("\n");
 }
 
-async function askGemini(question: string, s: Snapshot): Promise<string | null> {
-  if (!env.gemini.enabled) return null;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.gemini.model}:generateContent?key=${env.gemini.apiKey}`;
+/**
+ * The open questions, the ones the counts above could not answer.
+ *
+ * `low` effort on purpose, and it is the opposite call from the one the client
+ * assistant makes. This answers somebody sitting at the portal with the board
+ * open beside them — they can see the numbers, they want them read back — and
+ * a considered paragraph arriving fifteen seconds later is worse than a plain
+ * one now. The client assistant thinks harder because its reader has no board
+ * to check it against.
+ */
+async function askModel(question: string, s: Snapshot): Promise<string | null> {
+  if (!modelReady()) return null;
 
   const system = [
     "You are the assistant inside a digital-marketing agency portal.",
@@ -490,26 +500,19 @@ async function askGemini(question: string, s: Snapshot): Promise<string | null> 
     "Never mention the DATA block, prompts, or that you are a language model.",
   ].join(" ");
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: `DATA:\n${snapshotAsText(s)}\n\nQUESTION: ${question}` }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 400 },
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const text: string = (data?.candidates?.[0]?.content?.parts || [])
-      .map((p: { text?: string }) => p.text || "")
-      .join("")
-      .trim();
-    return text || null;
-  } catch {
+  const res = await ask({
+    system,
+    user: `DATA:\n${snapshotAsText(s)}\n\nQUESTION: ${question}`,
+    effort: "low",
+    // Covers the thinking as well as the answer; brevity is the prompt's job.
+    maxTokens: 1500,
+    timeoutMs: 30_000,
+  });
+  if (!res.ok) {
+    console.warn(`[assistant] ${res.model}: ${res.error || "empty reply"}`);
     return null;
   }
+  return res.text.trim() || null;
 }
 
 export async function answerQuestion(user: SessionUser, question: string): Promise<string> {
@@ -522,7 +525,7 @@ export async function answerQuestion(user: SessionUser, question: string): Promi
   const fast = fastAnswer(q, snap);
   if (fast) return fast;
 
-  const ai = await askGemini(q, snap);
+  const ai = await askModel(q, snap);
   if (ai) return ai;
 
   const c = snap.content;

@@ -24,8 +24,11 @@ import { env } from "./env";
 import { getSettings } from "./settings";
 import { prettyLocal } from "./posting";
 import { fmtDate } from "./utils";
-import { facebookPermalink } from "./facebook";
-import { needsRawFootageSql } from "./raw-footage";
+import { facebookLinkOf } from "./facebook";
+import { clientAdsSummary, type ClientAdsSummary } from "./ads";
+import { shortName, shortPlace } from "./ad-labels";
+import { footageChaseSql } from "./footage-scope";
+import { ask, modelReady, type Effort } from "./model";
 
 /** How long after replying before this group may be replied to again. */
 const COOLDOWN_MS = 20_000;
@@ -57,7 +60,8 @@ export type ClientFacts = {
   contactPerson: string | null;
   /** Their own videos, most recent first. */
   items: {
-    code: string;
+    /** Their own code for it, or null before it has ever been sent to them. */
+    code: string | null;
     title: string;
     status: string;
     due: string | null;
@@ -86,6 +90,25 @@ export type ClientFacts = {
    * client's chat message is not the right trigger for one.
    */
   invoices: { number: string; amount: number; due: string | null; payUrl: string | null }[];
+  /**
+   * How their ads have done over the last 30 days, and never what they cost.
+   *
+   * This is `clientAdsSummary` — the same reader behind the client's own Ads
+   * page — and choosing it is the entire safety argument. It does not select
+   * spend, currency, cost per lead or CPM, so there is no money in this object
+   * to leak into a prompt. Not "the model is told not to say it": there is
+   * nothing to say. A rule in a prompt is an instruction a message can argue
+   * with; a column that was never fetched is not.
+   *
+   * That matters more here than on the portal page. A page renders what it is
+   * given; a model is handed everything and asked to be helpful, and "helpful"
+   * plus a spend figure is a client comparing what they pay us with what we
+   * pay Meta, in writing, in their own group.
+   *
+   * Null when they have never run ads, or on a database where the ad tables
+   * have not been applied.
+   */
+  ads: ClientAdsSummary | null;
 };
 
 /** One line of the conversation so far, oldest first. */
@@ -119,8 +142,18 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
   );
   if (!c) return null;
 
+  /*
+   * Named only when it exists.
+   *
+   * A column that arrived with a later migration cannot be listed
+   * unconditionally: on a database that has not run it, the SELECT is a hard
+   * error and the assistant stops answering the client altogether — a whole
+   * feature lost to a link.
+   */
+  const hasFbLink = await hasColumn("deliverables", "facebook_permalink");
   const rows = await query<{
     id: number;
+    video_code: string | null;
     title: string;
     status: string;
     due_date: string | null;
@@ -128,9 +161,11 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
     posted_at: string | null;
     instagram_permalink: string | null;
     facebook_post_id: string | null;
+    facebook_permalink?: string | null;
   }>(
-    `SELECT id, title, status, due_date, scheduled_at, posted_at, instagram_permalink,
-            facebook_post_id
+    `SELECT id, video_code, title, status, due_date, scheduled_at, posted_at,
+            instagram_permalink, facebook_post_id
+            ${hasFbLink ? ", facebook_permalink" : ""}
        FROM deliverables
       WHERE client_id = ?
       ORDER BY COALESCE(scheduled_at, due_date, created_at) DESC
@@ -139,7 +174,23 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
   );
 
   const items = rows.map((r) => ({
-    code: `V${r.id}`,
+    /*
+     * The code the client has actually been given, not one built from the row
+     * id — they are different numbers and only one of them works.
+     *
+     * Codes are issued by `ensureVideoCode` from their own counter when a
+     * video is first sent for approval, and `findByVideoCode` matches on
+     * that column and nothing else. Built from the id instead, the assistant
+     * told a client "V179955" for a video whose code is "V901", and then —
+     * following its own instructions — asked them to reply "APPROVE V179955".
+     * That command matches no row, so the approval silently does nothing and
+     * the client is left believing they approved it.
+     *
+     * Null when the video has never been sent, which is the honest answer:
+     * there is no code to quote yet, and the renderer leaves it out rather
+     * than inventing one the client has never seen.
+     */
+    code: r.video_code,
     title: r.title,
     status: r.status,
     due: r.due_date,
@@ -154,7 +205,7 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
      * post. The model can only offer what it is given.
      */
     permalink: r.instagram_permalink,
-    facebookLink: facebookPermalink(r.facebook_post_id),
+    facebookLink: facebookLinkOf(r),
   }));
 
   const count = (fn: (s: string) => boolean) => items.filter((i) => fn(i.status)).length;
@@ -170,7 +221,17 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
    * Each is optional. A database without the invoice columns still gets an
    * assistant that can answer everything else, rather than no assistant.
    */
-  const [planned, footage, bills] = await Promise.all([
+  /*
+   * Thirty days, not the calendar month.
+   *
+   * "How are my ads doing" asked on the 2nd would be answered with two days of
+   * figures, or none — which reads as the ads having stopped. A rolling window
+   * always has something in it and always means the same thing.
+   */
+  const adTo = new Date().toISOString().slice(0, 10);
+  const adFrom = new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+
+  const [planned, footage, bills, ads] = await Promise.all([
     query<{ n: number }>(
       `SELECT COUNT(*) AS n FROM deliverables
         WHERE client_id = ? AND month_key = ? AND status NOT IN ('cancelled','rejected')`,
@@ -180,7 +241,7 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
       `SELECT title FROM deliverables
         WHERE client_id = ? AND status IN ('pending','waiting_for_raw')
           AND (raw_drive_link IS NULL OR raw_drive_link = '')
-          AND ${needsRawFootageSql("")}
+          AND ${await footageChaseSql("")}
         ORDER BY due_date IS NULL, due_date ASC LIMIT 10`,
       [clientId]
     ).catch(() => []),
@@ -200,6 +261,9 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
         [clientId]
       );
     })().catch(() => []),
+    // Null on a database where the ad tables were never applied, exactly as
+    // for a client who has never run an ad. Neither is worth an error.
+    clientAdsSummary(clientId, adFrom, adTo).catch(() => null),
   ]);
 
   return {
@@ -208,7 +272,7 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
     contactPerson: c.contact_person,
     items,
     counts: {
-      awaitingYourApproval: count((s) => s === "review" || s === "content_review"),
+      awaitingYourApproval: count((s) => s === "review"),
       changesRequested: count((s) => s === "changes_requested"),
       inEditing: count((s) => ["editing", "raw_uploaded", "caption_ready"].includes(s)),
       scheduled: count((s) => s === "scheduled"),
@@ -228,6 +292,7 @@ export async function clientFacts(clientId: number): Promise<ClientFacts | null>
       due: b.due_date,
       payUrl: b.payment_link || null,
     })),
+    ads: ads && ads.totals.ads > 0 ? ads : null,
   };
 }
 
@@ -269,6 +334,66 @@ export async function recentTurns(groupId: string, limit = 10): Promise<Turn[]> 
     }));
 }
 
+/**
+ * Their ad results, as lines the model can quote.
+ *
+ * Written out here rather than handed over as an object, because the shape is
+ * the answer to the question people actually ask. "How are my ads going" is a
+ * funnel question — how many saw it, how many did something, how many got in
+ * touch — and the numbers only mean anything in that order.
+ *
+ * ## A dash is not a nought, in a chat as much as on a page
+ *
+ * Meta does not report every action on every account. An unreported figure is
+ * left out of the line entirely rather than sent as 0: a client told "0
+ * profile visits" reads that their ad was ignored, when the truth is that we
+ * do not have the number. A missing line prompts "we'll check"; a wrong zero
+ * prompts a complaint about work that may have gone perfectly well.
+ *
+ * ## No money, and nothing money can be recovered from
+ *
+ * Nothing here is spend, and nothing here divides into it. That is not a
+ * choice made at this line — `clientAdsSummary` never fetched it. Cost per
+ * lead and CPM are absent for the same reason: either one beside a lead count
+ * hands back the spend by arithmetic.
+ */
+export function adLines(a: ClientAdsSummary | null): string[] {
+  if (!a) return ["They have no ads running with us.", ""];
+
+  const n = (v: number) => v.toLocaleString("en-IN");
+  const t = a.totals;
+
+  // Named the way the client's own page names them, so a figure quoted in the
+  // group and a figure read on the portal are recognisably the same figure.
+  const totals = [
+    t.reach === null ? null : `${n(t.reach)} accounts reached`,
+    `${n(t.impressions)} impressions`,
+    t.engagement === null ? null : `${n(t.engagement)} engagements`,
+    `${n(t.clicks)} clicks`,
+    t.ctr === null ? null : `${t.ctr.toFixed(2)}% click rate`,
+    t.profileVisits === null ? null : `${n(t.profileVisits)} profile visits`,
+    `${n(t.leads)} enquiries`,
+  ].filter(Boolean);
+
+  return [
+    `Their ads, ${fmtDate(a.from)} to ${fmtDate(a.to)}: ${t.ads} ${t.ads === 1 ? "ad" : "ads"} ran.`,
+    `Across all of them: ${totals.join(", ")}.`,
+    // The three biggest. A WhatsApp reply is not a report, and the tail of a
+    // list of twelve ads is noise in a chat.
+    ...a.ads.slice(0, 3).map((ad) => {
+      const where = ad.locations ? shortPlace(ad.locations) : null;
+      return (
+        `- "${shortName(ad.name, a.company)}"` +
+        (where ? `, running in ${where}` : "") +
+        `: ${n(ad.impressions)} impressions, ${n(ad.clicks)} clicks` +
+        (ad.engagement === null ? "" : `, ${n(ad.engagement)} engagements`) +
+        `, ${n(ad.leads)} ${ad.leads === 1 ? "enquiry" : "enquiries"}`
+      );
+    }),
+    "",
+  ];
+}
+
 /** The facts as plain lines — what the model is allowed to draw on. */
 function factsAsText(f: ClientFacts): string {
   /*
@@ -308,10 +433,13 @@ function factsAsText(f: ClientFacts): string {
         ].join("\n")
       : "They have no unpaid invoices.",
     "",
+    ...adLines(f.ads),
     "Their videos:",
     ...f.items.map((i) =>
       [
-        `- ${i.code} "${i.title}" — ${i.status.replace(/_/g, " ")}`,
+        // Without a code there is nothing to quote: the video has never been
+        // sent, so the client has never seen one.
+        `- ${i.code ? `${i.code} ` : ""}"${i.title}" — ${i.status.replace(/_/g, " ")}`,
         i.due ? `due ${when(i.due)}` : null,
         i.scheduledAt ? `goes out ${at(i.scheduledAt)}` : null,
         i.postedAt ? `posted ${at(i.postedAt)}` : null,
@@ -343,7 +471,7 @@ export function shouldAutoReply(input: {
    */
   addressed?: boolean;
   now?: number;
-}): { reply: boolean; reason?: string; kind?: "answer" | "emoji" } {
+}): { reply: boolean; reason?: string; kind?: "answer" | "emoji" | "hold" } {
   const now = input.now ?? Date.now();
 
   if (input.direction === "out") return { reply: false, reason: "our own message" };
@@ -353,7 +481,23 @@ export function shouldAutoReply(input: {
 
   const text = (input.message || "").trim();
   if (!text) return { reply: false, reason: "empty" };
-  if (text.length > MAX_INBOUND_CHARS) return { reply: false, reason: "too long to be a question" };
+
+  /*
+   * A long message is still a message, and silence is the one answer that is
+   * always wrong.
+   *
+   * This used to return `reply: false`, so a client who typed out a paragraph
+   * — which is what somebody does when the thing they want is complicated, or
+   * when they are annoyed — got nothing back at all. The two people most
+   * likely to be ignored by that rule were the two who least deserved it.
+   *
+   * It is not sent to the model: eight hundred characters of context is a
+   * document, and an answer confidently drawn from the wrong half of it is
+   * worse than no answer. So it is acknowledged instead, and the team is
+   * notified — which is the whole difference between "we're on it" and being
+   * left on read.
+   */
+  if (text.length > MAX_INBOUND_CHARS) return { reply: true, kind: "hold" };
 
   /*
    * Emoji on their own get an emoji back.
@@ -488,8 +632,17 @@ const SYSTEM = [
   "",
   "Answer only from the FACTS block. It contains this client's own work and nothing else.",
   "It covers their videos, what is scheduled and posted, their monthly package, anything we are waiting",
-  "on from them, and any unpaid invoice with its amount and due date. Use all of it — a question you can",
-  "answer exactly should never get a vague answer.",
+  "on from them, any unpaid invoice with its amount and due date, and how their ads have done over the",
+  "last 30 days. Use all of it — a question you can answer exactly should never get a vague answer.",
+  "",
+  "ADS. Answer these as fully as any other question: how many people the ads reached, how many",
+  "engagements, clicks, profile visits and enquiries, which ad did best, and where each one is running.",
+  "Those numbers are theirs and they are in FACTS.",
+  "What is NOT in FACTS is what the ads cost — budget, spend, ad rates, cost per lead, cost per view.",
+  "You do not have those figures, so you cannot state, estimate, approximate or work one out, and you",
+  "must not try. Asked about money on ads, thank them and say the team will come back to them on it.",
+  "A figure absent from a line is a figure Meta did not report to us. Say we do not have that one and",
+  "will check — never call it zero, which would tell them their ad was ignored when it may have done well.",
   "If the answer is not in the FACTS, do not guess and do not say you don't understand. Thank them for",
   "asking, say plainly that you'll check with the team, and that someone will come back to them shortly.",
   "A polite 'let me find out' is always a better answer than a wrong one.",
@@ -534,53 +687,26 @@ export function holdingReply(senderName?: string | null): string {
 }
 
 /**
- * Which model answers a client.
- *
- * Deliberately its own setting rather than the one the caption studio uses.
- * That one is the lite model because a caption is drafted, read and edited by
- * a person before anyone outside sees it; this one is read by the customer
- * unedited, and is worth the better model. Both stay overridable, so a bill
- * that gets uncomfortable can be turned down without touching the other.
- */
-const REPLY_MODEL = process.env.GEMINI_REPLY_MODEL || "gemini-flash-latest";
-
-/**
- * The model to fall back to when the good one is out of quota.
- *
- * On a free key the better model's daily allowance is small, and once it is
- * spent every client question would get the holding line — a worse answer than
- * the lite model would have given, withheld on a technicality the client
- * cannot see. The lite model has its own, much larger allowance, so the order
- * is: think hard, else answer plainly, else promise a person.
- */
-const FALLBACK_MODEL = env.gemini.model;
-
-/** Room to work the answer out before writing it, where the model supports it. */
-const THINKING_BUDGET = 1536;
-
-/**
- * The output cap, which has to cover the thinking as well as the answer.
- *
- * Gemini counts thought tokens against `maxOutputTokens`, so a budget of 1536
- * against a cap of 900 spends the whole allowance reasoning and returns half a
- * sentence — which is exactly what a client saw: "…(if you were asking about
- * V103" and nothing more. The cap is therefore the budget plus room for a real
- * reply; brevity is the prompt's job, not the token limit's.
- */
-const MAX_OUTPUT_TOKENS = THINKING_BUDGET + 1024;
-
-type Part = { text?: string };
-
-/**
  * Compose a reply, or null if the model can't be reached.
  *
  * Null rather than a canned fallback on purpose — the caller decides what to
  * say when there is no answer, and it has the notification to go with it.
  *
- * Two attempts, and the second is not the same as the first. `thinkingConfig`
- * is rejected outright by models that do not support it, so a 400 retries
- * without it rather than falling back to a holding line over a parameter the
- * client neither knows nor cares about.
+ * ## It thinks before it answers
+ *
+ * `medium` effort, not because a WhatsApp line is hard to write, but because
+ * working out *what was asked* is. "And the other one?" means nothing without
+ * the conversation above it; "when is it going out" has a different answer for
+ * each of four videos. A model that answers from first impressions gets those
+ * wrong fluently, and the client reads a confident sentence about the wrong
+ * reel.
+ *
+ * ## Two models, and the second is not a worse answer
+ *
+ * The good model first, the fast one if it fails. That order matters: a plain
+ * answer that is correct beats "someone will get back to you" every time, and
+ * the fallback is only reached when the first has already failed — so the
+ * choice is never between good and fast, it is between fast and nothing.
  */
 export async function composeReply(
   facts: ClientFacts,
@@ -588,14 +714,10 @@ export async function composeReply(
   senderName: string | null,
   history: Turn[] = []
 ): Promise<string | null> {
-  if (!env.gemini.enabled) return null;
+  if (!modelReady()) return null;
 
   const settings = await getSettings().catch(() => null);
   const agency = settings?.company_name || "the team";
-
-  const urlFor = (model: string) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}` +
-    `:generateContent?key=${env.gemini.apiKey}`;
 
   // The message being answered is usually the last line of the history too.
   // Dropping it there keeps the prompt from asking the same thing twice.
@@ -604,94 +726,61 @@ export async function composeReply(
     ? `CONVERSATION so far (oldest first):\n${earlier.map((t) => `${t.who}: ${t.text}`).join("\n")}\n\n`
     : "";
 
-  const ask = async (
-    model: string,
-    withThinking: boolean
-  ): Promise<{ text: string | null; status: number }> => {
-    const res: Response = await fetch(urlFor(model), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: `${SYSTEM}\n\nYou represent: ${agency}.` }] },
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text:
-                  `FACTS:\n${factsAsText(facts)}\n\n` +
-                  conversation +
-                  `MESSAGE from ${senderName || "the client"}:\n${message}`,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: withThinking ? MAX_OUTPUT_TOKENS : 1024,
-          ...(withThinking ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } } : {}),
-        },
-      }),
-      // Longer than before: thinking takes time, and a client waiting twenty
-      // seconds for a good answer is better served than one answered in five
-      // with "I'll check with the team".
-      signal: AbortSignal.timeout(35_000),
+  const user =
+    `FACTS:\n${factsAsText(facts)}\n\n` +
+    conversation +
+    `MESSAGE from ${senderName || "the client"}:\n${message}`;
+
+  const attempt = (model: string, effort: Effort) =>
+    ask({
+      system: `${SYSTEM}\n\nYou represent: ${agency}.`,
+      user,
+      model,
+      effort,
+      /*
+       * Room for the thinking as well as the reply. Reasoning tokens come out
+       * of this same budget, so a cap sized for the answer alone spends the
+       * lot working it out and returns half a sentence — which is exactly what
+       * a client once received: "…(if you were asking about V103" and nothing
+       * more. Brevity is the prompt's job, never the token limit's.
+       */
+      maxTokens: 3000,
+      // A client waiting twenty seconds for a good answer is better served
+      // than one answered in five with "I'll check with the team".
+      timeoutMs: 35_000,
     });
-    if (!res.ok) {
-      // Loud, because the client is quietly getting the holding line instead
-      // of an answer and the only other symptom is an assistant that has
-      // mysteriously stopped being useful.
-      const detail = await res.text().catch(() => "");
-      console.warn(`[whatsapp-ai] ${model} returned ${res.status}: ${detail.slice(0, 200)}`);
-      return { text: null, status: res.status };
-    }
 
-    const j = (await res.json()) as { candidates?: { content?: { parts?: Part[] } }[] };
-    /*
-     * A thinking model can return its reasoning as its own part. Only the
-     * parts marked as reasoning are dropped — joining everything would post
-     * the model's working out into the client's group.
-     */
-    const parts = (j.candidates?.[0]?.content?.parts || []).filter(
-      (p) => !(p as { thought?: boolean }).thought
-    );
-    const text = parts.map((p) => p.text || "").join("").trim();
-    return { text: text || null, status: res.status };
-  };
-
-  /*
-   * Three goes at an answer, each a different kind of retry, because the three
-   * ways this fails need three different responses.
-   *
-   * 400 — the request was wrong for this model, essentially always the
-   * thinking budget. Ask the same model again without it, rather than send a
-   * holding line over a parameter the client neither knows nor cares about.
-   *
-   * 429 / 5xx — out of quota, or a bad minute at Google's end. Pause, then go
-   * to the smaller model, which has its own allowance. A plainer answer beats
-   * "someone will get back to you" every time.
-   *
-   * Anything else, or an empty candidate — stop. The caller has a courteous
-   * holding line and a notification to the team, which is the honest end of
-   * the road.
-   */
   try {
-    const first = await ask(REPLY_MODEL, true);
-    if (first.text) return trim(first.text);
+    const first = await attempt(env.gemini.model, "medium");
+    if (first.ok && first.text.trim()) return trim(first.text.trim());
+    console.warn(`[whatsapp-ai] ${env.gemini.model}: ${first.error || "empty reply"}`);
 
-    if (first.status === 400) {
-      const plain = await ask(REPLY_MODEL, false);
-      if (plain.text) return trim(plain.text);
-    } else if (first.status === 429 || first.status >= 500) {
-      await new Promise((r) => setTimeout(r, 1_500));
-      if (FALLBACK_MODEL && FALLBACK_MODEL !== REPLY_MODEL) {
-        const smaller = await ask(FALLBACK_MODEL, false);
-        if (smaller.text) return trim(smaller.text);
-      } else {
-        const again = await ask(REPLY_MODEL, true);
-        if (again.text) return trim(again.text);
-      }
-    }
+    /*
+     * Only when trying again could plausibly work. A refused key or a bad
+     * request fails identically on the smaller model, and spending a second
+     * call to prove it just makes the client wait twice as long for the same
+     * holding line.
+     */
+    if (!first.retriable) return null;
+
+    /*
+     * And only when the second attempt is a different model.
+     *
+     * The two are configurable and, on the default configuration, identical —
+     * so this repeated the call that had just failed, against the same model,
+     * for the same reason. A client whose group hit a rate limit waited twice
+     * as long for the same holding line, and the retry spent a second slice
+     * of the quota that caused it.
+     *
+     * The smaller model is a real second chance only when it is a different
+     * model. When it is not, the holding reply is the better answer and it is
+     * twenty seconds sooner.
+     */
+    if (env.gemini.fastModel === env.gemini.model) return null;
+
+    const second = await attempt(env.gemini.fastModel, "low");
+    if (second.ok && second.text.trim()) return trim(second.text.trim());
+    console.warn(`[whatsapp-ai] ${env.gemini.fastModel}: ${second.error || "empty reply"}`);
     return null;
   } catch (err) {
     console.warn("[whatsapp-ai] reply failed:", err instanceof Error ? err.message : err);

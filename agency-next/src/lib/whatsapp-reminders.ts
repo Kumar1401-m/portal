@@ -16,11 +16,13 @@
  */
 import "server-only";
 import { onTheFloor } from "./client-status";
-import { query, execute, hasColumn, hasTable } from "./db";
+import { query, queryOne, execute, hasColumn, hasTable } from "./db";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { sendDueMessages } from "./reminder-outbox";
 import { recordRun } from "./automation-runs";
-import { needsRawFootageSql } from "./raw-footage";
+import { footageChaseSql } from "./footage-scope";
+import { settledSql } from "./whatsapp-approvals";
+import { groupOrderSql, type Purpose } from "./whatsapp-groups";
 import { notifyAdmins } from "./notify";
 import { expensesNeedingNotice } from "./expenses";
 import { money } from "./utils";
@@ -96,19 +98,22 @@ const AUTO_APPROVE_AFTER_HOURS = 24;
  * which is not what was wanted either: the point is to catch somebody during
  * the day they are actually working, not once a week for three weeks.
  *
- * So three slots in a day, and every day the footage is still missing.
- * Morning, after lunch, and end of day, which is when a person is most likely
- * to be at a desk and able to find the file.
+ * It was three slots a day — morning, after lunch, end of day — every day the
+ * footage was missing. That is the loudest thing this portal does, and the
+ * clients said so: asked three times a day for something they already know
+ * they owe you, it stops reading as a reminder and starts reading as
+ * pestering, and then the whole group gets muted. A muted group is worse than
+ * a missed reminder, because everything else goes there too.
  *
- * Each one stops the moment the footage arrives — the query only ever returns
- * tasks with no link on them — and each is claimed per client, per day, per
- * slot, so a run happening twice cannot say the same thing twice.
+ * One a day, at half past one — the middle of a working day, when somebody is
+ * at a desk and can actually go and find the file. Morning is too early to
+ * have looked; the end of the day is too late to act.
+ *
+ * It still stops the moment the footage arrives — the query only ever returns
+ * tasks with no link on them — and it is still claimed per client, per day,
+ * per slot, so a run happening twice cannot say the same thing twice.
  */
-const FOOTAGE_SLOTS = [
-  { at: "10:00", key: "morning", stage: "early" as FootageStage },
-  { at: "13:30", key: "midday", stage: "due" as FootageStage },
-  { at: "18:00", key: "evening", stage: "late" as FootageStage },
-];
+const FOOTAGE_SLOTS = [{ at: "13:30", key: "midday", stage: "due" as FootageStage }];
 
 /**
  * How early the chase starts, in days before the due date.
@@ -125,11 +130,39 @@ const FOOTAGE_LEAD_DAYS = 3;
  * Returns true only for the caller that actually inserted the row. The unique
  * key does the arbitration, so this is safe against two runners racing.
  */
+/**
+ * The kinds the daily ceiling does not apply to.
+ *
+ * `auto_approve` is not a message — it is the portal deciding on the client's
+ * behalf, and the message merely says so. Holding it back because the group
+ * was busy would leave a video unapproved and unpublished for a day, which is
+ * a far worse outcome than one more line in a chat.
+ *
+ * `team_digest` and `expense_due` never reach a client at all.
+ */
+const NO_CEILING: ReminderKind[] = ["auto_approve", "team_digest", "expense_due"];
+
 async function claim(
   kind: ReminderKind,
   scopeKey: string,
   meta: { clientId?: number | null; deliverableId?: number | null; groupId?: string | null } = {}
 ): Promise<boolean> {
+  /*
+   * Checked here rather than at the send, and that ordering is the point.
+   *
+   * A claim is the right to send. Refusing it leaves the message unclaimed, so
+   * tomorrow's run picks it up again — deferred, not lost. Checking at the
+   * send instead would burn the claim on a message nobody ever received, and
+   * that client would simply never hear about that video.
+   */
+  if (!NO_CEILING.includes(kind) && (await sentTodayTo(meta.clientId)) >= MAX_AUTOMATIC_PER_DAY) {
+    console.warn(
+      `[reminders] ${kind} ${scopeKey} held back — client ${meta.clientId} has had ` +
+        `${MAX_AUTOMATIC_PER_DAY} automatic messages today. It will go tomorrow.`
+    );
+    return false;
+  }
+
   const res = await execute(
     `INSERT IGNORE INTO whatsapp_reminders (kind, scope_key, client_id, deliverable_id, group_id)
      VALUES (?,?,?,?,?)`,
@@ -172,28 +205,54 @@ type Target = { client_id: number; company_name: string; group_id: string };
  * Computed once, because it needs `hasColumn`: a database that has not run
  * the migration keeps chasing everybody, which is what it did before.
  */
-let oneGroupSql: string | null = null;
-async function ONE_GROUP(): Promise<string> {
-  if (oneGroupSql) return oneGroupSql;
-  const optOut = (await hasColumn("clients", "auto_reminders"))
+/*
+ * And which group, of the several a client may have.
+ *
+ * The ordering comes from `groupOrderSql`, so a client who has split their
+ * chats — approvals with the creative team, invoices with accounts — is
+ * chased in the right one, and a client with a single group is addressed
+ * exactly where they always were.
+ */
+const oneGroupSql = new Map<Purpose, string>();
+async function ONE_GROUP(purpose: Purpose): Promise<string> {
+  const cached = oneGroupSql.get(purpose);
+  if (cached) return cached;
+  /*
+   * ...except for money, which has a switch of its own.
+   *
+   * `auto_reminders` is "this client would rather hear from a person", and
+   * its label on the client form lists what it covers: footage, approvals and
+   * the month's plan. It does not mention invoices — but this join did, so a
+   * client with the invoice box deliberately ticked and this one unticked was
+   * chased for nothing, with neither switch saying why. Two switches where one
+   * silently beats the other is worse than either.
+   *
+   * `auto_payment_reminders` is off for every client until somebody ticks it,
+   * so a tick there is already a deliberate decision about that client. It
+   * stands on its own.
+   */
+  const optOut = purpose !== "payments" && (await hasColumn("clients", "auto_reminders"))
     ? "AND client_id IN (SELECT id FROM clients WHERE auto_reminders = 1)"
     : "";
-  oneGroupSql = `(
+  const sql = `(
   SELECT client_id,
-         SUBSTRING_INDEX(GROUP_CONCAT(group_id ORDER BY is_default DESC, id ASC), ',', 1) AS group_id
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(group_id ORDER BY ${await groupOrderSql(purpose)}), ',', 1
+         ) AS group_id
     FROM whatsapp_groups
    WHERE is_active = 1 ${optOut}
    GROUP BY client_id
 )`;
-  return oneGroupSql;
+  oneGroupSql.set(purpose, sql);
+  return sql;
 }
 
-/** Clients we can actually reach: active, with a linked group. */
-async function reachableClients(): Promise<Target[]> {
+/** Clients we can actually reach for this kind of message: active, with a group for it. */
+async function reachableClients(purpose: Purpose): Promise<Target[]> {
   return query<Target>(
     `SELECT c.id AS client_id, c.company_name, g.group_id
        FROM clients c
-       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP(purpose)} g ON g.client_id = c.id
       WHERE ${onTheFloor()}`
   );
 }
@@ -210,6 +269,44 @@ async function reachableClients(): Promise<Target[]> {
  * for this to break: the claim survives, so the reminder is never retried, and
  * the run reports success while the client hears nothing.
  */
+/**
+ * The most automatic messages one client may get in a day.
+ *
+ * Asked for after a client said there were too many. Every rule here is
+ * individually reasonable — chase an approval, ask for footage, mention the
+ * unpaid invoice — and on a busy week they land on the same group on the same
+ * morning, and the person reading them has no idea a robot is choosing the
+ * order. Four is a working day's worth; the fifth would be the one that gets
+ * the group muted.
+ *
+ * A ceiling, not a schedule: on a quiet day nothing is sent at all. And it is
+ * counted per client rather than per kind, because the client does not
+ * experience "kinds" — they experience a phone buzzing.
+ *
+ * Not applied to anything a person pressed. Somebody deciding to chase a
+ * client today has weighed it themselves, and the console sends through
+ * `reminder-outbox`, not through here.
+ */
+const MAX_AUTOMATIC_PER_DAY = 4;
+
+/**
+ * How many have already gone to this client today.
+ *
+ * Counted from the claims table, which is the only complete record of what
+ * this file has sent — one row per message, written the moment the right to
+ * send is taken. `sent_at` is the database clock, and so is `CURDATE()`, so
+ * "today" means the same thing on both sides of the comparison.
+ */
+async function sentTodayTo(clientId: number | null | undefined): Promise<number> {
+  if (!clientId) return 0;
+  const row = await queryOne<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM whatsapp_reminders
+      WHERE client_id = ? AND DATE(sent_at) = CURDATE()`,
+    [clientId]
+  ).catch(() => null);
+  return Number(row?.n ?? 0);
+}
+
 async function deliver(
   kind: ReminderKind,
   scopeKey: string,
@@ -251,9 +348,9 @@ async function findApprovalChases() {
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
-       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP("approvals")} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id AND s.status IN ('sent','delivered','read')
-      WHERE d.status IN ('content_review','review')
+      WHERE d.status = 'review' AND NOT ${settledSql("d.")}
       GROUP BY d.id, d.title, d.client_id, g.group_id
      HAVING MAX(s.created_at) < DATE_SUB(NOW(), INTERVAL ? HOUR)
       LIMIT 50`,
@@ -301,10 +398,10 @@ async function findAutoApprovals() {
     `SELECT d.id, d.title, d.client_id, g.group_id
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
-       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP("approvals")} g ON g.client_id = c.id
        JOIN whatsapp_send_log s ON s.deliverable_id = d.id
             AND s.status IN ('sent','delivered','read')
-      WHERE d.status IN ('content_review','review')
+      WHERE d.status = 'review' AND NOT ${settledSql("d.")}
       GROUP BY d.id, d.title, d.client_id, g.group_id
      HAVING MAX(s.created_at) < DATE_SUB(NOW(), INTERVAL ? HOUR)
       LIMIT 25`,
@@ -394,13 +491,13 @@ async function findFootageDue(lead: number) {
             COUNT(*) AS n
        FROM deliverables d
        JOIN clients c ON c.id = d.client_id AND ${onTheFloor()}
-       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP("footage")} g ON g.client_id = c.id
       WHERE d.status IN ('pending','waiting_for_raw')
         AND (d.raw_drive_link IS NULL OR d.raw_drive_link = '')
         -- A poster is not waiting on a shoot. Chasing one asks the client
         -- for rushes that will never exist, about a piece already sitting
         -- with our own designer.
-        AND ${needsRawFootageSql("d")}
+        AND ${await footageChaseSql("d")}
         AND d.due_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
       GROUP BY d.client_id, g.group_id, d.due_date
       ORDER BY d.due_date ASC
@@ -477,7 +574,7 @@ function findMonthItems(clientId: number, month: string) {
 /** The month's schedule, once, at the start of it. */
 async function sendMonthlyPlan(month: string): Promise<{ sent: number; failed: number }> {
   let sent = 0, failed = 0;
-  for (const t of await reachableClients()) {
+  for (const t of await reachableClients("updates")) {
     const key = `c:${t.client_id}:${month}`;
     const items = await findMonthItems(t.client_id, month);
     if (items.length === 0) continue; // nothing planned is not worth a message
@@ -531,7 +628,7 @@ async function findUnpaidInvoices() {
             DATE_FORMAT(CURDATE(), '%x-W%v') AS week
        FROM invoices i
        JOIN clients c ON c.id = i.client_id AND ${onTheFloor()}
-       JOIN ${await ONE_GROUP()} g ON g.client_id = c.id
+       JOIN ${await ONE_GROUP("payments")} g ON g.client_id = c.id
       WHERE i.status IN ('sent','overdue','partial')
         AND i.due_date IS NOT NULL AND i.due_date <= CURDATE()
         ${gated}
@@ -587,6 +684,15 @@ async function teamDigest(teamGroupId: string, today: string): Promise<{ sent: n
         AND d.status NOT IN ('posted','completed','cancelled','rejected')
       ORDER BY d.due_date ASC LIMIT 25`
   );
+  /*
+   * Both gates, deliberately — and the only place left that counts both.
+   *
+   * Everything that writes into a *client's* group was narrowed to `review`,
+   * because content review happens inside the agency and a client chased about
+   * it is being asked for something they have never been shown. This message
+   * goes to the agency's own group, where a pile at content review is exactly
+   * what the team needs to see. The distinction is who is reading it.
+   */
   const awaiting = await query<{ n: number }>(
     `SELECT COUNT(*) AS n FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE ${onTheFloor()} AND d.status IN ('content_review','review')`
@@ -722,7 +828,7 @@ export async function pendingReminders(month?: string): Promise<PendingReminders
     // The same per-client loop the rule runs. A single clever aggregate would
     // be faster and would be a second definition of "has a plan worth sending".
     const keys: string[] = [];
-    for (const t of await reachableClients()) {
+    for (const t of await reachableClients("updates")) {
       if ((await findMonthItems(t.client_id, m)).length > 0) keys.push(`c:${t.client_id}:${m}`);
     }
     return unclaimedCount("monthly_plan", keys);
@@ -771,7 +877,82 @@ export async function recentlySent(days = 7): Promise<{ kind: string; n: number 
   }
 }
 
+/**
+ * Who was messaged, what about, and when — newest first.
+ *
+ * `recentlySent` answers "how many of each kind", which is the shape of a
+ * health check. This answers the question somebody actually asks: *did we
+ * message that client, and how much?* A client saying "you send me too much"
+ * is a claim, and this is the only place it can be checked rather than argued
+ * about.
+ *
+ * One row per client per kind, with the last time and today's count beside it,
+ * because today's count is the one the daily ceiling acts on.
+ */
+export async function sentByClient(days = 7): Promise<
+  {
+    clientId: number | null;
+    company: string;
+    kind: string;
+    total: number;
+    today: number;
+    last: string;
+  }[]
+> {
+  try {
+    return await query(
+      `SELECT r.client_id AS clientId,
+              COALESCE(c.company_name, '—') AS company,
+              r.kind,
+              COUNT(*) AS total,
+              COALESCE(SUM(DATE(r.sent_at) = CURDATE()), 0) AS today,
+              MAX(r.sent_at) AS last
+         FROM whatsapp_reminders r
+         LEFT JOIN clients c ON c.id = r.client_id
+        WHERE r.sent_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        GROUP BY r.client_id, c.company_name, r.kind
+        ORDER BY MAX(r.sent_at) DESC
+        LIMIT 100`,
+      [days]
+    );
+  } catch {
+    // The table arrives with a migration. No table is not an error here — it
+    // means nothing has been sent, which is what an empty list says.
+    return [];
+  }
+}
+
 /* ------------------------------------------------------------------ */
+
+/**
+ * The two rules that are a clock, not a nudge.
+ *
+ * Everything else here is a message that is no worse for arriving a few hours
+ * late. These two are a promise with an hour on it: chased at twelve, decided
+ * at twenty-four. Run once a day with the rest, "24 hours" meant "somewhere
+ * between 24 and 48", and — worse — the chase and the decision could land in
+ * the same run, so a client got their warning and lost their say in the same
+ * minute. The twelve hours of warning is the whole reason approving on their
+ * behalf is defensible.
+ *
+ * So this is called from the publisher too, which runs every quarter hour.
+ * Both rules claim before they act and claim once per video for ever, so
+ * being called ninety-six times a day sends nothing extra — the frequency
+ * only decides how soon after the hour passes anything happens.
+ *
+ * Deliberately does not `recordRun`: this is half of the reminder job, and
+ * marking the whole job healthy from here would hide a nightly run that had
+ * stopped.
+ */
+export async function runApprovalClock(): Promise<{ chased: number; approved: number }> {
+  if (!(await hasColumn("whatsapp_reminders", "scope_key"))) return { chased: 0, approved: 0 };
+  // In this order, and separately caught: a chase that fails must not stop
+  // the decision, and a client is never approved in the same pass that first
+  // warned them — the twelve-hour gap does that on its own.
+  const chase = await chaseApprovals().catch(() => ({ sent: 0, failed: 0 }));
+  const auto = await autoApprove().catch(() => ({ sent: 0, failed: 0 }));
+  return { chased: chase.sent, approved: auto.sent };
+}
 
 /**
  * Run every rule once.

@@ -24,6 +24,8 @@ import {
   emojiReply,
   unheardVoiceReply,
 } from "@/lib/whatsapp-ai";
+import { groupAllows } from "@/lib/whatsapp-groups";
+import { clientWants } from "@/lib/client-messages";
 import { notifyAdmins } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
@@ -66,17 +68,69 @@ async function maybeAnswer(input: {
     if (!clientId) return false;
 
     /*
-     * Two answers that need no model, and must not wait for one.
+     * And whether the assistant is wanted in *this* chat.
+     *
+     * A client can have several groups with us, and the one where their own
+     * people talk among themselves is not a room a robot should answer in.
+     * Checked after the group is attributed rather than before, so an
+     * unlinked group is still rejected for the older, stronger reason: it
+     * belongs to nobody, so there are no facts that may safely be shared.
+     *
+     * Ticked by default, so this changes nothing until somebody unticks it.
+     */
+    if (!(await groupAllows(input.groupId, "chat"))) return false;
+
+    /*
+     * And whether this client wants an assistant at all.
+     *
+     * Two switches for one behaviour, and they answer different questions: the
+     * group one is "not in this room", the client one is "not for us". A
+     * client who says the replies are unwelcome should not have to have that
+     * unticked on each of their groups one at a time, and should not find it
+     * back the day somebody links a new one.
+     */
+    if (!(await clientWants(clientId, "ai_replies"))) return false;
+
+    /*
+     * Three answers that need no model, and must not wait for one.
      *
      * A voice note we could not hear has no words to answer, and an emoji has
      * nothing to look up — sending either through the model would spend a
      * call to arrive somewhere worse.
+     *
+     * `hold` is the third: a message too long to be a question. It is not sent
+     * to the model, because an answer drawn confidently from the wrong half of
+     * a long message is worse than none — but it is answered, warmly, and the
+     * team is told below. That is the whole of the difference between "we're
+     * on it" and being left on read.
      */
     const quick = input.voiceUnreadable
       ? unheardVoiceReply(input.senderName)
       : gate.kind === "emoji"
         ? emojiReply(input.message || "", input.senderName)
-        : null;
+        : gate.kind === "hold"
+          ? holdingReply(input.senderName)
+          : null;
+
+    /*
+     * A promise of a reply, with somebody behind it.
+     *
+     * The holding line commits the agency to coming back to them, and a
+     * promise nothing is listening to is worse than the silence it replaced.
+     * The emoji and unheard-voice replies need no such thing: neither of them
+     * says anyone will follow up.
+     */
+    if (quick && gate.kind === "hold") {
+      const facts = await clientFacts(clientId).catch(() => null);
+      await notifyAdmins(
+        "general",
+        `${facts?.companyName || "A client"} sent a long message`,
+        `${input.senderName || "They"} wrote: "${(input.message || "").slice(0, 200)}…". ` +
+          `It was too long to answer automatically — they've been told someone will come back to them.`,
+        `/clients/${clientId}`
+      ).catch(() => {});
+    }
+
     if (quick) {
       const out = await sendTextToGroup(input.groupId, quick);
       if (!out.ok) return false;

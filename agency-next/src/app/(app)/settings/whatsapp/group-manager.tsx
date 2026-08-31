@@ -97,8 +97,9 @@ export function GroupManager({
       </CardHeader>
       <CardContent className="space-y-5">
         <p className="text-sm text-muted-foreground">
-          Each client needs one WhatsApp group. Approvals are only accepted from the group the
-          video was sent to, so a client can never approve someone else&apos;s work.
+          Each client needs at least one WhatsApp group. Approvals are only accepted from the group
+          the video was sent to, so a client can never approve someone else&apos;s work. Link as
+          many as they have — what each one is used for is set on the client&apos;s own page.
         </p>
 
         {linked.length ? (

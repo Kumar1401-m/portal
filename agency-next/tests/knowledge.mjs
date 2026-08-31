@@ -117,14 +117,15 @@ const knowledge = (o = {}) => ({
   assert.match(video, /knowledgeRules: ctx \? renderKnowledgeRules\(ctx\) : null/, "video captions read it");
   assert.match(video, /brief\.knowledgeRules/, "and it reaches the prompt");
 
+  /*
+   * The caption studio used to load this itself and hand it to a second
+   * writer. There is one writer now, so there is one place it is loaded —
+   * which is the point of the shared context, and one fewer path that can
+   * quietly stop reading it.
+   */
   const captions = read("app/(app)/deliverables/actions.ts");
-  assert.match(captions, /getKnowledge\(d\.client_id\)/, "the caption studio reads it");
-  assert.match(captions, /rules: renderRules\(knowledge\)/, "and passes the rules through");
-
-  const ai = read("lib/ai.ts");
-  // Into the system prompt, not the brief — that is the fact/rule split again,
-  // in the one place a mistake would be hardest to notice.
-  assert.match(ai, /const system = rules \? `\$\{CAPTION_V3_SYSTEM\}/, "rules join the system prompt");
+  assert.ok(captions.includes("runAnalysisForCaption("), "the caption studio goes through the same writer");
+  assert.ok(!captions.includes("await generateCaption("), "and no longer feeds a writer of its own");
   ok("the caption studio, the video analyser and the shared context all read it");
 }
 

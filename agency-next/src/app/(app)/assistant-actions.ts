@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { requireUser, STAFF_ROLES, ASSIGNABLE_ROLES, sqlRoleList } from "@/lib/auth";
 import { queryOne, execute } from "@/lib/db";
 import { canAccessClient } from "@/lib/crm";
-import { sendEmail, sendApprovalRequestEmail } from "@/lib/email";
+import { sendEmail } from "@/lib/email";
 import { notifyClientById } from "@/lib/notify";
 import { approvalChaseText, invoiceText, composeReminder } from "@/lib/reminder-messages";
 import { paymentLinkForInvoice } from "@/lib/payment-links";
 import { invoiceLink } from "@/lib/doc-link";
 import { sendNow, groupForClient } from "@/lib/reminder-outbox";
+import { purposeOfReminder } from "@/lib/whatsapp-groups";
 import {
   answerQuestion,
   buildSnapshot,
@@ -83,10 +84,8 @@ export async function runAssistantAction(
       const link = `/portal/content/${id}`;
       await notifyClientById(d.client_id, "approval_needed", "Your video is ready for review",
         `"${d.title}" — please review and approve or request changes.`, link, false);
-      const c = await queryOne<{ company_name: string; contact_person: string | null; email: string | null }>(
-        "SELECT company_name, contact_person, email FROM clients WHERE id = ?", [d.client_id]
-      );
-      if (c) sendApprovalRequestEmail(c, { title: d.title, stage: "final", kind: d.video_type, link }).catch(() => {});
+      // No email. A client hears about this in their WhatsApp group, which is
+      // where they approve it, and sees it in the portal. See notify.ts.
 
       revalidatePath("/deliverables");
       revalidatePath("/approvals");
@@ -142,7 +141,7 @@ export async function runAssistantAction(
         };
       }
 
-      const target = await groupForClient(d.client_id);
+      const target = await groupForClient(d.client_id, "approvals");
       if (!target) {
         return {
           ok: false,
@@ -189,7 +188,7 @@ export async function runAssistantAction(
         return { ok: false, text: composed.nothing || "There's nothing to send them." };
       }
 
-      const target = await groupForClient(id);
+      const target = await groupForClient(id, purposeOfReminder(which));
       if (!target) {
         return {
           ok: false,
@@ -282,7 +281,7 @@ export async function runAssistantAction(
        * actually answer on. Same composer as the weekly automatic chase, so
        * the wording matches whatever else has been sent about this invoice.
        */
-      const group = await groupForClient(inv.client_id);
+      const group = await groupForClient(inv.client_id, "payments");
       if (group) {
         const link = await paymentLinkForInvoice(id);
         const body = invoiceText([

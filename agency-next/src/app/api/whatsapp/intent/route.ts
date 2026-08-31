@@ -26,6 +26,7 @@
  */
 import { isAuthorizedWhatsAppRequest, unauthorized } from "@/lib/api-auth";
 import { env } from "@/lib/env";
+import { ask, modelReady } from "@/lib/model";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
   if (!isAuthorizedWhatsAppRequest(request)) return unauthorized();
   // No model, no guess. The caller treats this as "not understood", which is
   // exactly what the portal did before this route existed.
-  if (!env.gemini.enabled) {
+  if (!modelReady()) {
     return Response.json({ ok: true, intent: "none", confidence: 0, reason: "no model" });
   }
 
@@ -106,55 +107,57 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, intent: "none", confidence: 0, reason: "too long" });
   }
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${env.gemini.model}` +
-    `:generateContent?key=${env.gemini.apiKey}`;
+  /*
+   * The shape is enforced, not requested.
+   *
+   * This used to ask for JSON in the prompt and then repair whatever came
+   * back — a code fence, a missing key, a confidence of "high" instead of a
+   * number. Every one of those repairs was a guess about what the model had
+   * meant, on the path that decides whether a client just approved their
+   * video. A strict schema removes the guessing: the decoder cannot emit an
+   * intent outside the list, and cannot omit one.
+   */
+  const res = await ask<{
+    intent: Intent;
+    confidence: number;
+    note: string;
+    summary: string;
+  }>({
+    user: `${INSTRUCTION}\n\nMessage:\n${text}`,
+    // Fast and cheap: this runs on every inbound message, and a client waiting
+    // on an approval is waiting on this call.
+    model: env.gemini.fastModel,
+    effort: "low",
+    schemaName: "intent",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["intent", "confidence", "note", "summary"],
+      properties: {
+        intent: { type: "string", enum: INTENTS },
+        confidence: { type: "number" },
+        note: { type: "string" },
+        summary: { type: "string" },
+      },
+    },
+    maxTokens: 800,
+    timeoutMs: 20_000,
+  });
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${INSTRUCTION}\n\nMessage:\n${text}` }] }],
-        generationConfig: {
-          temperature: 0,
-          // Room for the answer and for a model that thinks before it writes:
-          // a budget that only fits the JSON comes back empty, having spent
-          // it all on reasoning. This has bitten the caption generator before.
-          maxOutputTokens: 800,
-          responseMimeType: "application/json",
-        },
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      console.warn("[whatsapp] intent failed:", res.status, detail.slice(0, 200));
-      return Response.json({ ok: true, intent: "none", confidence: 0, reason: `http ${res.status}` });
-    }
-
-    const j = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
-    };
-    const cand = j.candidates?.[0];
-    const raw = (cand?.content?.parts || []).map((p) => p.text || "").join("").trim();
-    if (!raw) {
-      // Almost always MAX_TOKENS spent on reasoning. Worth naming in the log,
-      // because the symptom — every reply reading as "none" — looks like the
-      // model simply disagreeing.
-      console.warn("[whatsapp] intent returned nothing", { finishReason: cand?.finishReason });
-      return Response.json({ ok: true, intent: "none", confidence: 0, reason: "empty" });
-    }
-
-    const parsed = coerce(raw);
-    if (!parsed) {
-      console.warn("[whatsapp] intent was not JSON:", raw.slice(0, 160));
-      return Response.json({ ok: true, intent: "none", confidence: 0, reason: "unparsable" });
-    }
-    return Response.json({ ok: true, ...parsed });
-  } catch (err) {
-    console.warn("[whatsapp] intent error:", err instanceof Error ? err.message : err);
-    return Response.json({ ok: true, intent: "none", confidence: 0, reason: "error" });
+  if (!res.ok || !res.data) {
+    // "none" rather than an error: the caller treats it as "not understood",
+    // which is exactly what the portal did before this route existed. A
+    // classifier that is down must never look like a client saying no.
+    console.warn("[whatsapp] intent unavailable:", res.error || "empty reply");
+    return Response.json({ ok: true, intent: "none", confidence: 0, reason: "unavailable" });
   }
+
+  const d = res.data;
+  return Response.json({
+    ok: true,
+    intent: INTENTS.includes(d.intent) ? d.intent : "none",
+    confidence: Number.isFinite(d.confidence) ? Math.min(1, Math.max(0, d.confidence)) : 0,
+    note: (d.note || "").trim().slice(0, 1000),
+    summary: (d.summary || "").trim().slice(0, 300),
+  });
 }

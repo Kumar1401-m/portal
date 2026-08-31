@@ -21,6 +21,7 @@
  */
 import "server-only";
 import { query, queryOne, execute, hasColumn } from "./db";
+import { groupOrderSql, type Purpose } from "./whatsapp-groups";
 import { sendTextToGroup } from "./whatsapp-service-client";
 import { recordRun } from "./automation-runs";
 
@@ -55,20 +56,21 @@ export type OutboxRow = {
 /**
  * Where a client is written to.
  *
- * The default group when there is one, then the oldest — the same order the
- * automatic reminders use, so a client is always addressed in the same chat
- * whatever sent the message: the nightly rules, the console, or the assistant.
- * Three copies of this choice would eventually pick three different groups for
- * a client who has more than one.
+ * The group ticked for this kind of message, then the default one, then the
+ * oldest — the same order the automatic reminders use, so a client is
+ * addressed in the same chat whatever sent the message: the nightly rules,
+ * the console, or the assistant. Three copies of this choice would eventually
+ * pick three different groups for a client who has more than one.
  */
 export async function groupForClient(
-  clientId: number
+  clientId: number,
+  purpose: Purpose = "updates"
 ): Promise<{ groupId: string; label: string } | null> {
   const row = await queryOne<{ group_id: string; group_name: string | null; company_name: string }>(
     `SELECT g.group_id, g.group_name, c.company_name
        FROM whatsapp_groups g JOIN clients c ON c.id = g.client_id
       WHERE g.client_id = ? AND g.is_active = 1
-      ORDER BY g.is_default DESC, g.id ASC LIMIT 1`,
+      ORDER BY ${await groupOrderSql(purpose, "g")} LIMIT 1`,
     [clientId]
   ).catch(() => null);
   if (!row) return null;
