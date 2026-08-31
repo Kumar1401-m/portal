@@ -6,8 +6,8 @@
 import "server-only";
 import { onTheFloor } from "./client-status";
 import { query, queryOne, hasColumn } from "./db";
-import { nowUtc, bothClocks, AUTO_SCHEDULE_CATEGORIES } from "./posting";
-import { countryOf, MAX_POST_ATTEMPTS } from "./instagram";
+import { nowUtc, bothClocks, autoPostKind, postingTimeLabel, windowHoursFor } from "./posting";
+import { countryOf, missedItsWindow, MAX_POST_ATTEMPTS } from "./instagram";
 
 const n = (v: unknown) => Number(v ?? 0);
 
@@ -474,27 +474,62 @@ function missedReason(r: {
   auto_publish: unknown;
   ig_user_id: unknown;
   content_category: unknown;
+  service: unknown;
+  video_type: unknown;
   has_video: unknown;
   post_attempts: unknown;
   post_error: unknown;
   instagram_status: unknown;
+  scheduled_at: unknown;
+  placeholder_values: unknown;
 }): string {
   if (!r.ig_user_id) return "No Instagram account on this client";
   if (Number(r.auto_publish) !== 1) return "Auto-publishing is off for this client";
   if (!Number(r.has_video)) return "No finished video on the task";
-  if (r.content_category !== AUTO_SCHEDULE_CATEGORIES[0]) {
-    return `Only ${AUTO_SCHEDULE_CATEGORIES[0]}s post automatically`;
+  if (
+    !autoPostKind({
+      service: r.service as string | null,
+      video_type: r.video_type as string | null,
+      content_category: r.content_category as string | null,
+    })
+  ) {
+    return "Only reels and posters post automatically";
   }
   if (r.post_error) return String(r.post_error).slice(0, 120);
   if (Number(r.post_attempts) >= MAX_POST_ATTEMPTS) return "Out of retries — reset it on the task";
   if (r.instagram_status === "processing") return "A publish run took it and never came back";
+
   /*
-   * Nothing is wrong with the row, which means nothing came to collect it.
+   * Its window closed — which is a decision, not a failure, and this said the
+   * opposite.
    *
-   * The publisher is not a background thread in this app — it is an n8n
-   * schedule calling the queue endpoint every fifteen minutes. If that
-   * schedule is off, every video in the portal is exactly this: correct,
-   * due, and untouched.
+   * A post belongs to its evening. Past the window the publisher deliberately
+   * stops offering it, because a reel going out at three in the morning
+   * reaches nobody and leaves an odd timestamp on a client's account for ever.
+   * The row is perfectly correct; nothing is broken.
+   *
+   * Without this check every such post fell through to the message below and
+   * blamed the schedule — sending somebody to look at a cron that was running
+   * perfectly well, for a post that was never going to be collected again.
+   * Seen on a real one: seventeen hours late, schedule healthy in the logs,
+   * and the screen saying to go and check the schedule.
+   */
+  const country = countryOf(r.placeholder_values);
+  if (r.scheduled_at && missedItsWindow(String(r.scheduled_at), country)) {
+    const hours = windowHoursFor(country);
+    return (
+      `Its window (${postingTimeLabel(country)}) closed more than ${hours} hour` +
+      `${hours === 1 ? "" : "s"} ago — move the date, or use Post now`
+    );
+  }
+
+  /*
+   * Nothing is wrong with the row, and it is still inside its window, which
+   * means nothing came to collect it.
+   *
+   * The publisher is not a background thread in this app — it is a schedule
+   * calling the queue endpoint every fifteen minutes. If that schedule is off,
+   * every video in the portal is exactly this: correct, due, and untouched.
    */
   return "Nothing collected it — check the publishing schedule is running";
 }
@@ -520,7 +555,7 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
     `SELECT d.id, d.title, c.company_name, d.scheduled_at, d.instagram_status,
             TIMESTAMPDIFF(MINUTE, d.scheduled_at, ?) AS late_minutes,
             c.auto_publish, c.ig_user_id, c.placeholder_values,
-            d.content_category, d.post_attempts, d.post_error,
+            d.content_category, d.service, d.video_type, d.post_attempts, d.post_error,
             (${cloud} IS NOT NULL
               OR (d.edited_link IS NOT NULL AND d.edited_link <> '')) AS has_video
        FROM deliverables d
@@ -557,10 +592,14 @@ export async function getMissedPosts(clientIds: number[] | null): Promise<Missed
       auto_publish: r.auto_publish,
       ig_user_id: r.ig_user_id,
       content_category: r.content_category,
+      service: r.service,
+      video_type: r.video_type,
       has_video: r.has_video,
       post_attempts: r.post_attempts,
       post_error: r.post_error,
       instagram_status: r.instagram_status,
+      scheduled_at: r.scheduled_at,
+      placeholder_values: r.placeholder_values,
     }),
   }));
 }

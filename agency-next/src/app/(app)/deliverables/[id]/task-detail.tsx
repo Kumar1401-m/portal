@@ -21,6 +21,7 @@ import { getPublishInfo } from "@/lib/instagram";
 import { SendApproval } from "./send-approval";
 import { AiCaption } from "../../editor/ai-caption";
 import { getAnalysis, videoAiReady } from "@/lib/video-ai";
+import { buildVideoPermalink } from "@/lib/video-link";
 import { getPanel as getWaPanel } from "@/lib/whatsapp-approvals";
 
 function Field({ label: l, value }: { label: string; value: React.ReactNode }) {
@@ -169,6 +170,10 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
                 lastError: analysis?.last_error ?? null,
                 tokensUsed: analysis?.tokens_used ?? null,
                 hasVideo: Boolean(d.cloud_video_url || d.edited_link),
+                hasFrames: Boolean(analysis?.frames_json),
+                // Only for an uploaded file: an external link is not ours to
+                // stream, and the browser cannot read pixels back out of it.
+                videoHref: d.cloud_video_key ? buildVideoPermalink(d.id, d.cloud_video_key) : null,
               }}
             />
           ) : null}
@@ -296,6 +301,7 @@ export async function TaskDetail({ id, inModal = false }: { id: number; inModal?
             locked={locked}
             defaultLanguage={d.language || "English"}
             isPoster={isPoster}
+            hasVideo={Boolean(d.cloud_video_url || d.cloud_video_key || d.edited_link)}
           />
         </div>
       </div>

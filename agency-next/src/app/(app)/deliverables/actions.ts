@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { queueAnalysis, runAnalysis, type CaptionOverrides, type RunResult } from "@/lib/video-ai";
 import { queryOne, execute, hasColumn } from "@/lib/db";
 import {
   requireUser,
@@ -11,24 +12,19 @@ import {
   type SessionUser,
 } from "@/lib/auth";
 import {
-  generateCaption,
   type ComposedCaption,
-  type CaptionSource,
-  type WatchedVideo,
 } from "@/lib/ai";
-import { getKnowledge, renderKnowledge, renderRules } from "@/lib/knowledge";
-import { getAnalysis } from "@/lib/video-ai";
 import { getDeliverable } from "@/lib/deliverables";
 import { canAccessClient } from "@/lib/crm";
 import { clientDefaults, defaultAssigneeFor } from "@/lib/clients";
 import { youtubeHandoff } from "@/lib/youtube";
 import { notifyClientById, notifyUser, notifyAdmins } from "@/lib/notify";
-import { sendApprovalRequestEmail } from "@/lib/email";
 import { PLATFORMS, PRIORITIES, STATUS_LIST, EDITOR_STATUSES } from "@/lib/constants";
 import { isServiceKey, videoTypeForService, type ServiceKey } from "@/lib/services";
 import { monthKey, autoTaskTitle } from "@/lib/utils";
 import { localTimeToUtc, scheduleDateToUtc } from "@/lib/posting";
-import { retryPublish, publishHandoff } from "@/lib/instagram";
+import { retryPublish, publishHandoff, countryOf, approvalHandoff } from "@/lib/instagram";
+import { postingSlotFor } from "@/lib/best-time";
 import { deliverForApproval, describeDelivery } from "@/lib/whatsapp-send";
 
 const REASON_REQUIRED = ["rejected", "changes_requested", "cancelled"];
@@ -154,37 +150,6 @@ export type CaptionState = {
   fromVideo?: boolean;
 };
 
-/**
- * The finished analysis for a video, in the shape the caption studio wants.
- *
- * Only a completed one counts. A job still uploading has a half-filled row,
- * and a caption written from half an observation is worse than one written
- * from the brief, because it reads just as confident.
- */
-async function watchedVideoFor(deliverableId: number): Promise<WatchedVideo | null> {
-  try {
-    const a = await getAnalysis(deliverableId);
-    if (!a || a.state !== "done") return null;
-
-    // The structured branding block, straight from the model's own JSON —
-    // parsed from the source rather than from the display text built off it.
-    const raw = a.raw_json;
-    const obj = typeof raw === "string" ? JSON.parse(raw || "{}") : raw || {};
-    const branding = (obj as { branding?: WatchedVideo["branding"] })?.branding ?? null;
-
-    return {
-      summary: a.summary,
-      spokenLanguage: a.spoken_language,
-      topic: a.topic,
-      onScreenText: a.on_screen_text,
-      branding,
-    };
-  } catch {
-    // No analysis table, or unreadable JSON. The brief still works.
-    return null;
-  }
-}
-
 export async function generateCaptionAction(
   _prev: CaptionState,
   formData: FormData
@@ -198,46 +163,42 @@ export async function generateCaptionAction(
   if (!d) return { ok: false, error: "Deliverable not found." };
   if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
 
-  const opts = {
+  /*
+   * One caption writer, for every kind of task.
+   *
+   * There used to be two. This action called the brief writer — it read what
+   * somebody typed into the task and had never heard of the client's caption
+   * structure — while a second, much better one sat behind the video panel
+   * reading a dozen frames of the finished cut. Which caption you got depended
+   * on which button you happened to press, and both looked equally finished.
+   *
+   * So the video writer became the only writer. It works from whatever it has:
+   * frames and a transcript when the video is uploaded, the brief alone when
+   * it is not, or when the task is a poster — and it is told plainly which,
+   * so it never describes footage it was not shown.
+   */
+  const run = await runAnalysisForCaption(id, {
     tone: String(formData.get("tone") || "") || undefined,
     language: String(formData.get("language") || "") || undefined,
     goal: String(formData.get("goal") || "") || undefined,
     length: String(formData.get("length") || "") || undefined,
-    include_contact: formData.get("include_contact") !== "off",
-  };
+    includeContact: formData.get("include_contact") !== "off",
+  });
 
-  /*
-   * Hand over what the AI saw when it watched the finished cut.
-   *
-   * Best-effort: a video nobody has analysed yet, or an install without the
-   * analysis table, simply falls back to the typed brief — the studio worked
-   * that way before and must keep working that way.
-   */
-  const seen = await watchedVideoFor(id);
-
-  /*
-   * What the agency wrote down about this brand.
-   *
-   * Best-effort like the analysis above: a client nobody has filled it in for
-   * gets exactly the caption they got before. When it is filled in, the words
-   * they use and the words they never use stop being something somebody
-   * corrects by hand every month.
-   */
-  const knowledge = await getKnowledge(d.client_id).catch(() => null);
-
-  let out: ComposedCaption;
-  try {
-    out = await generateCaption(
-      d as CaptionSource,
-      opts,
-      seen,
-      knowledge
-        ? { facts: renderKnowledge(knowledge), rules: renderRules(knowledge) }
-        : null
-    );
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Generation failed." };
+  if (!run.ok) return { ok: false, error: run.error || "Couldn't generate a caption." };
+  if (run.state !== "done" || !run.caption) {
+    // Still working: the job carries on server-side and the panel polls it.
+    return { ok: false, error: "Still writing — give it a moment and look again." };
   }
+
+  const out = {
+    caption: run.caption,
+    hashtags: run.hashtags ?? null,
+    cta: run.cta ?? null,
+    alternate_captions: run.alternates ?? [],
+    is_poster: String(d.video_type || "").toLowerCase() === "poster",
+    provider: "gemini" as const,
+  };
 
   // Persist to the caption library + set the deliverable's caption.
   await execute(
@@ -266,10 +227,29 @@ export async function generateCaptionAction(
     ok: true,
     provider: out.provider,
     caption: out.caption,
-    hashtags: out.hashtags,
+    hashtags: out.hashtags ?? undefined,
     alternates: out.alternate_captions,
     isPoster: out.is_poster,
+    // Whether it could actually see the work, or only read about it. The
+    // difference decides what the panel is allowed to claim.
+    fromVideo: Boolean(d.cloud_video_key || d.cloud_video_url || d.edited_link),
   };
+}
+
+/**
+ * Force a fresh run of the caption writer and return what it produced.
+ *
+ * Forced because this is somebody pressing a button: a finished analysis
+ * would otherwise be handed straight back, and pressing "Generate" and
+ * receiving the caption already on screen reads as the button not working.
+ * The three-per-48-hours ceiling is what stops that being expensive.
+ */
+async function runAnalysisForCaption(
+  deliverableId: number,
+  overrides: CaptionOverrides
+): Promise<RunResult> {
+  await queueAnalysis(deliverableId, true);
+  return runAnalysis(deliverableId, overrides);
 }
 
 /* ----------------------------- Save caption ----------------------------- */
@@ -528,6 +508,10 @@ type WfRow = {
   /** Who to tell when the content gate opens and the work becomes theirs. */
   assigned_to: number | null;
   service: string | null;
+  /** With `service`, what this task publishes as — see autoPostKind. */
+  content_category: string | null;
+  /** The day it is down for, which is which day it posts — see postingSlotFor. */
+  due_date: string | null;
   company_name: string;
   /**
    * Does this client sign the written content off first? Null on a database
@@ -570,7 +554,7 @@ async function applyStatus(
   const hasContentApproval = await hasColumn("clients", "content_approval");
   const d = await queryOne<WfRow>(
     `SELECT d.id, d.client_id, d.status, d.video_type, d.posted_at, d.title,
-            d.instagram_status, d.scheduled_at, d.assigned_to, d.service,
+            d.instagram_status, d.scheduled_at, d.due_date, d.assigned_to, d.service, d.content_category,
             c.company_name, c.auto_publish, c.ig_user_id, c.placeholder_values,
             ${hasContentApproval ? "c.content_approval" : "NULL AS content_approval"},
             ${hasYouTube ? "c.youtube_enabled, d.youtube_status" : "NULL AS youtube_enabled, NULL AS youtube_status"}
@@ -622,7 +606,24 @@ async function applyStatus(
     updates.approval_status = "pending";
   }
   if (handedToMaker) updates.approval_status = "pending";
-  else if (effective === "approved") updates.approval_status = "approved";
+  else if (effective === "approved") {
+    updates.approval_status = "approved";
+    /*
+     * And an approved reel goes to the publisher without a second button.
+     *
+     * Approving used to leave the row at `approved` and nothing more, so the
+     * Approvals page grew a "Recently approved" column whose only action was
+     * Schedule — a click that added no information. Everything it decided (the
+     * client's best hour, their evening window, the handoff columns) was
+     * already knowable the moment the approval landed.
+     *
+     * `approvalHandoff` writes nothing unless the client is set up to post
+     * unattended, so a poster, an opted-out client, or a task with no finished
+     * video still stops plainly at "approved" and waits for a person.
+     */
+    Object.assign(updates, await approvalHandoff(id));
+    if (updates.status === "scheduled" && hasYouTube) Object.assign(updates, youtubeHandoff(d));
+  }
   if (effective === "changes_requested") updates.approval_status = "changes_requested";
   if (effective === "rejected") {
     updates.approval_status = "rejected";
@@ -659,6 +660,25 @@ async function applyStatus(
   // rather than leaving a row that looks queued for ever.
   let scheduleWarning: string | null = null;
   if (effective === "scheduled") {
+    /*
+     * The day it is down for, at their own best hour.
+     *
+     * publishHandoff falls back to the country table and to *now* — roughly
+     * evening, roughly local, on whatever day the button happened to be
+     * pressed. Both halves are wrong here: the account's own proven hour beats
+     * a guess about a country, and a task carrying a date is a decision about
+     * which day it goes out. `postingSlotFor` answers both, so the handoff
+     * receives a time somebody already chose.
+     *
+     * A time set by hand still wins: this only fills a blank.
+     */
+    if (!d.scheduled_at) {
+      d.scheduled_at = await postingSlotFor(
+        d.client_id,
+        countryOf(d.placeholder_values),
+        d.due_date
+      ).catch(() => null);
+    }
     Object.assign(updates, publishHandoff(d));
     // Same slot, both platforms. Writes nothing at all unless the client is
     // opted in, so a portal that never touches YouTube behaves as before.
@@ -716,19 +736,13 @@ async function applyStatus(
       false
     );
 
-    const client = await queryOne<{
-      company_name: string;
-      contact_person: string | null;
-      email: string | null;
-    }>("SELECT company_name, contact_person, email FROM clients WHERE id = ?", [d.client_id]);
-    if (client) {
-      sendApprovalRequestEmail(client, {
-        title: d.title,
-        stage,
-        kind: d.video_type,
-        link,
-      }).catch(() => {});
-    }
+    /*
+     * No email. Asked for directly: a client is mailed once, at onboarding,
+     * and everything after that reaches them through the portal notification
+     * above and their WhatsApp group — which is where they actually approve.
+     * A separate email saying the same thing was the pile that made them stop
+     * reading any of it.
+     */
   } else if (["scheduled", "posted", "completed", "rejected", "resolved"].includes(effective)) {
     await notifyClientById(d.client_id, "general", `"${d.title}" — ${effective.replace(/_/g, " ")}`,
       reason || "Status updated by the agency.", link);
@@ -789,7 +803,14 @@ async function applyStatus(
   revalidatePath("/deliverables");
   revalidatePath("/today");
   revalidatePath("/approvals");
-  return { ok: true, effective, ...(scheduleWarning ? { warning: scheduleWarning } : {}) };
+  // What the row says, not what was asked for. Approving a reel that is set
+  // up to post writes `scheduled`, and "Moved to Approved ✓" over a row the
+  // board shows as Scheduled is the kind of small lie people stop trusting.
+  return {
+    ok: true,
+    effective: updates.status ?? effective,
+    ...(scheduleWarning ? { warning: scheduleWarning } : {}),
+  };
 }
 
 /** For the detail-page workflow controls (shows errors via useActionState). */

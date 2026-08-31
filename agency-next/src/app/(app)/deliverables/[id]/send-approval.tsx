@@ -20,6 +20,7 @@ export type WaPanel = {
   lastError: string | null;
   hasGroup: boolean;
   hasVideo: boolean;
+  hasCaption: boolean;
 };
 
 const LABEL: Record<string, { text: string; tone: "success" | "warning" | "danger" | "info" | "muted" }> = {
@@ -39,9 +40,15 @@ const LABEL: Record<string, { text: string; tone: "success" | "warning" | "dange
  * Sending one video to its client's WhatsApp group, and what came back.
  *
  * The button is deliberately blocked — not just error-prone — when there is no
- * group or no uploaded video. Both produce a confusing failure inside
- * WhatsApp itself, and the reason is far clearer stated up front than returned
- * from a send that looked like it should work.
+ * group, no uploaded video, or no caption. The first two produce a confusing
+ * failure inside WhatsApp itself, and the reason is far clearer stated up
+ * front than returned from a send that looked like it should work.
+ *
+ * The third would not fail at all, which is worse. The video goes, the client
+ * replies OK, and what they approved was a clip — while the words that
+ * actually publish underneath it on their feed are words they were never
+ * shown. So it is stopped here as well as in `prepareSend`, because a rule
+ * only the server knows is a button that looks ready and is not.
  */
 export function SendApproval({
   deliverableId,
@@ -85,7 +92,7 @@ export function SendApproval({
 
   const status = LABEL[panel.waStatus] ?? { text: panel.waStatus, tone: "muted" as const };
   const settled = ["approved", "rejected"].includes(panel.waStatus);
-  const blocked = !panel.hasGroup || !panel.hasVideo;
+  const blocked = !panel.hasGroup || !panel.hasVideo || !panel.hasCaption;
 
   return (
     <Card>
@@ -109,7 +116,17 @@ export function SendApproval({
         {!panel.hasVideo ? (
           <p className="flex items-start gap-2 text-muted-foreground">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Upload the finished video first — WhatsApp needs the actual file to send.</span>
+            <span>Upload the finished file first — WhatsApp needs the actual bytes to send.</span>
+          </p>
+        ) : null}
+
+        {panel.hasVideo && !panel.hasCaption ? (
+          <p className="flex items-start gap-2 text-muted-foreground">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              No caption yet. The client would be approving the video without the words that
+              go out with it — wait for the AI caption, or write one, then send.
+            </span>
           </p>
         ) : null}
 

@@ -237,9 +237,34 @@ async function mediaInsights(
   mediaId: string,
   tokens: (string | null)[],
   isReel: boolean
-): Promise<{ reach: number; saves: number; shares: number; views: number; failed: boolean }> {
-  const out = { reach: 0, saves: 0, shares: 0, views: 0, failed: false };
-  const wanted = isReel ? "reach,saved,shares,views" : "reach,saved,shares";
+): Promise<{
+  reach: number;
+  saves: number;
+  shares: number;
+  views: number;
+  /** Milliseconds. Reels only — a still has nothing to watch. */
+  avgWatchMs: number | null;
+  totalWatchMs: number | null;
+  failed: boolean;
+}> {
+  const out = {
+    reach: 0, saves: 0, shares: 0, views: 0,
+    avgWatchMs: null as number | null,
+    totalWatchMs: null as number | null,
+    failed: false,
+  };
+  /*
+   * Watch time, for the reels that have any.
+   *
+   * Reach says how many were shown it; this says whether they stayed, which
+   * is the thing a reel is actually judged on. Asked in the same call rather
+   * than a second one — and if Meta rejects the pair the retry below drops
+   * back to bare reach, so a metric being withdrawn costs the extras and
+   * never the whole row.
+   */
+  const wanted = isReel
+    ? "reach,saved,shares,views,ig_reels_avg_watch_time,ig_reels_video_view_total_time"
+    : "reach,saved,shares";
 
   type Insights = { data?: { name?: string; values?: { value?: number }[] }[] };
   const read = (res: Insights | null) => {
@@ -249,6 +274,8 @@ async function mediaInsights(
       else if (m.name === "saved") out.saves = v;
       else if (m.name === "shares") out.shares = v;
       else if (m.name === "views") out.views = v;
+      else if (m.name === "ig_reels_avg_watch_time") out.avgWatchMs = v;
+      else if (m.name === "ig_reels_video_view_total_time") out.totalWatchMs = v;
     }
     return Boolean(res?.data?.length);
   };
@@ -359,10 +386,10 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
       `INSERT INTO post_insights
          (client_id, deliverable_id, platform, media_id, media_type, permalink, caption,
           published_at, snapshot_date, reach, views, plays, likes, comments, saves, shares,
-          total_interactions, engagement_rate)
+          total_interactions, engagement_rate, avg_watch_ms, total_watch_ms)
        VALUES (?,
          (SELECT id FROM (SELECT id FROM deliverables WHERE instagram_media_id = ? LIMIT 1) x),
-         'instagram',?,?,?,?,?, CURDATE(), ?,?,?,?,?,?,?,?,?)
+         'instagram',?,?,?,?,?, CURDATE(), ?,?,?,?,?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          permalink = VALUES(permalink), caption = VALUES(caption),
          media_type = VALUES(media_type), published_at = VALUES(published_at),
@@ -371,6 +398,11 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
          saves = VALUES(saves), shares = VALUES(shares),
          total_interactions = VALUES(total_interactions),
          engagement_rate = VALUES(engagement_rate),
+         /* Only when the newer read actually has them: Meta withdraws a
+            metric now and then, and a null overwriting a real figure loses
+            the only record of how long anybody watched. */
+         avg_watch_ms = COALESCE(VALUES(avg_watch_ms), post_insights.avg_watch_ms),
+         total_watch_ms = COALESCE(VALUES(total_watch_ms), post_insights.total_watch_ms),
          /* Never unlink a post from its task: the media id match can fail on a
             later pass (a task deleted, a re-import) and losing the link would
             lose which brief this post came from. */
@@ -392,6 +424,8 @@ export async function syncClientPosts(clientId: number): Promise<SyncResult> {
         ins.shares,
         total,
         Number(rate.toFixed(2)),
+        ins.avgWatchMs,
+        ins.totalWatchMs,
       ]
     );
     written++;

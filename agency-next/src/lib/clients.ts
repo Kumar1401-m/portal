@@ -30,6 +30,8 @@ export type ClientFull = {
   designer_id: number | null;
   editor_id: number | null;
   caption_settings: unknown;
+  /** The fixed shape this client's captions take, reproduced by the AI. */
+  caption_template: string | null;
   placeholder_values: unknown;
   /** JSON array of ServiceKey — signed-up services (filtering/reporting only). */
   services: unknown;
@@ -53,6 +55,16 @@ export type ClientFull = {
   /** Null pre-migration, which reads as on. */
   auto_reminders: number | null;
   auto_payment_reminders: number | null;
+  /** Whether we ask this client for raw footage at all. Null pre-migration reads as yes. */
+  provides_footage: number | null;
+  /*
+   * The three kinds of message that had no switch until a client asked for
+   * fewer. Null pre-migration, which reads as on — see `client-messages.ts`,
+   * which is the one place that decides what a null means.
+   */
+  send_reports: number | null;
+  send_posted_links: number | null;
+  ai_replies: number | null;
   /** Null on a database without the column, which reads as on. */
   content_approval: number | null;
   youtube_channel_id: string | null;

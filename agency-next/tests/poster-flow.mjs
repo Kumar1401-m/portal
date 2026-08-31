@@ -19,6 +19,7 @@ const SRC = process.env.PORTAL_SRC;
 const load = (rel) => import(pathToFileURL(`${SRC}/${rel}`).href);
 const posters = await load("lib/posters.ts");
 const db = await load("lib/db.ts");
+const wa = await load("lib/whatsapp-approvals.ts");
 const read = (rel) => readFileSync(`${SRC}/${rel}`, "utf8");
 
 let pass = 0;
@@ -141,6 +142,125 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
   await db.execute("DELETE FROM deliverables WHERE id = ?", [id]);
   await clean();
   ok("a poster created today reaches the designer's queue, brief and all");
+}
+
+/* ---------------- and it reaches the client, having no caption ---------------- */
+{
+  /*
+   * A rule written about videos stopped every poster leaving the building.
+   *
+   * Sending a video for approval requires a caption, and rightly: the client
+   * is approving a post, a video post is the clip and its words together, and
+   * without them the copy that goes out under it on their feed is copy they
+   * were never shown.
+   *
+   * A poster has no caption to wait for. The words are *on the design*, put
+   * there by the designer from the brief, and the AI writer watches a video —
+   * there is no path by which a poster ever gets one. So the guard held every
+   * poster back with a message telling somebody to wait for a caption that was
+   * never coming, and the Send button was greyed out to match. Both halves
+   * agreed, which is why it read as a rule rather than a fault.
+   */
+  const clean = async () => {
+    await db.execute("DELETE FROM deliverables WHERE title = 'ZZ poster send'");
+    await db.execute("DELETE FROM clients WHERE company_name = 'ZZ poster client'");
+  };
+  await clean();
+  const clientId = Number(
+    (await db.execute("INSERT INTO clients (company_name,status) VALUES ('ZZ poster client','active')"))
+      .insertId
+  );
+  const group = `zz-poster-${clientId}@g.us`;
+  await wa.linkGroup(clientId, group, "ZZ poster client", true);
+
+  const mk = async (service, videoType, link) =>
+    Number(
+      (await db.execute(
+        `INSERT INTO deliverables (client_id, title, service, video_type, content_category,
+                                   status, edited_link, caption, hashtags)
+         VALUES (?, 'ZZ poster send', ?, ?, 'Offer Poster', 'caption_ready', ?, NULL, NULL)`,
+        [clientId, service, videoType, link]
+      )).insertId
+    );
+
+  try {
+    const poster = await mk("poster_designing", "Poster", "https://example.com/zz.png");
+    const ready = await wa.prepareSend(poster);
+    assert.equal(
+      ready.ok,
+      true,
+      `a poster with no caption can still be sent (${"error" in ready ? ready.error : ""})`
+    );
+
+    // The panel that draws the button has to agree, or the send is reachable
+    // and the button that reaches it is greyed out.
+    const panel = await wa.getPanel(poster);
+    assert.equal(panel.hasCaption, true, "and the Send button is not greyed out for one");
+
+    /*
+     * A row from before `service` existed is still a poster. `video_type` is
+     * where the same fact lived then, and those rows are the oldest posters in
+     * the portal — exactly the ones nobody would think to re-test.
+     */
+    const legacy = await mk(null, "Poster", "https://example.com/zz.png");
+    assert.equal((await wa.prepareSend(legacy)).ok, true, "including a legacy poster row");
+
+    /*
+     * And the rule still stands where it was written. A video with no caption
+     * is the case the guard exists for, and excusing posters must not excuse
+     * it too.
+     */
+    const video = await mk("video_editing", "Reel", "https://example.com/zz.mp4");
+    const blocked = await wa.prepareSend(video);
+    assert.equal(blocked.ok, false, "a video with no caption is still held back");
+    assert.match(blocked.error, /caption/i, "and told why");
+  } finally {
+    await db.execute("DELETE FROM whatsapp_groups WHERE group_id LIKE 'zz-poster%'");
+    await db.execute("DELETE FROM deliverables WHERE title = 'ZZ poster send'");
+    await clean();
+  }
+  ok("a poster goes to the client's WhatsApp, and a video without its words still does not");
+}
+
+/* ---------------- and the writer is shown the poster, not asked to guess ---------------- */
+{
+  const src = read("lib/video-ai.ts");
+
+  /*
+   * A poster had no frames, because frames are what the browser decodes out of
+   * an uploaded video. So the one caption writer was handed nothing to look at
+   * and told — correctly — to say nothing about what was on screen. Every
+   * poster caption was therefore written from a brief typed before the design
+   * existed, and could not mention the offer, the price, or the words actually
+   * printed on the thing being posted.
+   */
+  assert.ok(src.includes("if (poster && !frames.length) {"), "a poster is looked at");
+  assert.ok(
+    src.includes("buf.byteLength <= MAX_POSTER_BYTES"),
+    "and only when what came back is a sane size"
+  );
+  assert.ok(
+    src.includes(String.raw`/^image\//.test(type)`),
+    "and only when it is image bytes"
+  );
+  /*
+   * A Canva or Drive share address serves an HTML page. Base64ing one into the
+   * prompt would have the model describing a login screen as though it were
+   * the client's poster.
+   */
+  assert.ok(src.includes("directDownloadUrl(d.edited_link)"), "a Drive link is turned into the file");
+
+  /*
+   * And it is not listened to. This branch sends "the file" to speech-to-text;
+   * on a poster that file is a PNG, so every poster caption spent a
+   * transcription call on an image that could only come back empty.
+   */
+  assert.ok(src.includes('heardNothing = "a poster has no sound";'), "a poster is not transcribed");
+  assert.ok(
+    src.includes("You were NOT shown the poster"),
+    "and when it truly saw nothing, it is told in the right words"
+  );
+  ok("the caption writer reads the poster, and never listens to one");
 }
 
 await finish(pass);

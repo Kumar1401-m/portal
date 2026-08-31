@@ -6,6 +6,7 @@ import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { ASSIGNABLE_ROLES, sqlRoleList } from "@/lib/auth";
 import { canAccessClient } from "@/lib/crm";
 import { monthKey } from "@/lib/utils";
+import { setTaskDate } from "@/lib/task-plan";
 
 export type ClientBoardTask = {
   id: number;
@@ -157,20 +158,17 @@ export async function quickUpdateTask(
     if (!u) return { ok: false, error: "That team member isn't available." };
   }
 
-  // The month a task counts towards follows its due date, the same rule
-  // `createDeliverable` uses — otherwise moving a date would leave the
-  // scorecard reporting it in the old month.
-  if (dueDate) {
-    await execute(
-      "UPDATE deliverables SET due_date = ?, month_key = ?, assigned_to = ? WHERE id = ?",
-      [dueDate, dueDate.slice(0, 7), assignedTo, id]
-    );
-  } else {
-    await execute("UPDATE deliverables SET due_date = NULL, assigned_to = ? WHERE id = ?", [
-      assignedTo,
-      id,
-    ]);
-  }
+  /*
+   * The date through `setTaskDate`, like every other way of moving one.
+   *
+   * This wrote `due_date` and `month_key` itself and left `scheduled_at`
+   * where it was — so a task dragged from Tuesday to Thursday on this board
+   * still had its posting slot on Tuesday evening, and the board and the
+   * publisher disagreed about the day with nothing on screen to say so.
+   * `setTaskDate` shifts the slot by the same number of days.
+   */
+  await setTaskDate(id, dueDate);
+  await execute("UPDATE deliverables SET assigned_to = ? WHERE id = ?", [assignedTo, id]);
 
   revalidatePath("/deliverables");
   revalidatePath("/today");

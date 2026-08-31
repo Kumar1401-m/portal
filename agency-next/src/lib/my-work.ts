@@ -29,8 +29,19 @@ export type MyWorkStats = {
   withClient: number;
   /** Sent back for changes. Mine again. */
   changes: number;
-  /** Not started or mid-edit — the actual to-do list. */
+  /** Not started or mid-edit — the actual to-do list, in this month. */
   toDo: number;
+  /**
+   * Still to do, but belonging to another month.
+   *
+   * The counts on this page are a month's report and the worklist under them
+   * is not — a task left over from last month is the first thing that should
+   * be picked up, so it stays in the list. That was right and it was also
+   * invisible: "Still to do 3" sat directly above a list of eight, with
+   * nothing on the screen to say where the other five came from, and the only
+   * available conclusion was that the number was wrong.
+   */
+  carriedOver: number;
   /** Of the to-do, the ones whose date has passed. */
   overdue: number;
   /** Of the to-do, the ones due today. */
@@ -60,6 +71,8 @@ export type MyWork = {
     status: string;
     dueDate: string | null;
     overdue: boolean;
+    /** From a month other than the one the counts above report on. */
+    carried: boolean;
   }[];
 };
 
@@ -100,6 +113,19 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
     [month]
   );
 
+  /*
+   * The same to-do rule, for every month except this one — which is precisely
+   * what the worklist below shows and the counts above do not.
+   */
+  const carried = await queryOne<{ n: number }>(
+    `SELECT COUNT(*) AS n
+       FROM deliverables d JOIN clients c ON c.id = d.client_id
+      WHERE ${onTheFloor()} AND d.assigned_to = ${me} AND ${COUNTS}
+        AND d.status IN ${TO_DO}
+        AND (d.month_key IS NULL OR d.month_key <> ?)`,
+    [month]
+  );
+
   const clients = await query<Record<string, unknown>>(
     `SELECT c.id AS clientId, c.company_name AS company,
             COUNT(*)                                        AS assigned,
@@ -123,12 +149,14 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
    */
   const upNext = await query<Record<string, unknown>>(
     `SELECT d.id, d.title, c.company_name AS company, d.status, d.due_date AS dueDate,
-            (d.due_date IS NOT NULL AND d.due_date < CURDATE()) AS overdue
+            (d.due_date IS NOT NULL AND d.due_date < CURDATE()) AS overdue,
+            (d.month_key IS NULL OR d.month_key <> ?) AS carried
        FROM deliverables d JOIN clients c ON c.id = d.client_id
       WHERE ${onTheFloor()} AND d.assigned_to = ${me} AND ${COUNTS}
         AND d.status IN ${TO_DO}
       ORDER BY d.due_date IS NULL, d.due_date ASC, d.id ASC
-      LIMIT 8`
+      LIMIT 8`,
+    [month]
   );
 
   const n = (v: unknown) => Number(v ?? 0);
@@ -142,6 +170,7 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
       withClient: n(stats?.withClient),
       changes: n(stats?.changes),
       toDo: n(stats?.toDo),
+      carriedOver: n(carried?.n),
       overdue: n(stats?.overdue),
       dueToday: n(stats?.dueToday),
     },
@@ -161,6 +190,7 @@ export async function getMyWork(user: SessionUser, month = thisMonth()): Promise
       status: String(r.status),
       dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
       overdue: Boolean(Number(r.overdue)),
+      carried: Boolean(Number(r.carried)),
     })),
   };
 }

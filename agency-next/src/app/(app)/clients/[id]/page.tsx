@@ -19,9 +19,14 @@ import { checkPageConnection } from "@/lib/facebook";
 import { checkInstagramConnection } from "@/lib/instagram-connection";
 import { checkYouTubeConnection } from "@/lib/youtube";
 import { getKnowledge, completeness } from "@/lib/knowledge";
+import { getGroupsForClient } from "@/lib/whatsapp-approvals";
+import { PURPOSES, purposesOn, storablePurposes } from "@/lib/whatsapp-groups";
+import { MESSAGE_KINDS, storableKinds, wantsFrom } from "@/lib/client-messages";
 import { KnowledgeCard } from "./knowledge-card";
 import { archiveClient } from "../actions";
 import { PortalLogin } from "./portal-login";
+import { GroupPurposes } from "./group-purposes";
+import { MessagePrefs } from "./message-prefs";
 import { MonthlyPlan } from "./monthly-plan";
 import { monthPlan, monthTasks, safeMonth } from "@/lib/task-plan";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,13 +64,16 @@ export default async function ClientDetailPage({
   const month = safeMonth(typeof sp.plan === "string" ? sp.plan : null);
   // Alongside the plan queries, not after them: the Facebook check is a call
   // to Meta, and it is the slowest thing on this page by a distance.
-  const [plan, planTasks, ig, fb, yt, knowledge] = await Promise.all([
+  const [plan, planTasks, ig, fb, yt, knowledge, waGroups] = await Promise.all([
     monthPlan(c.id, month),
     monthTasks(c.id, month),
     checkInstagramConnection(c.id),
     checkPageConnection(c.id),
     checkYouTubeConnection(c.id),
     getKnowledge(c.id),
+    // Never fatal to the page: an install without the WhatsApp tables still
+    // has a client to look at.
+    getGroupsForClient(c.id).catch(() => []),
   ]);
 
   /*
@@ -96,6 +104,37 @@ export default async function ClientDetailPage({
     : {}) as Record<string, unknown>;
   const locBits = [ph.location, ph.country].filter(Boolean).join(", ");
   const services = parseClientServices(c.services);
+
+  /*
+   * Which kinds of message this client is not sent at all.
+   *
+   * Read from the switches on their edit page, and shown against the group
+   * tickboxes because the two screens were answering different questions —
+   * "should we?" there, "which of their groups?" here — and looked like two
+   * copies of one setting. A group ticked for something that is switched off
+   * says "this will go here", and it will not.
+   */
+  /*
+   * Which of the six switches this database can actually store. A column that
+   * has not been applied reads as "on" and springs back the moment it is
+   * saved, which looks exactly like a broken save — so the card says so
+   * instead of offering a control that cannot work.
+   */
+  const [msgStorable, grpStorable] = await Promise.all([storableKinds(), storablePurposes()]);
+
+  const chases = c.auto_reminders !== 0;
+  const waOff: Record<string, string | null> = {
+    approvals: chases ? null : "Off — “Chase this client on WhatsApp” is unticked.",
+    footage: !chases
+      ? "Off — “Chase this client on WhatsApp” is unticked."
+      : c.provides_footage === 0
+        ? "Off — this client is not asked for raw footage."
+        : null,
+    payments:
+      c.auto_payment_reminders === 1 ? null : "Off — “Chase unpaid invoices” is unticked.",
+    updates: chases ? null : "Off — “Chase this client on WhatsApp” is unticked.",
+    chat: null,
+  };
 
   // What changing the monthly numbers did to this month's tasks. Carried in
   // the URL because the save redirects here, and a change made silently is a
@@ -395,6 +434,34 @@ export default async function ClientDetailPage({
             loginEmail={c.login_email}
             loginActive={c.login_active}
           />
+
+          {/*
+            Above the group card on purpose. "Do we send this at all" is the
+            question somebody comes to this page with; "which of their groups"
+            only matters once the answer to the first one is yes.
+          */}
+          <MessagePrefs
+            clientId={c.id}
+            kinds={MESSAGE_KINDS.map((k) => ({ key: k.key, label: k.label, blurb: k.blurb }))}
+            on={wantsFrom(c)}
+            storable={msgStorable}
+          />
+
+          <GroupPurposes
+            clientId={c.id}
+            purposes={PURPOSES.map((p) => ({
+              key: p.key,
+              label: p.label,
+              blurb: p.blurb,
+              off: waOff[p.key] ?? null,
+            }))}
+            storable={grpStorable}
+            groups={waGroups.map((g) => ({
+              groupId: g.group_id,
+              name: g.group_name,
+              on: purposesOn(g),
+            }))}
+          />
         </div>
 
         {/* Right column */}
@@ -430,6 +497,13 @@ export default async function ClientDetailPage({
               plan={plan}
               tasks={planTasks}
               canForce={user.role === "super_admin"}
+              // The contract, shown as what a month falls back to and
+              // prefilled when one is agreed for the first time.
+              contract={{
+                videos: c.monthly_deliverables || 0,
+                posters: c.monthly_posters || 0,
+                amount: c.package_amount || 0,
+              }}
             />
           ) : null}
 

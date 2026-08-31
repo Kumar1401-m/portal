@@ -20,6 +20,7 @@ import "server-only";
 import { query, queryOne, execute, hasTable } from "./db";
 import { onTheFloor } from "./client-status";
 import { groupForClient, queueMessage, nowUtc } from "./reminder-outbox";
+import { clientWants } from "./client-messages";
 import { reportLink } from "./doc-link";
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -338,6 +339,17 @@ export async function queueMonthlyReports(
 
     if (!report.content.planned && !report.posts) {
       out.skipped.push({ client: c.company_name, reason: "nothing happened this month" });
+      continue;
+    }
+
+    /*
+     * Checked before the group and before the claim, so a client who does not
+     * want reports is never marked as having had one — otherwise switching it
+     * back on next month would find the month already claimed and send
+     * nothing.
+     */
+    if (!(await clientWants(c.id, "reports"))) {
+      out.skipped.push({ client: c.company_name, reason: "reports are switched off for them" });
       continue;
     }
 

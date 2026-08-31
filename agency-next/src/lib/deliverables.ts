@@ -275,6 +275,8 @@ export type DeliverableDetail = CaptionSource & {
   edited_link: string | null;
   raw_drive_link: string | null;
   cloud_video_url: string | null;
+  /** The R2 object key — what a permanent link, and a frame read, are built from. */
+  cloud_video_key: string | null;
   reject_reason: string | null;
   ai_score: number | null;
   service: string | null;
@@ -286,8 +288,8 @@ export type DeliverableDetail = CaptionSource & {
 /** Full deliverable + the client fields needed for the caption brief. */
 export async function getDeliverable(id: number): Promise<DeliverableDetail | null> {
   const cloud = (await hasColumn("deliverables", "cloud_video_url"))
-    ? "d.cloud_video_url"
-    : "NULL AS cloud_video_url";
+    ? "d.cloud_video_url, d.cloud_video_key"
+    : "NULL AS cloud_video_url, NULL AS cloud_video_key";
   const d = await queryOne<DeliverableDetail>(
     `SELECT d.id, d.client_id, d.title, d.description, d.content_hook, d.platform,
             d.video_type, d.promotion_type, d.language, d.target_audience,

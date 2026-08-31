@@ -474,7 +474,15 @@ export function renderTemplateRule(ctx: ClientContext): string | null {
         "or from the client details above. Never leave the braces in the caption."
       : "Every placeholder is already filled in above — keep those values exactly as they are.",
     "",
-    "If the template ends with hashtags, put yours there and nowhere else.",
-    "If it has no hashtags, return them only in the hashtags field.",
+    /*
+     * The template's own hashtag line, if it has one, is the block the portal
+     * appends — built from the business name, the handle, the town and the
+     * video, three of which it knows exactly. Reproduce it and the post
+     * carries two hashtag blocks, one of them with the handle spelled
+     * plausibly wrong.
+     */
+    "If the template ends with a keyword or hashtag line, LEAVE IT OUT. That",
+    "block is added afterwards from what we know for certain, and writing your",
+    "own puts it in the post twice.",
   ].join("\n");
 }

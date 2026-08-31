@@ -9,6 +9,7 @@ import { queryOne } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { MonthPicker } from "@/components/admin/month-picker";
 import { EditVideoModal } from "../../deliverables/edit-video-modal";
+import { TaskDate } from "../../deliverables/task-date";
 import { SERVICES, serviceOf, isServiceKey } from "@/lib/services";
 import {
   contentStatusLabel,
@@ -405,14 +406,19 @@ export default async function ClientReportPage({
                       <td className="px-2 py-3 text-right align-top">
                         {/* The same editor as the task list — one dialog for
                             editing a task, wherever you reach it from. */}
-                        <EditVideoModal
-                          deliverable={t}
-                          categories={categoryMap}
-                          canSendToClient={user.role === "super_admin" || user.role === "crm"}
-                          canDelete={user.role === "super_admin"}
-                          assignees={assignees}
-                          canUploadVideo={user.role !== "crm"}
-                        />
+                        <div className="flex items-center justify-end gap-1">
+                          {/* The date, beside the pencil that opens everything else. Moving a
+                              task a day used to mean opening the client and finding its month. */}
+                          <TaskDate taskId={t.id} title={t.title} dueDate={t.due_date} />
+                          <EditVideoModal
+                            deliverable={t}
+                            categories={categoryMap}
+                            canSendToClient={user.role === "super_admin" || user.role === "crm"}
+                            canDelete={user.role === "super_admin"}
+                            assignees={assignees}
+                            canUploadVideo={user.role !== "crm"}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );

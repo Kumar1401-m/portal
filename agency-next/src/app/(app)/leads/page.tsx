@@ -5,7 +5,7 @@ import { ClientFilter } from "@/components/admin/client-filter";
 import { Target, TriangleAlert, Flame, Trophy, IndianRupee } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES, ADMIN_ROLES } from "@/lib/auth";
 import { query, queryOne } from "@/lib/db";
-import { getLeads, leadsReady, funnel, LEAD_STAGES, type StageKey, isStage } from "@/lib/leads";
+import { getLeads, leadsReady, leadFunnel, LEAD_STAGES, type StageKey, isStage } from "@/lib/leads";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { money } from "@/lib/utils";
@@ -72,14 +72,24 @@ export default async function LeadsPage({
   const clientId =
     Number.isInteger(wanted) && clients.some((c) => c.id === wanted) ? wanted : null;
 
-  const [leads, all, owners, todayRow] = await Promise.all([
+  const [leads, f, owners, todayRow] = await Promise.all([
     getLeads({ stage, includeClosed, search: sp.q, clientId, clientIds: scope }),
-    // The header counts every lead, whatever the list is filtered to — a
-    // filtered pipeline total is a number that changes when you click a tab,
-    // which is the fastest way to make people stop trusting it.
-    // The header counts this client's pipeline when one is picked, so the
-    // total and the list are answering the same question.
-    getLeads({ includeClosed: true, clientId, clientIds: scope }),
+    /*
+     * Counted in the database, not by adding up the rows above.
+     *
+     * The header used to be built from a second `getLeads` call — and that has
+     * a LIMIT 300, which is right for a list and catastrophic for a total.
+     * Past three hundred leads every figure on this page silently stopped
+     * growing: not visibly wrong, just quietly plateaued at a plausible
+     * number, on the one board whose whole job is to say how much work is
+     * coming in. Ads make leads, so this was a bug with a date on it.
+     *
+     * Still counts every lead whatever the list is filtered to — a pipeline
+     * total that changes when you click a tab is the fastest way to make
+     * people stop trusting it — and still narrows to one client when one is
+     * picked, so the total and the list answer the same question.
+     */
+    leadFunnel({ clientId, clientIds: scope, search: sp.q }),
     query<{ id: number; name: string }>(
       `SELECT id, name FROM users
         WHERE role IN ('super_admin','admin','crm') AND COALESCE(is_active,1) = 1
@@ -89,7 +99,6 @@ export default async function LeadsPage({
   ]);
 
   const today = todayRow?.today ?? new Date().toISOString().slice(0, 10);
-  const f = funnel(all, today);
 
   /*
    * Scored on the server, beside the rows themselves.

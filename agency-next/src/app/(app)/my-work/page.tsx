@@ -92,11 +92,22 @@ export default async function MyWorkPage({
           icon={CheckCircle2}
           tone="emerald"
         />
+        {/*
+          The number and the list under it have to agree, or one of them looks
+          broken. The list carries last month's leftovers on purpose — they are
+          the first thing that should be picked up — so the count says how many
+          of those there are rather than leaving somebody to work it out.
+        */}
         <StatCard
           title="Still to do"
           value={s.toDo}
           icon={ListTodo}
           tone="amber"
+          hint={
+            s.carriedOver > 0
+              ? `+ ${s.carriedOver} carried over from other months`
+              : undefined
+          }
         />
         <StatCard
           title="Overdue"
@@ -121,11 +132,17 @@ export default async function MyWorkPage({
           icon={Hourglass}
           tone="amber"
         />
+        {/*
+          Part of "Still to do", not another pile beside it — a designer
+          reading the two cards and adding them together gets a number that
+          does not exist.
+        */}
         <StatCard
           title="Changes asked for"
           value={s.changes}
           icon={PencilLine}
           tone={s.changes > 0 ? "rose" : "sky"}
+          hint={s.changes > 0 ? "Included in Still to do" : undefined}
         />
       </div>
 

@@ -269,7 +269,9 @@ await mk("ZZ next week", "pending", nextWeek);
     // answers "where is this", and Actions is how you do anything about it.
     assert.ok(src.includes("<th>Client name</th>"), `${file}: the name never folds`);
     assert.match(src, /<th className="w-28">Post status<\/th>/, `${file}: nor does the post status`);
-    assert.match(src, /<th className="w-20 text-right">Actions<\/th>/, `${file}: nor the actions`);
+    // w-24, not w-20: two icon buttons live there now, the calendar beside
+    // the pencil.
+    assert.match(src, /<th className="w-24 text-right">Actions<\/th>/, `${file}: nor the actions`);
 
     // And the folded facts are restacked rather than dropped.
     assert.match(

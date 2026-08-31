@@ -24,6 +24,7 @@ import { ServiceTabs } from "@/components/admin/service-tabs";
 import { SearchBox } from "@/components/admin/search-box";
 import { Pager } from "@/components/admin/pager";
 import { EditVideoModal } from "../deliverables/edit-video-modal";
+import { TaskDate } from "../deliverables/task-date";
 import { fmtDate } from "@/lib/utils";
 
 export const metadata = { title: "Today's Tasks · NVK Hub" };
@@ -253,7 +254,7 @@ export default async function TodayPage({
                   </>
                 )}
                 <th className="hidden w-28 2xl:table-cell">Remarks</th>
-                <th className="w-20 text-right">Actions</th>
+                <th className="w-24 text-right">Actions</th>
               </tr>
             </THead>
             <TBody>
@@ -339,14 +340,19 @@ export default async function TodayPage({
                       {d.reject_reason || d.writer_notes || "—"}
                     </TD>
                     <TD className="text-right">
-                      <EditVideoModal
-                        deliverable={d}
-                        categories={categoryMap}
-                        canSendToClient={user.role === "super_admin" || user.role === "crm"}
-                        canDelete={user.role === "super_admin"}
-                        assignees={assignees}
-                        canUploadVideo={user.role !== "crm"}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        {/* The date, beside the pencil that opens everything else. Moving a
+                            task a day used to mean opening the client and finding its month. */}
+                        <TaskDate taskId={d.id} title={d.title} dueDate={d.due_date} />
+                        <EditVideoModal
+                          deliverable={d}
+                          categories={categoryMap}
+                          canSendToClient={user.role === "super_admin" || user.role === "crm"}
+                          canDelete={user.role === "super_admin"}
+                          assignees={assignees}
+                          canUploadVideo={user.role !== "crm"}
+                        />
+                      </div>
                     </TD>
                   </TR>
                 );

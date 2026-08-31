@@ -28,6 +28,7 @@ import { getCategoryMap } from "./categories";
 import { DEFAULT_CATEGORIES, videoTypeForService, type ServiceKey } from "./services";
 import { utcToLocalInput } from "./posting";
 import { clientDefaults, defaultAssigneeFor } from "./clients";
+import { monthPlanFor } from "./month-plans";
 
 /** Tasks a cancelled or rejected row shouldn't count towards. */
 const COUNTS_TOWARDS_TARGET = "d.status NOT IN ('cancelled','rejected')";
@@ -43,6 +44,11 @@ export type MonthPlan = {
   month: string;
   videoTarget: number;
   posterTarget: number;
+  /**
+   * Set when this month has a plan of its own rather than following the
+   * contract — the amount agreed for it, and the invoice it raised.
+   */
+  agreed: { amount: number; note: string | null; invoiceNo: string | null } | null;
   videosExisting: number;
   postersExisting: number;
   /** The shortfall — what pressing Generate would actually create. */
@@ -104,6 +110,19 @@ export async function monthPlan(clientId: number, month: string): Promise<MonthP
   );
   if (!client) return null;
 
+  /*
+   * This month's own plan outranks the contract, when it has one.
+   *
+   * The contract holds one pair of numbers standing for every month there
+   * will ever be, so agreeing twelve videos for September used to mean editing
+   * it — which then reported twelve for August as well, and for every month
+   * already closed. A month agreed differently is a fact about that month.
+   *
+   * Null when there is no plan for it, and null on a database that has not
+   * applied the table, so everything below behaves exactly as it did.
+   */
+  const override = await monthPlanFor(clientId, mk).catch(() => null);
+
   const tally = await queryOne<{ videos: number; posters: number }>(
     `SELECT COALESCE(SUM(NOT ${IS_POSTER}),0) AS videos,
             COALESCE(SUM(${IS_POSTER}),0) AS posters
@@ -112,8 +131,12 @@ export async function monthPlan(clientId: number, month: string): Promise<MonthP
     [clientId, mk]
   );
 
-  const videoTarget = Math.max(0, Number(client.monthly_deliverables) || 0);
-  const posterTarget = Math.max(0, Number(client.monthly_posters) || 0);
+  const videoTarget = override
+    ? override.videos
+    : Math.max(0, Number(client.monthly_deliverables) || 0);
+  const posterTarget = override
+    ? override.posters
+    : Math.max(0, Number(client.monthly_posters) || 0);
   const videosExisting = Number(tally?.videos) || 0;
   const postersExisting = Number(tally?.posters) || 0;
 
@@ -121,6 +144,9 @@ export async function monthPlan(clientId: number, month: string): Promise<MonthP
     month: mk,
     videoTarget,
     posterTarget,
+    agreed: override
+      ? { amount: override.amount, note: override.note, invoiceNo: override.invoiceNo }
+      : null,
     videosExisting,
     postersExisting,
     videosToAdd: Math.max(0, videoTarget - videosExisting),

@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ServiceDot } from "@/components/ui/service-badge";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
+import { jobStatuses, CRITICAL_JOBS } from "@/lib/automation-map";
 import { ProductionSummary } from "@/components/admin/production-summary";
 import { ServiceMix } from "@/components/admin/service-mix";
 import Link from "next/link";
@@ -42,6 +43,23 @@ export default async function DashboardPage() {
 
   // Slots that came and went without the post going out.
   const missed = await getMissedPosts(scopeIds);
+
+  /*
+   * Whether the machine itself has stopped.
+   *
+   * "Not posted" below says a slot came and went; it cannot say that nothing
+   * has been calling the publisher at all, which has been the cause every time
+   * so far. That fact lived only on the Automations page, which is not the
+   * page anybody opens in the morning — so a portal could sit for weeks
+   * publishing nothing while every screen looked merely quiet.
+   *
+   * Admins only: a crm can see the symptom on their own clients but cannot fix
+   * a schedule, and a warning nobody can act on is noise.
+   */
+  const stopped = isCrm
+    ? []
+    : (await jobStatuses().catch(() => []))
+        .filter((j) => CRITICAL_JOBS.includes(j.key) && j.health !== "ok");
 
   const admin = isCrm ? null : (d as Awaited<ReturnType<typeof getAdminDashboard>>);
 
@@ -106,6 +124,36 @@ export default async function DashboardPage() {
         <StatCard title="Upcoming" value={d.deliverables.upcoming} icon={CalendarClock} tone="indigo" />
         <StatCard title="Overdue" value={d.deliverables.overdue} icon={AlertTriangle} tone="rose" />
       </div>
+
+      {/*
+        Above everything, because it explains everything below it. A dashboard
+        full of "overdue" that is really one dead schedule sends somebody
+        chasing eight tasks instead of fixing one thing.
+      */}
+      {stopped.length ? (
+        <Card className="border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-destructive">
+                {stopped.length === 1
+                  ? `${stopped[0].label} is not running.`
+                  : `${stopped.length} automatic jobs are not running.`}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {stopped.map((j) => j.label).join(", ")} —{" "}
+                {stopped.some((j) => j.health === "never")
+                  ? "nothing has ever called them."
+                  : "nothing has called them recently."}{" "}
+                Scheduled posts and reminders wait until something does.
+              </p>
+              <Link href="/automations" className="inline-block text-sm text-primary hover:underline">
+                See what to do about it →
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {missed.length ? (
         <Card className="overflow-hidden border-[color-mix(in_srgb,var(--destructive)_40%,var(--border))]">

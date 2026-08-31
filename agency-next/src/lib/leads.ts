@@ -14,7 +14,16 @@
  */
 import "server-only";
 import { query, queryOne, execute, hasTable } from "./db";
-import { OPEN_STAGES, isSource, isStage, type Lead, type StageKey } from "./lead-stages";
+import {
+  LEAD_STAGES,
+  OPEN_STAGES,
+  funnel,
+  isSource,
+  isStage,
+  type Funnel,
+  type Lead,
+  type StageKey,
+} from "./lead-stages";
 
 /*
  * The vocabulary lives next door, where the board — a client component — can
@@ -135,6 +144,9 @@ export async function getLead(id: number): Promise<Lead | null> {
 }
 
 /** Won this month, and what it was worth. For the dashboard and the assistant. */
+/** `'a','b'` — OPEN_STAGES for an IN clause. Our own constants, never input. */
+const OPEN_LIST = OPEN_STAGES.map((s) => `'${s}'`).join(",");
+
 export async function leadSummary(): Promise<{
   open: number;
   overdue: number;
@@ -144,8 +156,11 @@ export async function leadSummary(): Promise<{
   if (!(await leadsReady())) return null;
   const r = await queryOne<Record<string, unknown>>(
     `SELECT
-       SUM(stage IN ('new','contacted','qualified','proposal')) AS open_count,
-       SUM(stage IN ('new','contacted','qualified','proposal')
+       /* One definition of "open", shared with the board and the filters —
+          three hardcoded copies of this list is how a new stage ends up
+          counted on one screen and invisible on another. */
+       SUM(stage IN (${OPEN_LIST})) AS open_count,
+       SUM(stage IN (${OPEN_LIST})
            AND next_follow_up IS NOT NULL AND next_follow_up < CURDATE()) AS overdue,
        SUM(stage = 'won' AND DATE_FORMAT(updated_at,'%Y-%m') = DATE_FORMAT(CURDATE(),'%Y-%m')) AS won_count,
        COALESCE(SUM(CASE WHEN stage = 'won'
@@ -221,4 +236,122 @@ export async function findByContact(phone: string | null, email: string | null):
     [phone, phone, email, email]
   );
   return r ? Number(r.id) : null;
+}
+
+/**
+ * The funnel, counted in the database rather than by loading the leads.
+ *
+ * The board used to build every number on it — the open pipeline, each stage
+ * chip, the won value, the overdue count — by fetching leads and adding them
+ * up in memory. `getLeads` has a `LIMIT 300`, which is right for a list and
+ * catastrophic for a total: past three hundred leads every figure on the page
+ * silently stopped growing. Not wrong in a way anybody would notice, either —
+ * it just quietly plateaued at a plausible number, on the one board whose
+ * whole job is to say how much work is coming in.
+ *
+ * Ads produce leads, and an agency running lead-gen crosses three hundred
+ * quickly, so this was a bug with a date on it.
+ *
+ * Same filters as the list so the two agree, same shape as `funnel()` so the
+ * board did not have to change how it reads them, and no limit — a COUNT does
+ * not need one.
+ */
+export async function leadFunnel(opts: {
+  clientId?: number | null;
+  clientIds?: number[] | null;
+  search?: string;
+  ownerId?: number | null;
+} = {}): Promise<Funnel> {
+  const blank = funnel([], "1970-01-01");
+  if (!(await leadsReady())) return blank;
+
+  const where: string[] = ["1=1"];
+  const params: (string | number)[] = [];
+
+  if (opts.clientId) {
+    where.push("l.client_id = ?");
+    params.push(opts.clientId);
+  }
+  if (opts.clientIds) {
+    if (opts.clientIds.length === 0) return blank;
+    where.push(`l.client_id IN (${opts.clientIds.map(() => "?").join(",")})`);
+    params.push(...opts.clientIds);
+  }
+  if (opts.ownerId) {
+    where.push("l.owner_user_id = ?");
+    params.push(opts.ownerId);
+  }
+  if (opts.search) {
+    where.push("(l.name LIKE ? OR l.company LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)");
+    const like = `%${opts.search}%`;
+    params.push(like, like, like, like);
+  }
+
+  /*
+   * CURDATE() is the database's clock, which runs on Indian time here — and
+   * that is the right one: `next_follow_up` is a date somebody typed while
+   * sitting in India, not a moment in UTC. Comparing it against the app's UTC
+   * day would make every follow-up look overdue for five and a half hours
+   * every night.
+   */
+  const rows = await query<{
+    stage: string;
+    n: number;
+    value: string | null;
+    overdue: number;
+    due_today: number;
+  }>(
+    `SELECT l.stage,
+            COUNT(*) AS n,
+            COALESCE(SUM(l.value), 0) AS value,
+            COALESCE(SUM(l.next_follow_up IS NOT NULL AND l.next_follow_up < CURDATE()), 0) AS overdue,
+            COALESCE(SUM(l.next_follow_up = CURDATE()), 0) AS due_today
+       FROM leads l
+      WHERE ${where.join(" AND ")}
+      GROUP BY l.stage`,
+    params
+  ).catch(() => []);
+
+  const stages = LEAD_STAGES.map((s) => ({ key: s.key, label: s.label, count: 0, value: 0 }));
+  const at = new Map(stages.map((s) => [s.key, s]));
+
+  let openValue = 0;
+  let wonValue = 0;
+  let overdue = 0;
+  let dueToday = 0;
+
+  for (const r of rows) {
+    const bucket = at.get(r.stage as StageKey);
+    const n = Number(r.n) || 0;
+    const value = Number(r.value) || 0;
+    if (bucket) {
+      bucket.count = n;
+      bucket.value = value;
+    }
+    if (r.stage === "won") {
+      wonValue += value;
+    } else if (r.stage !== "lost") {
+      // Only an open lead can be overdue. A lost one whose follow-up date
+      // passed is not a task anybody has to do — same rule as `funnel()`.
+      openValue += value;
+      overdue += Number(r.overdue) || 0;
+      dueToday += Number(r.due_today) || 0;
+    }
+  }
+
+  const won = at.get("won")?.count ?? 0;
+  const lost = at.get("lost")?.count ?? 0;
+  const closed = won + lost;
+
+  return {
+    stages,
+    openValue,
+    wonValue,
+    // Against everything that has *closed*, not against every lead ever — a
+    // pipeline full of live enquiries would otherwise drag the rate down for
+    // the crime of being busy. Same rule as `funnel()`.
+    conversion: closed > 0 ? Math.round((won / closed) * 100) : null,
+    overdue,
+    dueToday,
+  };
 }
