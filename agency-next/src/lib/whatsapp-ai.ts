@@ -342,6 +342,15 @@ export async function recentTurns(groupId: string, limit = 10): Promise<Turn[]> 
  * funnel question — how many saw it, how many did something, how many got in
  * touch — and the numbers only mean anything in that order.
  *
+ * ## Everything except the money
+ *
+ * Every money-free figure the reader holds is written out, for the totals and
+ * for each ad: reach and the window it covers, impressions, engagements, video
+ * views, clicks, click rate, profile visits, enquiries, the campaign, where it
+ * ran and how many days it ran for. The model composing a two-line reply from
+ * all that is cheap; it going quiet on "what about the poster ad?" because the
+ * figure was never handed over is not.
+ *
  * ## A dash is not a nought, in a chat as much as on a page
  *
  * Meta does not report every action on every account. An unreported figure is
@@ -366,32 +375,70 @@ export function adLines(a: ClientAdsSummary | null): string[] {
   // Named the way the client's own page names them, so a figure quoted in the
   // group and a figure read on the portal are recognisably the same figure.
   const totals = [
-    t.reach === null ? null : `${n(t.reach)} accounts reached`,
+    t.reach === null
+      ? null
+      : `${n(t.reach)} accounts reached` + (t.reachDays ? ` over ${t.reachDays} days` : ""),
     `${n(t.impressions)} impressions`,
     t.engagement === null ? null : `${n(t.engagement)} engagements`,
+    t.videoViews === null ? null : `${n(t.videoViews)} video views`,
     `${n(t.clicks)} clicks`,
     t.ctr === null ? null : `${t.ctr.toFixed(2)}% click rate`,
     t.profileVisits === null ? null : `${n(t.profileVisits)} profile visits`,
     `${n(t.leads)} enquiries`,
   ].filter(Boolean);
 
+  /**
+   * One ad, with every figure we hold on it, in the funnel's order.
+   *
+   * The same rule as the totals: a figure Meta never reported is left out
+   * rather than sent as a nought.
+   */
+  const one = (ad: ClientAdsSummary["ads"][number]) =>
+    [
+      ad.days ? `ran on ${ad.days} ${ad.days === 1 ? "day" : "days"}` : null,
+      `${n(ad.impressions)} impressions`,
+      ad.engagement === null ? null : `${n(ad.engagement)} engagements`,
+      ad.videoViews === null ? null : `${n(ad.videoViews)} video views`,
+      `${n(ad.clicks)} clicks`,
+      ad.ctr === null ? null : `${ad.ctr.toFixed(2)}% click rate`,
+      ad.profileVisits === null ? null : `${n(ad.profileVisits)} profile visits`,
+      `${n(ad.leads)} ${ad.leads === 1 ? "enquiry" : "enquiries"}`,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+  /*
+   * Every ad, not the three biggest.
+   *
+   * These lines are what the model may draw on, not what it sends — it still
+   * writes two or three lines back. Handing it only the top three meant "and
+   * how is the poster one doing?" was answered with "I'll check with the team"
+   * about an ad whose figures were sitting one line away. Twelve is a ceiling
+   * on the prompt, not on the answer: past that the tail is tiny, and what is
+   * left is counted out loud so nothing is silently dropped.
+   */
+  const listed = a.ads.slice(0, 12);
+
   return [
     `Their ads, ${fmtDate(a.from)} to ${fmtDate(a.to)}: ${t.ads} ${t.ads === 1 ? "ad" : "ads"} ran.`,
+    // Meta reports a day or two behind. Without this the model answers "as of
+    // today" for figures that stop on Tuesday.
+    a.lastDay ? `Figures up to ${fmtDate(a.lastDay)}.` : null,
     `Across all of them: ${totals.join(", ")}.`,
-    // The three biggest. A WhatsApp reply is not a report, and the tail of a
-    // list of twelve ads is noise in a chat.
-    ...a.ads.slice(0, 3).map((ad) => {
+    ...listed.map((ad) => {
       const where = ad.locations ? shortPlace(ad.locations) : null;
       return (
         `- "${shortName(ad.name, a.company)}"` +
+        (ad.campaign ? ` (campaign: ${shortName(ad.campaign, a.company)})` : "") +
         (where ? `, running in ${where}` : "") +
-        `: ${n(ad.impressions)} impressions, ${n(ad.clicks)} clicks` +
-        (ad.engagement === null ? "" : `, ${n(ad.engagement)} engagements`) +
-        `, ${n(ad.leads)} ${ad.leads === 1 ? "enquiry" : "enquiries"}`
+        `: ${one(ad)}`
       );
     }),
+    a.ads.length > listed.length
+      ? `- and ${a.ads.length - listed.length} more ads, all smaller than these.`
+      : null,
     "",
-  ];
+  ].filter((l): l is string => l !== null);
 }
 
 /** The facts as plain lines — what the model is allowed to draw on. */
@@ -635,9 +682,11 @@ const SYSTEM = [
   "on from them, any unpaid invoice with its amount and due date, and how their ads have done over the",
   "last 30 days. Use all of it — a question you can answer exactly should never get a vague answer.",
   "",
-  "ADS. Answer these as fully as any other question: how many people the ads reached, how many",
-  "engagements, clicks, profile visits and enquiries, which ad did best, and where each one is running.",
-  "Those numbers are theirs and they are in FACTS.",
+  "ADS. Answer these as fully as any other question: how many people the ads reached and over how",
+  "many days, impressions, engagements, video views, clicks, click rate, profile visits and enquiries.",
+  "FACTS has all of it twice over — for their ads together, and for each ad on its own with its",
+  "campaign, where it is running, how many days it ran, and the date the figures run up to. Which ad",
+  "did best is in there too. Every one of those numbers is theirs: give the exact figure asked for.",
   "What is NOT in FACTS is what the ads cost — budget, spend, ad rates, cost per lead, cost per view.",
   "You do not have those figures, so you cannot state, estimate, approximate or work one out, and you",
   "must not try. Asked about money on ads, thank them and say the team will come back to them on it.",

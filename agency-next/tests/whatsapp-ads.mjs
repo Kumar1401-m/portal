@@ -81,7 +81,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
     to: "2026-08-30",
     company: "Freskos",
     totals: {
-      ads: 2,
+      ads: 4,
       impressions: 5382,
       clicks: 210,
       ctr: 3.9,
@@ -96,8 +96,9 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
       {
         adId: "1",
         name: "Freskos - Video Ad 5 - Order Now",
-        campaign: null,
+        campaign: "Freskos - August Reels",
         locations: "Hyderabad, Telangana",
+        days: 12,
         impressions: 4000,
         clicks: 180,
         ctr: 4.5,
@@ -111,6 +112,7 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
         name: "Freskos - Poster",
         campaign: null,
         locations: null,
+        days: 9,
         impressions: 1382,
         clicks: 30,
         ctr: 2.1,
@@ -119,7 +121,36 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
         engagement: 26,
         leads: 1,
       },
+      {
+        adId: "3",
+        name: "Freskos - Carousel",
+        campaign: null,
+        locations: null,
+        days: 5,
+        impressions: 900,
+        clicks: 21,
+        ctr: 2.33,
+        videoViews: null,
+        profileVisits: null,
+        engagement: 12,
+        leads: 1,
+      },
+      {
+        adId: "4",
+        name: "Freskos - Story Ad",
+        campaign: null,
+        locations: null,
+        days: 4,
+        impressions: 640,
+        clicks: 15,
+        ctr: 2.34,
+        videoViews: null,
+        profileVisits: null,
+        engagement: 8,
+        leads: 1,
+      },
     ],
+    lastDay: "2026-08-29",
   };
 
   const text = wa.adLines(summary).join("\n");
@@ -131,11 +162,36 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
     "5,382 impressions",
     "96 engagements",
     "210 clicks",
+    "1,400 video views",
     "3.90% click rate",
     "7 enquiries",
   ]) {
     assert.ok(text.includes(said), `it can say "${said}"`);
   }
+
+  // Meta reports a day or two behind, and a client reading a figure as today's
+  // when it stops on Tuesday is being told something untrue.
+  assert.ok(text.includes("Figures up to 29 Aug"), "the day the figures actually run to");
+
+  /*
+   * Everything except the money, per ad as well as in total.
+   *
+   * Each of these was held by the reader and dropped before the model saw it,
+   * which is how "how many people watched the video ad?" — a question with an
+   * exact answer one line away — came back as "I will check with the team".
+   */
+  for (const said of [
+    "1,200 video views",
+    "4.50% click rate",
+    "ran on 12 days",
+    "campaign: August Reels",
+  ]) {
+    assert.ok(text.includes(said), `each ad carries "${said}"`);
+  }
+
+  // The fourth ad. Under the old three-ad cap its figures never reached the
+  // model, so the smallest ad was the one it could not answer about.
+  assert.ok(text.includes(`"Story Ad"`), "every ad is listed, not the top three");
 
   // Asked for by name: which ad, and where it is running.
   assert.ok(text.includes("running in Hyderabad"), "and where an ad is running");
