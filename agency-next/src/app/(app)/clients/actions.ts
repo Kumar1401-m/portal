@@ -92,6 +92,11 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
   if (await hasColumn("clients", "auto_reminders")) {
     columns.auto_reminders = fd.get("auto_reminders") ? 1 : 0;
   }
+  // Whether they send us footage at all. Ticked by default — most do, and an
+  // unticked box is the deliberate "stop asking us for rushes".
+  if (await hasColumn("clients", "provides_footage")) {
+    columns.provides_footage = fd.get("provides_footage") ? 1 : 0;
+  }
   // Whether the client reads the brief before the work starts. Ticked by
   // default in the form, so an unticked box here is a deliberate "no".
   if (await hasColumn("clients", "ads_access_token")) {
@@ -123,6 +128,22 @@ async function parseClient(fd: FormData, isSuperAdmin: boolean): Promise<ClientD
     // unrelated edit. Clearing it is done by writing the word "none".
     const token = s(fd, "ig_access_token");
     if (token) columns.ig_access_token = token.toLowerCase() === "none" ? null : token;
+  }
+
+  /*
+   * The shape this client's captions take.
+   *
+   * The column, the prompt block that reproduces it and the rule that says it
+   * is not optional all existed already — what did not exist was anywhere to
+   * type it. So the feature was complete except for its input, and a client
+   * with an agreed caption structure got captions in whatever shape the model
+   * felt like.
+   *
+   * Stored as its own column rather than inside `caption_settings`, because
+   * it is a paragraph with line breaks and emoji in it, not a setting.
+   */
+  if (await hasColumn("clients", "caption_template")) {
+    columns.caption_template = orNull(s(fd, "caption_template"));
   }
 
   // Localization → these drive the AI caption brief (city/country/language/tone).

@@ -10,6 +10,22 @@ import type { CrmUserOption } from "@/lib/crm";
 import { SERVICE_LIST, type ServiceKey } from "@/lib/services";
 import { cn } from "@/lib/utils";
 
+/**
+ * What a caption structure looks like, shown as placeholder text.
+ *
+ * A real one rather than a description of one: told "enter your caption
+ * template", people write a sentence about their captions. Shown a shape with
+ * blank lines and an emoji in it, they replace it with theirs.
+ */
+const CAPTION_TEMPLATE_EXAMPLE = `✨ [hook — one line about this video]
+
+[2-3 short lines describing what happens]
+
+📍 {{location}}
+📞 {{whatsapp}}
+
+#yourbrand #{{location}} #reels`;
+
 export type ClientDefaults = Partial<{
   id: number;
   company_name: string;
@@ -35,6 +51,7 @@ export type ClientDefaults = Partial<{
   editor_id: string;
   caption_language: string;
   caption_tone: string;
+  caption_template: string;
   loc_city: string;
   loc_country: string;
   loc_whatsapp: string;
@@ -50,6 +67,7 @@ export type ClientDefaults = Partial<{
   youtube_enabled: boolean;
   auto_payment_reminders: boolean;
   auto_reminders: boolean;
+  provides_footage: boolean;
   youtube_channel_id: string;
   meta_ad_account_id: string;
   ads_access_token: string;
@@ -333,8 +351,10 @@ export function ClientForm({
             </span>
           </label>
 
-          {/* The ad account, which is what the Ad management board reads. It
-              is not the Page or the IG account — those cannot report spend. */}
+          {/* The three switches below and the group tickboxes on the
+              client's own page answer different questions — "should we?" here,
+              "which of their groups?" there — so each says which one it is.
+              Read apart they look like two copies of the same setting. */}
           <label
             htmlFor="auto_reminders"
             className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
@@ -351,9 +371,40 @@ export function ClientForm({
               <span className="font-medium">Chase this client on WhatsApp</span>
               <br />
               <span className="text-muted-foreground">
-                Footage, approvals and the month&apos;s plan, sent to their group on a schedule.
-                Untick it for a client who would rather hear from a person — everything else,
-                including content and finished videos, still goes to them.
+                <b>Approvals</b>, <b>footage</b> and <b>updates</b> — sent on a schedule. Untick
+                it for a client who would rather hear from a person; everything else, including
+                content and finished videos, still goes to them. Unpaid invoices have their own
+                switch below and are not affected by this one. Which of their groups each of
+                these lands in is set on the client&apos;s own page.
+              </span>
+            </span>
+          </label>
+
+          {/* Narrower than the switch above, and the reason it is separate: a
+              client we film ourselves, or whose whole plan is posters and ads,
+              should still be chased about approvals and told what is going out
+              this month. They should just never be asked for rushes that were
+              never going to exist. */}
+          <label
+            htmlFor="provides_footage"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/60"
+          >
+            <input
+              id="provides_footage"
+              type="checkbox"
+              name="provides_footage"
+              value="1"
+              defaultChecked={d.provides_footage !== false}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Ask this client for raw footage</span>
+              <br />
+              <span className="text-muted-foreground">
+                Narrows <b>footage</b> only. Untick it for a client we film ourselves, or whose
+                work is posters and ads — their group then hears nothing about raw footage,
+                while approvals and updates carry on. A link they send anyway is still
+                accepted, and the agency&apos;s own boards still show what is waiting.
               </span>
             </span>
           </label>
@@ -379,8 +430,9 @@ export function ClientForm({
               <span className="font-medium">Chase unpaid invoices on WhatsApp</span>
               <br />
               <span className="text-muted-foreground">
-                Once the due date passes, this client&apos;s group gets a weekly reminder with a
-                payment link they can tap — no login. Off unless you tick it.
+                <b>Payments</b>, and only this switch decides it. Once the due date passes, the
+                group gets a weekly reminder with a payment link they can tap — no login. Off
+                unless you tick it.
               </span>
             </span>
           </label>
@@ -615,6 +667,31 @@ export function ClientForm({
               <Input id="loc_whatsapp" name="loc_whatsapp" defaultValue={d.loc_whatsapp} />
             </Field>
           </div>
+
+          {/*
+            The shape, not the words.
+
+            Language and tone say how a caption should sound; this says how it
+            should be laid out — the sections, their order, the line breaks,
+            where the hashtags go. The AI reproduces it exactly and changes
+            only the parts that describe the particular video, which is what
+            makes one client's feed look like one client's feed.
+          */}
+          <Field label="Caption structure (optional)" name="caption_template">
+            <Textarea
+              id="caption_template"
+              name="caption_template"
+              rows={8}
+              placeholder={CAPTION_TEMPLATE_EXAMPLE}
+              defaultValue={d.caption_template}
+            />
+            <p className="text-xs text-muted-foreground">
+              Written here, every caption for this client comes out in this shape — same
+              sections, same order, same line breaks. Only the words describing the video
+              change. Use <code>{"{{location}}"}</code>, <code>{"{{whatsapp}}"}</code> or{" "}
+              <code>{"{{country}}"}</code> and they are filled in from the fields above.
+            </p>
+          </Field>
         </CardContent>
       </Card>
 

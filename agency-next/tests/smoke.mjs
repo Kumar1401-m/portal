@@ -102,7 +102,7 @@ ok("a client with nothing outstanding gets a reason, never a blank message");
 await db.execute(
   `INSERT INTO deliverables (client_id, title, status, due_date, month_key, video_code)
    VALUES (?, 'Smoke reel — footage', 'waiting_for_raw', DATE_ADD(CURDATE(), INTERVAL 3 DAY), ?, NULL),
-          (?, 'Smoke reel — approval', 'content_review', CURDATE(), ?, 'VZZ1'),
+          (?, 'Smoke reel — approval', 'review', CURDATE(), ?, 'VZZ1'),
           (?, 'Smoke reel — approval 2', 'review', CURDATE(), ?, 'VZZ2')`,
   [client.id, month, client.id, month, client.id, month]
 );
@@ -122,6 +122,14 @@ for (const kind of ["footage_due", "approval_chase", "monthly_plan", "invoice_du
 assert.match(composed.footage_due, /Smoke reel — footage/);
 assert.ok(!composed.footage_due.includes("approval"), "the footage chase lists only what is missing footage");
 assert.match(composed.approval_chase, /VZZ1/, "two waiting videos means the codes are named");
+/*
+ * Both fixtures sit at "review", which is the gate the client is actually
+ * shown. One of them used to sit at "content_review" — and was chased, which
+ * was the bug: content review happens inside the agency, so the client was
+ * being asked to approve something they had never seen. no-second-ask.mjs
+ * holds that line; this one needs two videos at the same gate to exercise the
+ * many-videos wording, where the codes appear.
+ */
 assert.match(composed.monthly_plan, /3 pieces of content/);
 assert.match(composed.invoice_due, /ZZ-SMOKE-1/);
 assert.match(composed.invoice_due, /₹12,500/);

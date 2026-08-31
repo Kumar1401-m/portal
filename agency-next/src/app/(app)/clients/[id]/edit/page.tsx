@@ -44,6 +44,7 @@ export default async function EditClientPage({
   const defaults: ClientDefaults = {
     id: client.id,
     company_name: str(client.company_name),
+    caption_template: str(client.caption_template),
     contact_person: str(client.contact_person),
     business_type: str(client.business_type),
     status: str(client.status),
@@ -69,6 +70,7 @@ export default async function EditClientPage({
     auto_payment_reminders: Number(client.auto_payment_reminders) === 1,
     // Null (column not there yet) means on — same rule the server applies.
     auto_reminders: client.auto_reminders === null || Number(client.auto_reminders) === 1,
+    provides_footage: client.provides_footage === null || Number(client.provides_footage) === 1,
     youtube_channel_id: client.youtube_channel_id ?? "",
     meta_ad_account_id: client.meta_ad_account_id ?? "",
     // Deliberately not the stored token: a password field that echoes the

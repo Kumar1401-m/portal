@@ -26,8 +26,18 @@ export default async function LoginPage({
 
   const expired = (await searchParams).expired === "1";
 
+  /*
+   * `min-h-dvh`, not `min-h-screen`. On a phone `100vh` is the viewport with
+   * the browser's toolbars *hidden*, so a screen sized to it has its bottom
+   * tucked behind the URL bar until you scroll — which on a centred card puts
+   * the Sign in button under the chrome, on the one screen nobody has learnt
+   * their way around yet.
+   *
+   * And less padding on a small screen: 24px each side plus a 32px card inset
+   * leaves a 320px phone about 208px of usable field.
+   */
   return (
-    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#0d0c0f] px-6 py-12 text-white">
+    <main className="relative grid min-h-dvh place-items-center overflow-hidden bg-[#0d0c0f] px-4 py-8 text-white sm:px-6 sm:py-12">
       {/* Warmth behind the card, so it sits in light rather than on a flat ground. */}
       <div
         aria-hidden
@@ -53,7 +63,7 @@ export default async function LoginPage({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-8 shadow-2xl backdrop-blur-sm">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-6 shadow-2xl backdrop-blur-sm sm:p-8">
           {/* Says why, rather than leaving someone to wonder whether they were
               signed out or something broke. */}
           {expired ? (

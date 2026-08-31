@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,16 @@ import { cn } from "@/lib/utils";
  * keep working untouched. `onChange` fires with the value, matching the
  * pattern the monthly plan already uses to save on pick.
  */
+
+/**
+ * The panel's own size in pixels, so it can be placed before it is rendered.
+ *
+ * The width is `w-[17.5rem]` at the default root size. The height is only used
+ * to decide whether to open upwards, so being a few pixels out there costs
+ * nothing — being wrong about the width would push it off the screen.
+ */
+const PANEL_W = 280;
+const PANEL_H = 340;
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -52,6 +63,8 @@ export function DateField({
   className,
   placeholder = "Pick a date",
   disabled,
+  compact = false,
+  align = "left",
   "aria-label": ariaLabel,
 }: {
   /** Paired with a <Label htmlFor>, so the label still focuses the control. */
@@ -62,31 +75,88 @@ export function DateField({
   className?: string;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * Just the calendar, at icon size.
+   *
+   * The full control is a button wide enough to read "26 Aug 2026" off, which
+   * is right where the date is the thing being edited. Dropped into a table's
+   * actions column — twenty units wide, shared with a pencil — it rendered as
+   * "26" with the rest cut off: a fragment of a date that cannot be read,
+   * beside a Schedule date column already printing the whole thing.
+   *
+   * So this is the icon alone, sized to sit next to the pencil. The date it
+   * holds is on the tooltip and in the label.
+   */
+  compact?: boolean;
+  /** Which edge the calendar hangs from — see `place`. */
+  align?: "left" | "right";
   "aria-label"?: string;
 }) {
   const [value, setValue] = useState(defaultValue ? defaultValue.slice(0, 10) : "");
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => parse(defaultValue) ?? new Date());
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const hidden = useRef<HTMLInputElement>(null);
 
+  /**
+   * Where the calendar goes, measured against the window.
+   *
+   * It was `absolute` inside this component's own box, which is right
+   * everywhere except the place it is now used most: a cell of a dense table.
+   * Those carry `overflow-hidden` — `table-fixed` needs it so a long value is
+   * clipped rather than widening its column — inside a wrapper that is
+   * `overflow-x-auto`. Between them the panel was cropped to the height of a
+   * table row, so the picker opened and there was nothing to see. That reads
+   * exactly like a button that does not work.
+   *
+   * So it is measured off the trigger and rendered into `document.body`, where
+   * no ancestor can crop it. Fixed rather than absolute, because
+   * `getBoundingClientRect` is already in viewport coordinates.
+   */
+  const place = useCallback(() => {
+    const b = trigger.current?.getBoundingClientRect();
+    if (!b) return;
+    // Hung from whichever edge was asked for, and never off either one.
+    const wanted = align === "right" ? b.right - PANEL_W : b.left;
+    const left = Math.min(Math.max(8, wanted), window.innerWidth - PANEL_W - 8);
+    // Below, unless there is more room above — a row near the foot of a long
+    // board would otherwise open past the bottom of the window.
+    const below = window.innerHeight - b.bottom;
+    const top = below < PANEL_H && b.top > below ? b.top - PANEL_H - 4 : b.bottom + 4;
+    setAt({ top, left });
+  }, [align]);
+
   // Close on a click elsewhere or Escape. Without both, a picker left open
-  // sits on top of the next thing you try to click.
+  // sits on top of the next thing you try to click. The panel is no longer a
+  // descendant of `box`, so a click inside it has to be recognised separately
+  // or picking a date would count as clicking away.
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (box.current?.contains(t) || panel.current?.contains(t)) return;
+      setOpen(false);
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
+    // Detached from its trigger the moment anything moves, so it follows one.
+    // Captured, to catch scrolling inside the table wrapper and not only the page.
+    const follow = () => place();
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", key);
+    window.addEventListener("scroll", follow, true);
+    window.addEventListener("resize", follow);
     return () => {
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", follow, true);
+      window.removeEventListener("resize", follow);
     };
-  }, [open]);
+  }, [open, place]);
 
   /**
    * Take the picked date, and make sure the form can see it.
@@ -125,29 +195,54 @@ export function DateField({
     <div ref={box} className={cn("relative", className)}>
       <input ref={hidden} type="hidden" name={name} value={value} readOnly />
       <button
+        ref={trigger}
         id={id}
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        aria-label={ariaLabel || "Pick a date"}
+        // Measured before it is shown, so it never appears in the wrong place
+        // for a frame and then jumps.
+        onClick={() => {
+          if (!open) place();
+          setOpen((o) => !o);
+        }}
+        // The compact one does not carry the date on its face, so it has to be
+        // somewhere: the tooltip, and the label a screen reader gets.
+        title={compact ? (value ? pretty(value) : placeholder) : undefined}
+        aria-label={
+          ariaLabel ? (value ? `${ariaLabel} — ${pretty(value)}` : ariaLabel) : "Pick a date"
+        }
         aria-expanded={open}
         className={cn(
-          "flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-left text-sm",
-          "shadow-sm transition-colors hover:bg-accent/40",
+          "flex h-9 items-center rounded-md transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-          "disabled:cursor-not-allowed disabled:opacity-50"
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          compact
+            ? "w-9 justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+            : "w-full gap-2 border border-input bg-card px-3 text-left text-sm shadow-sm hover:bg-accent/40"
         )}
       >
-        <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className={cn("tabular-nums", !value && "text-muted-foreground")}>
-          {value ? pretty(value) : placeholder}
-        </span>
+        <CalendarDays
+          className={cn(
+            "h-4 w-4 shrink-0",
+            // A date that is set is worth seeing at a glance; an empty one
+            // should look like the empty thing it is.
+            compact ? value && "text-foreground" : "text-muted-foreground"
+          )}
+        />
+        {compact ? null : (
+          <span className={cn("tabular-nums", !value && "text-muted-foreground")}>
+            {value ? pretty(value) : placeholder}
+          </span>
+        )}
       </button>
 
-      {open ? (
+      {open && at ? (
+        createPortal(
         <div
+          ref={panel}
           role="dialog"
-          className="absolute left-0 top-full z-50 mt-1 w-[17.5rem] rounded-lg border border-border bg-card p-3 shadow-lg"
+          style={{ top: at.top, left: at.left, width: PANEL_W }}
+          className="fixed z-50 rounded-lg border border-border bg-card p-3 shadow-lg"
         >
           <div className="mb-2 flex items-center justify-between">
             <button
@@ -222,7 +317,9 @@ export function DateField({
               Today
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
+        )
       ) : null}
     </div>
   );
