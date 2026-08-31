@@ -12,6 +12,9 @@ import {
   Sparkles,
 } from "lucide-react";
 import { getVideoUploadUrl, attachUploadedVideo } from "./upload-actions";
+import { saveFrames } from "./save-frames";
+import { saveAudio } from "./save-audio";
+import { extractFrames, MAX_FRAMES, FRAME_EDGE } from "@/lib/frames";
 import { finishAnalysisAfterUpload } from "../editor/actions";
 import { buttonClasses } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -209,39 +212,75 @@ export function VideoUpload({
 
     // XHR rather than fetch — it's the only way to get upload progress.
     setPhase("uploading");
-    const result = await new Promise<{ status: number; body: string }>((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", signed.uploadUrl, true);
-      // Sending this is what makes R2 store the object as a video, which both
-      // Instagram and the AI analyser depend on. It also costs a CORS
-      // preflight: "video/mp4" isn't a safelisted Content-Type value, so the
-      // browser sends OPTIONS first and the bucket has to allow that header.
-      xhr.setRequestHeader("Content-Type", file.type);
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
-      };
-      xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText || "" });
-      // status 0 means the browser never got a response — blocked before it
-      // left, or the preflight was refused.
-      xhr.onerror = () => resolve({ status: 0, body: "" });
-      xhr.send(file);
-    });
+
+    /*
+     * Cloudflare's own 5xx is worth another go before it is anybody's problem.
+     *
+     * R2 answers a perfectly good PUT with `500 InternalError` from time to
+     * time, and documents it as retriable. Reported straight through, that was
+     * a finished video refused for a reason nobody could act on — and the
+     * message told the editor their credentials were wrong, which sent them to
+     * Settings to fix keys that had just worked.
+     *
+     * Three attempts, one and three seconds apart. Only 5xx repeats: 403 is a
+     * refusal that will be refused again, and a status of 0 never reached
+     * Cloudflare at all. The whole file goes up again each time, which is the
+     * price of a single-part PUT — and is exactly what the editor would do by
+     * hand, without the waiting.
+     */
+    const attempt = (url: string) =>
+      new Promise<{ status: number; body: string }>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", url, true);
+        // Sending this is what makes R2 store the object as a video, which both
+        // Instagram and the AI analyser depend on. It also costs a CORS
+        // preflight: "video/mp4" isn't a safelisted Content-Type value, so the
+        // browser sends OPTIONS first and the bucket has to allow that header.
+        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+        };
+        xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText || "" });
+        // status 0 means the browser never got a response — blocked before it
+        // left, or the preflight was refused.
+        xhr.onerror = () => resolve({ status: 0, body: "" });
+        xhr.send(file);
+      });
+
+    const BACKOFF_MS = [1000, 3000];
+    let result = await attempt(signed.uploadUrl);
+    for (let i = 0; i < BACKOFF_MS.length && result.status >= 500; i++) {
+      setError(
+        `Cloudflare had a problem at its end — trying again (${i + 2} of ${BACKOFF_MS.length + 1})…`
+      );
+      await new Promise((r) => setTimeout(r, BACKOFF_MS[i]));
+      setProgress(0);
+      result = await attempt(signed.uploadUrl);
+    }
+    setError(null);
 
     if (result.status < 200 || result.status >= 300) {
       setPhase("error");
       /*
-       * These two look identical to a user and have opposite causes, so they
-       * must not share a message. A status of 0 means the request never
-       * reached R2 — CORS. Any real status means CORS is fine and R2 itself
-       * refused, which is a credentials or permissions problem.
+       * Three different faults that look identical to whoever is uploading, so
+       * they must not share a message. A status of 0 means the request never
+       * reached R2 — CORS. A 5xx means it did, and R2 broke: nothing here is
+       * misconfigured and there is nothing in Settings to go and fix. Only a
+       * 4xx is really about credentials or permissions.
        */
+      const code = result.body.match(/<Code>([^<]+)<\/Code>/)?.[1];
       if (result.status === 0) {
         setError(
           `The browser blocked the upload before it reached Cloudflare. Add ${window.location.origin} ` +
             `to the bucket's CORS policy, allowing PUT and the content-type header.`
         );
+      } else if (result.status >= 500) {
+        setError(
+          `Cloudflare is failing at its end — it returned ${result.status}` +
+            `${code ? ` (${code})` : ""} three times. Nothing here is set up wrong, ` +
+            `so give it a few minutes and press Replace again.`
+        );
       } else {
-        const code = result.body.match(/<Code>([^<]+)<\/Code>/)?.[1];
         setError(
           code === "SignatureDoesNotMatch"
             ? "Cloudflare rejected the signature — the R2 secret access key in Settings is wrong."
@@ -256,11 +295,62 @@ export function VideoUpload({
     }
 
     setPhase("saving");
-    const saved = await attachUploadedVideo(deliverableId, signed.key, signed.publicUrl);
+    /*
+     * Attach first, THEN read the frames — the order is load-bearing.
+     *
+     * Attaching is what points the task at the new file, and queueing the
+     * analysis is what throws away the analysis of the video this one just
+     * replaced. Frames saved before that happens are saved onto a row that is
+     * about to be deleted, so a Replace produced a caption written with its
+     * eyes shut — and nothing anywhere said so.
+     *
+     * The flag keeps it from *running* yet: the model reads frames, and a call
+     * made before they arrive spends money on the sound track alone.
+     */
+    const saved = await attachUploadedVideo(deliverableId, signed.key, signed.publicUrl, !isPoster);
     if (!saved.ok) {
       setPhase("error");
       setError(saved.error || "Uploaded, but couldn't attach it to the task.");
       return;
+    }
+
+    /*
+     * Now decode it, while the file is still a local File in this tab.
+     *
+     * This is the only moment the frames are free. The model cannot take a
+     * video — it reads images and hears audio — so something has to turn a
+     * reel into pictures, and the browser is holding the bytes, has a hardware
+     * decoder, and is doing it on the editor's machine rather than ours.
+     *
+     * Posters are already an image and skip it.
+     *
+     * Nothing in here can fail the upload. The video is safely in R2 by this
+     * point; a browser that cannot decode this particular codec should cost
+     * the client a caption written from the sound track, never the video.
+     */
+    if (!isPoster) {
+      try {
+        const frames = await extractFrames(file, MAX_FRAMES, FRAME_EDGE, (done, total) =>
+          setError(`Reading the video — frame ${done} of ${total}…`)
+        );
+        setError(null);
+        if (frames.length) await saveFrames(deliverableId, frames);
+
+        /*
+         * And the sound track, separately from the video.
+         *
+         * Transcription refuses a file over 25 MB and a finished reel goes
+         * past that on picture alone, so the audio of a good video was simply
+         * never heard — the caption came out written from the frames, and
+         * read like any other. A mono 16 kHz WAV of the same minute is under
+         * two megabytes.
+         */
+        setError("Reading the sound…");
+        await saveAudio(deliverableId, file);
+        setError(null);
+      } catch {
+        setError(null);
+      }
     }
 
     // `link` is the portal's permanent address for the video, so it can go
@@ -384,9 +474,26 @@ export function VideoUpload({
         </div>
       ) : null}
 
+      {/*
+        * Still uploading means this is a retry, not a verdict.
+        *
+        * The same line carries both, because both answer "why did the bar go
+        * back to nought" — but a red warning about something that is still
+        * working reads as a failure, and the editor stops waiting for an
+        * upload that was about to succeed.
+        */}
       {error ? (
-        <p className="flex items-start gap-1.5 text-xs text-destructive">
-          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <p
+          className={cn(
+            "flex items-start gap-1.5 text-xs",
+            phase === "uploading" ? "text-muted-foreground" : "text-destructive"
+          )}
+        >
+          {phase === "uploading" ? (
+            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+          ) : (
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          )}
           <span>{error}</span>
         </p>
       ) : null}

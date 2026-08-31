@@ -1,25 +1,34 @@
 /**
  * Watching a video and writing its caption.
  *
- * Gemini can genuinely watch the file — not guess from a thumbnail. On a real
- * 66 MB Telugu reel it identified the topic, detected the spoken language,
- * read the on-screen text, and wrote the caption in Telugu. That is the whole
- * reason this exists: the brief someone typed weeks ago describes what the
- * video was *meant* to be, and the file describes what it actually became.
+ * The point of it: the brief someone typed weeks ago describes what the video
+ * was *meant* to be, and the file describes what it actually became. On a real
+ * 66 MB Telugu reel this identifies the topic, detects the spoken language,
+ * reads the on-screen text and writes the caption in Telugu.
  *
- * Structured as a resumable job rather than one function call, because the
- * work is four steps across ~30 seconds:
+ * The model has no video input — it takes images and audio and nothing else —
+ * so the video arrives here already taken apart, by the browser that uploaded
+ * it and had the file in hand:
  *
- *   fetch from R2 → upload to Gemini → wait for processing → generate
+ *   frames decoded to R2  ┐
+ *                         ├→  generate  →  caption, branding, topic
+ *   audio decoded to WAV  ┘   (transcribed here, cached on the row)
  *
- * A serverless function can be killed partway through any of them. Each step
- * records what it achieved, so a retry resumes rather than re-uploading a
- * video that is already sitting on Gemini's servers.
+ * Structured as a resumable job rather than one function call, because a
+ * serverless function can be killed partway through any of it. Each step
+ * records what it achieved, so a retry picks up rather than paying twice —
+ * the transcript in particular is kept, being the expensive half that never
+ * changes.
  */
 import "server-only";
-import { query, queryOne, execute, hasColumn } from "./db";
+import { query, queryOne, execute, hasColumn, type SqlParam } from "./db";
 import { env } from "./env";
-import { resolveVideoUrl } from "./storage";
+import { resolveVideoUrl, directDownloadUrl } from "./storage";
+import { audioKey } from "./audio";
+import { ask, modelReady, transcribe } from "./model";
+import { MAX_FRAMES } from "./frames";
+import { isPosterWork } from "./posting";
+import { composeCaption } from "./instagram";
 import { isGeneratedTitle, titleFromTopic } from "./title";
 import {
   getClientContext,
@@ -31,46 +40,15 @@ import {
   correctPhones,
 } from "./client-context";
 
-const BASE = "https://generativelanguage.googleapis.com";
-
 /**
- * `gemini-flash-lite-latest` — the model the caption studio uses — does not
- * accept video. This one does, and is the cheapest that does.
- */
-const VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || "gemini-flash-latest";
-
-/**
- * ...and what to try when that one has nothing left to give.
+ * How large a poster may be before it is left out of the prompt.
  *
- * The free tier counts generations per model per day — twenty, and the reply
- * says so: `limit: 20, model: gemini-3.7-flash`. So an exhausted quota is not
- * the account being out, it is that one model being out, and a different one
- * has its own untouched allowance.
- *
- * Only models that accept video belong here. `gemini-flash-lite-latest` is
- * the caption studio's and does not take a file, so it is not a fallback for
- * this — it would fail differently and look like a broken video.
- *
- * Order matters: the configured one first because it is the one chosen for
- * quality and cost, the rest only when it refuses.
+ * A design is one image where a video is a dozen small frames, so it can be
+ * far bigger than any of them. Four megabytes is generous for something meant
+ * for a phone screen; past it the request is not worth making, and a caption
+ * from the brief alone is better than a call that times out.
  */
-const VIDEO_MODELS = [
-  ...new Set([
-    VIDEO_MODEL,
-    ...(process.env.GEMINI_VIDEO_FALLBACKS || "gemini-3.6-flash,gemini-3.5-flash")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  ]),
-];
-
-/**
- * Gemini's Files API accepts up to 2 GB, but everything in between has to pass
- * through this process's memory twice — once down from R2, once up to Gemini.
- * A cap well under the serverless memory limit turns "the function died" into
- * a sentence someone can act on.
- */
-const MAX_VIDEO_BYTES = Number(process.env.VIDEO_AI_MAX_BYTES || 100 * 1024 * 1024);
+const MAX_POSTER_BYTES = 4 * 1024 * 1024;
 
 /** A job whose lease is older than this was killed mid-run and may be retaken. */
 const LEASE_MINUTES = 10;
@@ -103,6 +81,10 @@ export type VideoAnalysis = {
   grounded: number;
   /** The model's own reply, kept whole — the structured branding lives here. */
   raw_json: unknown;
+  /** R2 keys of the frames the browser decoded, in order. */
+  frames_json: unknown;
+  /** What is said in the video, cached so a retry never re-hears it. */
+  transcript: string | null;
   tokens_used: number | null;
   duration_ms: number | null;
   attempts: number;
@@ -111,7 +93,7 @@ export type VideoAnalysis = {
 };
 
 export async function videoAiReady(): Promise<boolean> {
-  if (!env.gemini.enabled) return false;
+  if (!modelReady()) return false;
   return hasColumn("video_analysis", "state");
 }
 
@@ -123,6 +105,34 @@ export async function getAnalysis(deliverableId: number): Promise<VideoAnalysis 
 }
 
 /* --------------------------------- Prompting -------------------------------- */
+
+/**
+ * The studio's "no contact details" box, as a rule.
+ *
+ * A caption carrying a phone number the client asked not to publish is not a
+ * matter of style, so it is stated as flatly as the shape above it and given
+ * somewhere to land instead.
+ */
+const NO_CONTACT = [
+  "- NO contact details in this one: no phone number, no website, no address.",
+  '  End with "DM us" or "link in bio" instead.',
+].join(String.fromCharCode(10));
+
+/**
+ * The shape a caption takes when the client has not agreed one of their own.
+ *
+ * Used instead of a client template, never alongside it. Two shapes in one
+ * prompt is two instructions to obey, and what comes back is neither.
+ */
+const HOUSE_SHAPE = [
+  "- THREE lines about the video, and no more. Not a summary of the topic —",
+  "  what is actually in this footage. Line two: the detail that makes it",
+  "  worth watching — the process, the ingredient, the number, whatever the",
+  "  video is proud of. Line three: who it is for, or what to do about it.",
+  "- Then a contact line: the business name, and the phone, website or handle",
+  "  ONLY if it is listed above or visible on screen. Add the city if you know",
+  "  it. Leave out what you do not have — an invented number reaches a stranger.",
+].join(String.fromCharCode(10));
 
 /**
  * What the model is asked for.
@@ -143,6 +153,10 @@ function buildPrompt(brief: {
   templateRule: string | null;
   /** Their brand rules — banned words, restrictions, their own CTAs. */
   knowledgeRules: string | null;
+  /** Picked in the studio for this one caption, not saved on the client. */
+  goal: string | null;
+  length: string | null;
+  includeContact: boolean;
 }): string {
   const context = [
     brief.clientContext,
@@ -171,11 +185,27 @@ function buildPrompt(brief: {
     [brief.knowledgeRules, brief.templateRule].filter(Boolean).length
       ? `\n${[brief.knowledgeRules, brief.templateRule].filter(Boolean).join("\n\n")}\n`
       : "";
-  const templateRule = brief.templateRule
+  /*
+   * The shape of the caption — one answer, not two.
+   *
+   * These used to both be in the prompt: a client's template above, telling
+   * the model to reproduce it exactly, and the house shape below, telling it
+   * to write three lines and then a contact line. A model given two shapes
+   * splits the difference, so a client with an agreed template got something
+   * that was neither — which reads as the template being ignored, and is
+   * really the template being argued with.
+   *
+   * The hook rule is deliberately NOT part of this. Whatever shape a caption
+   * takes, its first line is the one that decides whether anybody reads the
+   * second.
+   */
+  const shape = brief.templateRule
     ? "- FOLLOW THE TEMPLATE ABOVE EXACTLY. Its structure is the client's, not\n" +
-      "  a suggestion — same sections, same order, same line breaks. Only the\n" +
-      "  wording that describes this video changes."
-    : "- Open with the hook, then 2-3 short lines, then one clear call to action.";
+      "  a suggestion — same sections, same order, same line breaks, same\n" +
+      "  emoji. Only the wording that describes this video changes. Where the\n" +
+      "  template has a contact line, fill it from what is listed above or\n" +
+      "  visible on screen and from nothing else."
+    : HOUSE_SHAPE;
 
   return `You are writing the Instagram caption for a video an agency has just edited for a client.
 
@@ -205,45 +235,97 @@ Reply with JSON only:
   "scenes": [{"start":"00:00","end":"00:12","label":"what happens"}],
   "topic": "the subject in 3-6 words",
   "mood": "one word: informative, energetic, emotional, promotional, calm",
-  "hook": "the strongest opening line, taken from what is actually said or shown",
+  "has_face": true or false — is a person visibly on camera at any point,
+  "hook": "line one of the caption, repeated here on its own",
   "caption": "the full caption",
-  "hashtags": ["#tag", "..."]
+  "alternate_captions": ["four other complete captions, each a different angle"],
+  "cta": "the call to action used in the caption",
+  "seo_keywords": ["5 search phrases for this video, no # and no duplicates"],
+  "video_keyword": "2-3 words for what this video is about"
 }
+
+The alternates are complete captions, not variations of a line — a different
+angle each: one led by the offer, one by the story, one by the question, one by
+the result. Same language, same template, same rules as the main one. They are
+there so a caption can be *chosen* rather than regenerated.
 
 Rules for the caption:
 - Write it in the language the video is SPOKEN in. If the preferred caption
   language above disagrees with what you hear, follow what you hear — the
   audience is whoever the speaker is addressing.
-${templateRule}
 - NEVER write a phone number, website or handle that is not either listed
   above or visible on screen in the video. If there is no number to give,
   end with "DM us" or "link in bio" — a made-up number reaches a stranger.
+${brief.includeContact ? "" : NO_CONTACT}
 - Write as the business the branding shows. If the video's footer says
   "loan provider", the caption should read like a loan provider wrote it.
 - Describe what is genuinely in the video. Never invent offers, prices,
   interest rates, guarantees or claims that were not made — for a regulated
   business this is the difference between marketing and a false promise.
-- THREE lines about the video, and no more. Not a summary of the topic —
-  what is actually in this footage. Line one: what happens, the thing a
-  viewer sees. Line two: the detail that makes it worth watching — the
-  process, the ingredient, the number, whatever the video is proud of.
-  Line three: who it is for, or what to do about it.
+${shape}
+- THE FIRST LINE IS THE HOOK, and it is the most important line you write. It has
+  one job: stop the scroll and earn a reply. A description is not a hook.
+  "Fresh biryani at ZZ Foods" is a label; "This biryani takes 6 hours — and
+  it sells out by 1pm" is a hook. Use the sharpest thing the video actually
+  has: the number, the price, the surprise, the mistake, the question it
+  answers. Never a greeting, never "check out our", never the business name
+  first.
+
+  IS THIS REEL ASKING FOR A COMMENT? Look at how it ENDS — the last thing
+  said, and the text on the final frames. A lead-magnet reel finishes by
+  asking for one: "comment PRICE and I'll send the list", "comment GUIDE and
+  we'll DM the PDF", "కామెంట్ చేయండి, పంపిస్తాను".
+
+  If it does, that ask is the FIRST line of the caption:
+
+      Comment "PRICE" and we'll send you the full list 👇
+
+  Use the SAME word the video used. It is the word people will type and the
+  word the business is watching for, so inventing a neater one breaks the
+  thing it is there to do. If the video asks for a comment without naming a
+  word, choose a short one from what is being offered.
+
+  It goes first because that is where it gets read. The reel makes the ask at
+  the end, by which point most people have already scrolled; the caption is
+  what the ones who stayed are looking at. A comment is worth far more than a
+  like — it is what makes Instagram show the reel to people who do not follow
+  the account, and it opens a thread the business can reply in.
+
+  EVERY OTHER REEL: no comment ask at all. Not "comment below", not "let us
+  know" — write the sharpest hook the footage gives you and nothing else. A
+  reel that never offered anything, captioned as though it did, costs the
+  client the reply and the trust, and there is nothing to send the people who
+  do comment.
+
+- If the video is about food, NAME the dishes that appear in it. "Our menu"
+  is not a caption for a biryani; the dish is the thing being searched for
+  and the thing a viewer recognises.
 - Use the branding you read off the screen. The logo, the footer bar and the
   business name are how this business presents itself; if the footer says
   "loan provider" the lines should read as one wrote them. Never attribute a
   logo or a footer to a business other than the one shown.
-- Emoji: one or two, and only where they carry meaning — the thing being
-  made, the place, the action. Not one per line, not decoration, never on a
-  price or a claim.
-- Then a contact line: the business name, and the phone, website or handle
-  ONLY if it is listed above or visible on screen. Add the city if you know
-  it. Leave out what you do not have — an invented number reaches a stranger.
-- EXACTLY THREE hashtags, every one a word the video itself carries: what is
-  being made or sold, what is written on screen, what the branding says. Not
-  broad tags, and not the business name, its handle, its city or its country
-  — those four are added afterwards and a duplicate wastes one of your three.
-- Do NOT put the hashtags or the keywords in the caption. They go in
-  "hashtags" alone.
+- USE EMOJI. A caption with none reads like a notice, and this is a feed. Two
+  to five across the whole caption, each one earning its place:
+
+    · the hook takes one that IS the subject — 🍟 chips, 💛 gold, 🏠 a house
+    · the contact line takes the ones that label it — 📍 for the town,
+      📞 for the phone, 🌐 for a website, 📩 for a DM
+    · a list of points takes ✅ or ✨ at the start of each
+
+  Not one per word, and never on a price, an interest rate, a guarantee or a
+  medical or financial claim — an emoji makes a number look like an offer,
+  and for a regulated business that is the line between marketing and a
+  promise.
+
+  If the client's template has emoji in it, use exactly those, in exactly
+  those places. They are part of the shape they agreed.
+- "video_keyword": two or three words for what this video is about, taken
+  from the video itself — the dish, the service, the thing on screen. Not the
+  business name, not its handle, not its city: those three are added
+  afterwards from what the portal knows exactly, and this is the fourth.
+- Do NOT write the keyword line and do NOT write any hashtags. Both blocks
+  are built afterwards from those four, and anything you write is published
+  twice.
 - No preamble, no explanation, JSON only.`;
 }
 
@@ -394,6 +476,27 @@ export type RunResult = {
   caption?: string | null;
   /** True when the caller should call again to continue a multi-step job. */
   more?: boolean;
+  /** Four other complete captions, so one can be chosen instead of re-paid for. */
+  alternates?: string[];
+  hashtags?: string | null;
+  cta?: string | null;
+};
+
+/**
+ * Per-run overrides from the caption studio.
+ *
+ * The client's saved settings are the default for every caption; these are
+ * what somebody picks for *this* one, in the studio, when a particular video
+ * wants a different tone or a shorter caption than usual. Absent everywhere
+ * else, which is why every field is optional.
+ */
+export type CaptionOverrides = {
+  tone?: string;
+  language?: string;
+  goal?: string;
+  length?: string;
+  /** False means the caption must not carry a phone number or a website. */
+  includeContact?: boolean;
 };
 
 /**
@@ -404,8 +507,11 @@ export type RunResult = {
  * — the UI polls, which keeps any one request short enough to survive a
  * serverless timeout.
  */
-export async function runAnalysis(deliverableId: number): Promise<RunResult> {
-  if (!env.gemini.enabled) {
+export async function runAnalysis(
+  deliverableId: number,
+  overrides?: CaptionOverrides
+): Promise<RunResult> {
+  if (!modelReady()) {
     return { ok: false, state: "failed", error: "No GEMINI_API_KEY is configured." };
   }
   if (!(await hasColumn("video_analysis", "state"))) {
@@ -425,11 +531,40 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
   const job = await getAnalysis(deliverableId);
   if (!job) return { ok: false, state: "failed", error: "No analysis queued for this video." };
   if (job.state === "done") {
-    return { ok: true, state: "done", caption: job.caption, more: false };
+    // Composed, like a fresh run's — the row keeps the body and the tag block
+    // apart, and handing back the body alone made a second press look as
+    // though the keywords and hashtags had been lost.
+    return { ok: true, state: "done", caption: composeCaption(job.caption, job.hashtags), more: false };
   }
   if (claimed.affectedRows === 0) {
     // Someone else is working on it. Not an error — just report progress.
     return { ok: true, state: job.state, more: true };
+  }
+
+  /*
+   * Three captions per video per 48 hours.
+   *
+   * Separate from the attempts ceiling below, and about a different thing.
+   * Attempts stop a *broken* job looping; this stops a working one being
+   * asked over and over. A generation reads a dozen high-detail frames at the
+   * highest reasoning effort the portal buys anywhere — the most expensive
+   * call it makes — and there is a Regenerate button beside it.
+   *
+   * Three is enough to get one reel's copy right. A fourth in two days is
+   * someone hoping a different answer falls out of the same video, and the
+   * cure for that is editing the caption settings, not paying again.
+   */
+  const spent = await captionsWritten(deliverableId);
+  if (spent >= CAPTIONS_PER_WINDOW) {
+    await setState(deliverableId, "failed", {
+      last_error: `This video has had ${spent} captions in the last 48 hours, which is the limit. Edit the caption by hand, or try again later.`,
+      locked_at: null,
+    });
+    return {
+      ok: false,
+      state: "failed",
+      error: `Caption limit reached — ${CAPTIONS_PER_WINDOW} per video per 48 hours.`,
+    };
   }
 
   // Give up rather than burn tokens on something that keeps failing.
@@ -442,31 +577,16 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
   }
 
   try {
-    const fileUri = await ensureUploaded(deliverableId);
-    if (!fileUri.ok) {
-      await setState(deliverableId, fileUri.permanent ? "failed" : "queued", {
-        last_error: fileUri.error,
+    const eyes = await gatherEyes(deliverableId);
+    if (!eyes.ok) {
+      await setState(deliverableId, eyes.permanent ? "failed" : "queued", {
+        last_error: eyes.error,
         locked_at: null,
       });
-      return { ok: false, state: fileUri.permanent ? "failed" : "queued", error: fileUri.error };
+      return { ok: false, state: eyes.permanent ? "failed" : "queued", error: eyes.error };
     }
 
-    const ready = await waitForProcessing(deliverableId, fileUri.uri, fileUri.name);
-    if (!ready.ok) {
-      await setState(deliverableId, ready.permanent ? "failed" : "processing", {
-        last_error: ready.error,
-        locked_at: null,
-      });
-      // Still processing is normal — tell the caller to come back.
-      return {
-        ok: !ready.permanent,
-        state: ready.permanent ? "failed" : "processing",
-        error: ready.permanent ? ready.error : undefined,
-        more: !ready.permanent,
-      };
-    }
-
-    return await generate(deliverableId, fileUri.uri, fileUri.mimeType);
+    return await generate(deliverableId, eyes.eyes, overrides);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     await setState(deliverableId, "queued", { last_error: message, locked_at: null });
@@ -474,208 +594,465 @@ export async function runAnalysis(deliverableId: number): Promise<RunResult> {
   }
 }
 
-/* ----------------------------- Step 1: get it there ---------------------------- */
+/* ------------------------------ The caption budget ----------------------------- */
 
-async function ensureUploaded(
+/** How many captions one video may be given, and over how long. */
+const CAPTIONS_PER_WINDOW = 3;
+const WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * How many more captions this video may be given, for showing on screen.
+ *
+ * The number is worth saying out loud rather than discovering by pressing the
+ * button. A generation is the most expensive call the portal makes, and
+ * finding out you have run out *after* deciding the caption needs one more
+ * pass is the worst moment to learn there is a limit at all.
+ */
+export async function captionBudget(
   deliverableId: number
-): Promise<{ ok: true; uri: string; name: string; mimeType: string } | (StepResult & { ok: false })> {
-  const tracksSource = await hasColumn("video_analysis", "source_ref");
-  const ref = await currentSourceRef(deliverableId);
+): Promise<{ used: number; left: number; limit: number }> {
+  const used = await captionsWritten(deliverableId);
+  return { used, left: Math.max(0, CAPTIONS_PER_WINDOW - used), limit: CAPTIONS_PER_WINDOW };
+}
 
-  const existing = await queryOne<{
-    file_uri: string | null;
-    file_name: string | null;
-    file_expires_at: string | null;
-    source_ref?: string | null;
-  }>(
-    `SELECT file_uri, file_name, file_expires_at${tracksSource ? ", source_ref" : ""}
-       FROM video_analysis WHERE deliverable_id = ?`,
+/**
+ * How many captions this video has been given inside the window.
+ *
+ * The times are written by the app in UTC and compared here, never in SQL.
+ * This database's clock runs on Indian time, so `NOW()` sits five and a half
+ * hours ahead of anything the app stored — a window compared against it
+ * would let two extra generations through every time.
+ *
+ * Fails open. A database without the column yet should caption videos, not
+ * refuse to; the limit starts working the moment the column is applied.
+ */
+async function captionsWritten(deliverableId: number): Promise<number> {
+  if (!(await hasColumn("video_analysis", "gen_log"))) return 0;
+  const row = await queryOne<{ gen_log: string | null }>(
+    "SELECT gen_log FROM video_analysis WHERE deliverable_id = ?",
     [deliverableId]
   );
+  return readTimes(row?.gen_log).filter((t) => Date.now() - t < WINDOW_MS).length;
+}
 
-  /*
-   * Reuse an upload that Google hasn't expired yet — but only if it is an
-   * upload of *this* video.
-   *
-   * Gemini holds a file for ~40 hours and it is addressed by URI, not by
-   * content. Reusing one after the task's video has been replaced means the
-   * model watches the old footage and writes a caption with no relation to
-   * what is now attached, which is indistinguishable from the AI hallucinating
-   * and cannot be cleared by re-running it.
-   */
-  if (existing?.file_uri && existing.file_name) {
-    const expired =
-      existing.file_expires_at && new Date(existing.file_expires_at + "Z").getTime() < Date.now();
-    const stale = tracksSource && existing.source_ref != null && existing.source_ref !== ref;
+/** Record that a caption was written, keeping only what the window can use. */
+async function recordCaption(deliverableId: number): Promise<void> {
+  if (!(await hasColumn("video_analysis", "gen_log"))) return;
+  const row = await queryOne<{ gen_log: string | null }>(
+    "SELECT gen_log FROM video_analysis WHERE deliverable_id = ?",
+    [deliverableId]
+  );
+  const kept = readTimes(row?.gen_log)
+    .filter((t) => Date.now() - t < WINDOW_MS)
+    // Trimmed so the column cannot grow without bound on a video that is
+    // re-cut and re-captioned for months.
+    .slice(-CAPTIONS_PER_WINDOW * 2);
+  kept.push(Date.now());
+  await execute("UPDATE video_analysis SET gen_log = ? WHERE deliverable_id = ?", [
+    JSON.stringify(kept.map((t) => new Date(t).toISOString())),
+    deliverableId,
+  ]).catch(() => {});
+}
 
-    if (!expired && !stale) {
-      return {
-        ok: true,
-        uri: existing.file_uri,
-        name: existing.file_name,
-        mimeType: "video/mp4",
-      };
-    }
+/** Stored ISO strings back to milliseconds, ignoring anything unreadable. */
+function readTimes(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  let val: unknown;
+  try {
+    val = JSON.parse(raw);
+  } catch {
+    return [];
   }
+  if (!Array.isArray(val)) return [];
+  return val
+    .map((v) => (typeof v === "string" ? Date.parse(v) : NaN))
+    .filter((t) => Number.isFinite(t));
+}
 
+/* ------------------------- Step 1: what it will look at ------------------------ */
+
+/**
+ * The frames, as data URIs, and what was said.
+ *
+ * ## Why frames at all
+ *
+ * The model has no video input — it takes images and audio and nothing else.
+ * That is not a limitation to route around; it is the shape of the problem.
+ * A video *is* a sequence of images with a sound track, and the two questions
+ * anybody asks about a finished reel are answered by different halves of it:
+ * the logo, the footer, the phone number and the on-screen text are visual,
+ * and the pitch is spoken.
+ *
+ * So both are gathered, and gathered where each is cheapest. The frames were
+ * decoded in the browser at upload time, from a file it was already holding —
+ * no server, no ffmpeg, no second copy of a 60 MB reel crossing the network.
+ * The speech is read straight out of the same mp4 by the transcription
+ * endpoint, which accepts the container whole.
+ *
+ * ## Sampled across the whole runtime, in order
+ *
+ * Evenly spaced from first second to last, and handed over in that order, so
+ * "what happens at the end" is a question the model can answer. A branding
+ * footer usually appears in the last two seconds and nowhere else; frames
+ * taken from the first few seconds — which is what a cheap sampler does —
+ * would miss the single most important thing this is asked to read.
+ *
+ * ## Nothing is invented when a half is missing
+ *
+ * A video with no frames yet (linked rather than uploaded, or uploaded before
+ * this existed) is analysed from its transcript alone, and one whose audio is
+ * over the 25 MB limit from its frames alone. Both are said plainly in the
+ * prompt, so the model reports what it could not see or hear instead of
+ * filling it in.
+ */
+type Eyes = {
+  frames: string[];
+  transcript: string | null;
+  /** What we could not get, in words the prompt can use. */
+  missing: string[];
+};
+
+async function gatherEyes(deliverableId: number): Promise<
+  { ok: true; eyes: Eyes } | { ok: false; error: string; permanent?: boolean }
+> {
+  const job = await getAnalysis(deliverableId);
   const d = await queryOne<{
     title: string;
     cloud_video_key: string | null;
     cloud_video_url: string | null;
     edited_link: string | null;
+    service: string | null;
+    video_type: string | null;
   }>(
-    `SELECT title, cloud_video_key, cloud_video_url, edited_link
+    `SELECT title, cloud_video_key, cloud_video_url, edited_link, service, video_type
        FROM deliverables WHERE id = ?`,
     [deliverableId]
   );
   if (!d) return { ok: false, error: "Task not found.", permanent: true };
 
+  const poster = isPosterWork(d);
+
+  await setState(deliverableId, "uploading", { model: env.gemini.model });
+
+  /* ---- the frames the browser decoded ---- */
+  const keys = readFrameKeys(job?.frames_json);
+  const frames: string[] = [];
+  for (const key of keys.slice(0, MAX_FRAMES)) {
+    const url = await resolveVideoUrl(key, null, 30 * 60).catch(() => null);
+    if (!url) continue;
+    const got = await fetch(url).catch(() => null);
+    if (!got?.ok) continue;
+    const buf = Buffer.from(await got.arrayBuffer());
+    // Straight into the request rather than left as a link. The model would
+    // fetch a URL itself, but then a frame it cannot reach fails the whole
+    // analysis for a reason no log here would ever show.
+    frames.push(`data:image/jpeg;base64,${buf.toString("base64")}`);
+  }
+
   /*
-   * Prefer our own storage, then fall back to a directly-linked file — an
-   * editor who pastes a link rather than uploading should still get a caption.
+   * A poster's frame is the poster.
    *
-   * The fallback is only taken for an http(s) URL, and the content-type check
-   * after fetching is what catches a Google Drive share link: those return an
-   * HTML page, not video bytes, and would otherwise be uploaded to Gemini as a
-   * "video" that it then can't read.
+   * `frames_json` is written by the browser as it decodes an uploaded video,
+   * so a poster has none and this writer was being handed nothing to look at.
+   * It then wrote the caption from the brief alone — words somebody typed
+   * before the design existed — and was told, correctly, to say nothing about
+   * what was on screen. So the caption for a poster could never mention the
+   * offer, the price, or the words actually printed on the thing being posted.
+   *
+   * The design is one image and this model reads images. Fetched here the same
+   * way a frame is, for the same reason: handing over a URL would let a file
+   * the model cannot reach fail the whole analysis for a cause no log of ours
+   * would show.
    */
-  const linked =
-    d.edited_link && /^https?:\/\//i.test(d.edited_link) ? d.edited_link : null;
-  const url = (await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url, 60 * 60)) || linked;
-
-  if (!url) {
-    return {
-      ok: false,
-      error: "No video to analyse. Upload the finished file, or add a direct video link.",
-      permanent: true,
-    };
+  if (poster && !frames.length) {
+    const url =
+      (await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url, 30 * 60).catch(() => null)) ||
+      directDownloadUrl(d.edited_link);
+    const got = url ? await fetch(url).catch(() => null) : null;
+    if (got?.ok) {
+      const type = (got.headers.get("content-type") || "").split(";")[0].trim();
+      const buf = Buffer.from(await got.arrayBuffer());
+      /*
+       * Image bytes, and not too many of them. A Canva or Drive link that
+       * serves an HTML page arrives here as `text/html`, and base64ing a web
+       * page into the prompt would have the model describing a login screen.
+       */
+      if (/^image\//.test(type) && buf.byteLength <= MAX_POSTER_BYTES) {
+        frames.push(`data:${type};base64,${buf.toString("base64")}`);
+      }
+    }
   }
 
-  await setState(deliverableId, "uploading", { model: VIDEO_MODEL });
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    return { ok: false, error: `Couldn't fetch the video (HTTP ${res.status}).` };
+  /* ---- and what was said, once, kept ---- */
+  let transcript = job?.transcript ?? null;
+  let heardNothing: string | null = null;
+  /*
+   * A poster is not listened to.
+   *
+   * This branch resolves "the file" and sends it to speech-to-text. On a
+   * poster that file is a PNG, so every poster caption spent a transcription
+   * call on an image that could only ever come back empty — quota, latency and
+   * a confusing error, for a question a poster cannot answer.
+   */
+  if (poster) {
+    heardNothing = "a poster has no sound";
+  } else if (transcript === null) {
+    /*
+     * The extracted speech first, the video only if there is none.
+     *
+     * Transcription refuses anything over 25 MB, and a finished reel passes
+     * that on picture alone — so a good video was captioned from its frames
+     * and never mentioned a word anybody said. Nothing failed; the caption
+     * just quietly got worse. The browser now decodes the audio track to a
+     * mono 16 kHz WAV as the video uploads, which is a fraction of the size
+     * and is the rate speech recognition resamples to anyway.
+     *
+     * The video stays as the fallback, unchanged, for everything uploaded
+     * before this and for any file the browser could not decode.
+     */
+    const linked = d.edited_link && /^https?:\/\//i.test(d.edited_link) ? d.edited_link : null;
+    const speech = await resolveVideoUrl(audioKey(deliverableId), null, 60 * 60);
+    const url = (await resolveVideoUrl(d.cloud_video_key, d.cloud_video_url, 60 * 60)) || linked;
+    if (speech || url) {
+      const fromVideo = () =>
+        url
+          ? transcribe(url, `${d.title.slice(0, 60) || "video"}.mp4`)
+          : Promise.resolve({ text: null, error: "there is no video file to listen to" });
+      // A key that was never written presigns perfectly happily and 404s on
+      // collection, so "no extracted speech" arrives here as a failed fetch
+      // rather than as a missing URL.
+      const heard = speech
+        ? await transcribe(speech, "speech.wav").then((r) => (r.text ? r : fromVideo()))
+        : await fromVideo();
+      if (heard.text) {
+        transcript = heard.text;
+        /*
+         * Stored the moment it arrives. Transcription is the expensive half
+         * and it does not change; a retry that paid for it again would spend
+         * a small balance re-hearing videos it had already heard.
+         */
+        await execute("UPDATE video_analysis SET transcript = ? WHERE deliverable_id = ?", [
+          transcript,
+          deliverableId,
+        ]).catch(() => {});
+      } else {
+        heardNothing = heard.error || "nothing audible";
+      }
+    } else {
+      heardNothing = "there is no video file to listen to";
+    }
   }
 
-  const bytes = Buffer.from(await res.arrayBuffer());
-  if (bytes.byteLength > MAX_VIDEO_BYTES) {
-    return {
-      ok: false,
-      // Permanent: the same file will be the same size next time.
-      permanent: true,
-      error: `Video is ${(bytes.byteLength / 1048576).toFixed(0)} MB; the limit for AI analysis is ${(
-        MAX_VIDEO_BYTES / 1048576
-      ).toFixed(0)} MB.`,
-    };
+  /*
+   * Nothing to look at is not a failure — it is a thinner brief.
+   *
+   * This used to stop here, which is why the portal grew a second caption
+   * writer: something had to serve a poster, and a task whose video is not
+   * uploaded yet, and those are ordinary cases rather than errors. Two
+   * writers then meant two prompts, two sets of brand rules, and a caption
+   * that followed the client's agreed structure only if you happened to press
+   * the right button.
+   *
+   * One writer, told plainly what it was and was not given. A caption written
+   * from the brief alone is worth having; what is not worth having is a model
+   * inventing what is on screen, and `missing` is what prevents that.
+   */
+  const missing: string[] = [];
+  if (!frames.length) {
+    missing.push(
+      poster
+        ? "You were NOT shown the poster — say nothing about what is on it."
+        : "You were given NO frames — say nothing about what is on screen."
+    );
+  }
+  if (!transcript) {
+    missing.push(
+      `You were given NO transcript${heardNothing ? ` (${heardNothing})` : ""} — say nothing about what was said.`
+    );
   }
 
-  const mimeType = res.headers.get("content-type")?.split(";")[0] || "video/mp4";
+  return { ok: true, eyes: { frames, transcript, missing } };
+}
 
-  // A Drive/Dropbox "share" link serves an HTML page. Uploading that to Gemini
-  // succeeds and then fails much later with an opaque error, so it is caught
-  // here where the cause can actually be named.
-  if (!/^(video|application\/octet-stream)/.test(mimeType)) {
-    return {
-      ok: false,
-      permanent: true,
-      error:
-        `That link returns ${mimeType}, not a video file. ` +
-        `Share links (Google Drive, Dropbox) serve a web page — upload the video instead.`,
-    };
+/** The stored keys, whatever shape MySQL handed the JSON column back in. */
+function readFrameKeys(raw: unknown): string[] {
+  if (!raw) return [];
+  const val = typeof raw === "string" ? safeJson(raw) : raw;
+  return Array.isArray(val) ? val.filter((k): k is string => typeof k === "string") : [];
+}
+
+const safeJson = (s: string): unknown => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
   }
+};
 
-  // Resumable upload: start, then send the bytes.
-  const init = await fetch(`${BASE}/upload/v1beta/files?key=${env.gemini.apiKey}`, {
-    method: "POST",
-    headers: {
-      "X-Goog-Upload-Protocol": "resumable",
-      "X-Goog-Upload-Command": "start",
-      "X-Goog-Upload-Header-Content-Length": String(bytes.byteLength),
-      "X-Goog-Upload-Header-Content-Type": mimeType,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ file: { display_name: d.title.slice(0, 100) } }),
-  });
+/**
+ * One word or phrase as a hashtag: letters and digits only, lower case.
+ *
+ * Its class had at some point lost the two backslashes off its property
+ * escapes. Written without them those are five literal characters, not a
+ * unicode property — so the negated set kept only p, {, L, } and N and
+ * deleted everything else. "Freskos" came out empty, "Liverpool" came out
+ * "Lp", and a tag that comes out empty returns null.
+ *
+ * Every keyword was therefore dropped, the array was empty, and captions
+ * published with no keyword line and no hashtags at all — silently, for every
+ * client, because an empty tag list is indistinguishable from one nobody
+ * asked for.
+ *
+ * Marks are kept as well as letters, and that is not decoration. A Telugu
+ * word is letters plus its vowel signs: strip the marks from బిర్యానీ and
+ * what is left is బరయన, which is not a misspelling of biryani so much as a
+ * different string of consonants. Letters and digits alone would have quietly
+ * mangled the hashtags of every client this portal actually has.
+ *
+ * A module-level function rather than a closure, so a test can run it on real
+ * strings. A source-text assertion would have read the regex back and agreed
+ * with it.
+ */
+export function hashTag(v: string | null | undefined): string | null {
+  const clean = String(v ?? "").replace(/[^\p{L}\p{N}\p{M}]/gu, "");
+  return clean ? `#${clean.toLowerCase()}` : null;
+}
 
-  const uploadUrl = init.headers.get("x-goog-upload-url");
-  if (!uploadUrl) {
-    return { ok: false, error: `Gemini refused the upload (HTTP ${init.status}).` };
-  }
+/* ------------------------------ Step 2: generate ------------------------------ */
 
-  const up = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      "Content-Length": String(bytes.byteLength),
-      "X-Goog-Upload-Offset": "0",
-      "X-Goog-Upload-Command": "upload, finalize",
-    },
-    body: new Uint8Array(bytes),
-  });
-  const upJson = (await up.json()) as { file?: { uri: string; name: string; mimeType: string } };
-  if (!upJson.file?.uri) {
-    return { ok: false, error: "Gemini did not return an uploaded file." };
-  }
-
-  const expires = new Date(Date.now() + FILE_TTL_HOURS * 3600_000)
-    .toISOString()
-    .slice(0, 19)
-    .replace("T", " ");
-
-  await setState(deliverableId, "processing", {
-    file_uri: upJson.file.uri,
-    file_name: upJson.file.name,
-    file_expires_at: expires,
-    video_bytes: bytes.byteLength,
-    // Stamped with the video it came from, so this upload can never be handed
-    // back for a different one.
-    ...(tracksSource ? { source_ref: ref } : {}),
-  });
-
+/**
+ * The finished-analysis UPDATE, built so a value cannot lose its column.
+ *
+ * The column names come from the literal above and never from anything a
+ * model or a client sent, which is what makes interpolating them safe; the
+ * values stay parameters.
+ */
+export function buildCaptionUpdate(
+  deliverableId: number,
+  fields: Record<string, SqlParam>
+): { sql: string; params: SqlParam[] } {
+  const columns = Object.keys(fields);
   return {
-    ok: true,
-    uri: upJson.file.uri,
-    name: upJson.file.name,
-    mimeType: upJson.file.mimeType || mimeType,
+    sql: `UPDATE video_analysis
+             SET state = 'done', ${columns.map((c) => `${c} = ?`).join(", ")},
+                 last_error = NULL, locked_at = NULL
+           WHERE deliverable_id = ?`,
+    params: [...columns.map((c) => fields[c]), deliverableId],
   };
 }
 
-/* --------------------------- Step 2: wait for Gemini -------------------------- */
-
-async function waitForProcessing(
-  deliverableId: number,
-  _uri: string,
-  name: string
-): Promise<{ ok: true } | (StepResult & { ok: false })> {
-  // Polled here for a few seconds rather than looped to completion: a long
-  // video can take a minute, and holding a serverless request open that long
-  // risks the platform killing it mid-wait. The caller polls instead.
-  for (let i = 0; i < 5; i++) {
-    const res = await fetch(`${BASE}/v1beta/${name}?key=${env.gemini.apiKey}`);
-    const file = (await res.json()) as { state?: string; error?: { message?: string } };
-
-    if (file.error) return { ok: false, error: file.error.message || "Gemini error", permanent: true };
-    if (file.state === "ACTIVE") return { ok: true };
-    if (file.state === "FAILED") {
-      return {
-        ok: false,
-        permanent: true,
-        error: "Gemini could not process this video — the format may be unsupported.",
-      };
-    }
-    await new Promise((r) => setTimeout(r, 2500));
-  }
-
-  await setState(deliverableId, "processing", { locked_at: null });
-  return { ok: false, error: "Still processing." };
-}
-
-/* ------------------------------ Step 3: generate ------------------------------ */
+/**
+ * The shape the reply is *made* to take.
+ *
+ * This is the same shape the prompt asks for in words, and asking in words was
+ * all that was happening: the call passed no schema, and `ask` only fills in
+ * `data` when it is given one. So `res.data` came back null every single time,
+ * the caller read that as a parse failure, and every video in the portal
+ * reported "the reply was not the JSON it was required to be" — on a reply
+ * that was, in fact, perfectly good JSON that nobody parsed.
+ *
+ * Written out in full because `strict` mode has no shorthand: every property
+ * has to appear in `required`, every object has to say
+ * `additionalProperties: false`, and anything that may be absent says so as a
+ * null in its type rather than by being optional. In return the decoder
+ * guarantees the shape — the model cannot wrap it in a code fence, cannot
+ * drop a key, and cannot answer in prose.
+ */
+export const CAPTION_SCHEMA: Record<string, unknown> = (() => {
+  /** A field the video may simply not show — a logo with no phone number in it. */
+  const maybe = { type: ["string", "null"] };
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "summary",
+      "spoken_language",
+      "on_screen_text",
+      "branding",
+      "scenes",
+      "topic",
+      "mood",
+      "has_face",
+      "hook",
+      "caption",
+      "alternate_captions",
+      "cta",
+      "seo_keywords",
+      "video_keyword",
+    ],
+    properties: {
+      summary: { type: "string" },
+      spoken_language: { type: "string" },
+      on_screen_text: { type: "array", items: { type: "string" } },
+      branding: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "logo_text",
+          "footer_text",
+          "phone",
+          "website",
+          "handle",
+          "tagline",
+          "business_name_seen",
+        ],
+        properties: {
+          logo_text: maybe,
+          footer_text: maybe,
+          phone: maybe,
+          website: maybe,
+          handle: maybe,
+          tagline: maybe,
+          business_name_seen: maybe,
+        },
+      },
+      scenes: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["start", "end", "label"],
+          properties: {
+            start: { type: "string" },
+            end: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+      },
+      topic: { type: "string" },
+      mood: { type: "string" },
+      has_face: { type: "boolean" },
+      hook: { type: "string" },
+      caption: { type: "string" },
+      /*
+       * Five more, so the editor picks rather than regenerates.
+       *
+       * This is the whole reason the second writer existed: a page of
+       * alternates to choose from. Choosing costs nothing; regenerating costs
+       * a dozen high-detail frames at high reasoning effort, and one of only
+       * three attempts in two days.
+       */
+      alternate_captions: { type: "array", items: { type: "string" } },
+      cta: { type: "string" },
+      seo_keywords: { type: "array", items: { type: "string" } },
+      /*
+       * Two or three words for what this video is about, and the only part
+       * of the keyword line the model supplies.
+       *
+       * The other three — the business name, the handle and the town — are
+       * things the portal knows exactly, and a model asked for any of them
+       * returns something plausible: a handle spelled almost right is a tag
+       * belonging to a stranger, posted on this client's account.
+       */
+      video_keyword: { type: "string" },
+    },
+  };
+})();
 
 async function generate(
   deliverableId: number,
-  fileUri: string,
-  mimeType: string
+  eyes: Eyes,
+  overrides?: CaptionOverrides
 ): Promise<RunResult> {
   await setState(deliverableId, "analysing");
   const started = Date.now();
@@ -711,9 +1088,14 @@ async function generate(
     clientContext: contextBlock,
     title: d.title,
     description: d.description,
-    language: str(cs.language),
-    tone: str(cs.tone),
+    language: overrides?.language || str(cs.language),
+    tone: overrides?.tone || str(cs.tone),
     cta: str(cs.cta),
+    goal: overrides?.goal || null,
+    length: overrides?.length || null,
+    // The studio's "no contact details" box. A caption that carries a phone
+    // number the client did not want published is not a style problem.
+    includeContact: overrides?.includeContact !== false,
     // Stored on the client and, until now, read by nothing in this portal —
     // the template someone wrote for a client was quietly having no effect.
     templateRule: ctx ? renderTemplateRule(ctx) : null,
@@ -724,172 +1106,108 @@ async function generate(
   });
 
   /*
-   * Grounded web search when the tier allows it.
+   * What it is looking at, said before the task.
    *
-   * Off by default: Gemini's `google_search` tool is a paid-tier feature and
-   * returns a quota error on the free one, which would fail every caption. The
-   * context above is the client's own words and is better material anyway —
-   * search adds reach, not accuracy.
+   * The frames arrive as an ordered strip covering the whole runtime, and the
+   * model has no way of knowing that unless it is told — shown eight pictures
+   * with no explanation it will describe eight separate images rather than one
+   * video. Saying "these are frames 1..8, evenly spaced, first to last" is
+   * what turns a pile of stills back into something with a beginning and an
+   * end, which is the difference between reading the footer and not.
    */
-  const useGrounding = groundingAvailable();
+  const sightNote = eyes.frames.length
+    ? `You are looking at ${eyes.frames.length} frames taken from ONE video, in order, ` +
+      `evenly spaced from its first second to its last. Frame 1 is the opening; the final ` +
+      `frame is how it ends — branding, a logo lock-up and a footer usually appear only there. ` +
+      `Read every word visible in every frame, including small print along the bottom.`
+    : "";
+  const heardNote = eyes.transcript
+    ? `\n\nWHAT IS SAID IN THE VIDEO (transcribed from its own audio, verbatim):\n${eyes.transcript.slice(0, 6000)}`
+    : "";
+  const missingNote = eyes.missing.length ? `\n\nIMPORTANT:\n- ${eyes.missing.join("\n- ")}` : "";
 
-  const callModel = (model: string) =>
-    fetch(
-      `${BASE}/v1beta/models/${model}:generateContent?key=${env.gemini.apiKey}`,
-    {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ file_data: { mime_type: mimeType, file_uri: fileUri } }, { text: prompt }],
-            },
-          ],
-          ...(useGrounding ? { tools: [{ google_search: {} }] } : {}),
-          generationConfig: {
-            temperature: 0.7,
-            // Grounding and forced-JSON output are mutually exclusive in the
-            // API, so the JSON is parsed out of the text when searching is on.
-            ...(useGrounding ? {} : { responseMimeType: "application/json" }),
-          },
-        }),
-      }
-    );
-
-  type GenerateReply = {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-    usageMetadata?: { totalTokenCount?: number };
-    error?: { message?: string; code?: number };
-  };
-
-  /*
-   * Each model in turn, until one has quota left.
-   *
-   * A quota refusal is about one model, not the account — the reply names it:
-   * `limit: 20, model: gemini-3.7-flash`. So the next model on the list is
-   * asked, with its own untouched allowance, and the caption arrives instead
-   * of the card saying Failed until tomorrow.
-   *
-   * Any other error breaks out immediately. A video Gemini cannot read is a
-   * video none of them can read, and walking the whole list to be told so
-   * three times costs three uploads' worth of nothing.
-   */
-  let out: GenerateReply = {};
-  let usedModel = VIDEO_MODELS[0];
-  /*
-   * Whether any model refused on quota, kept across the loop.
-   *
-   * Only the last error survives it, and the last model on the list may have
-   * been retired — which classifies as permanent and marks the job failed,
-   * for a video whose only problem was that today's allowance had run out and
-   * would be back in the morning.
-   */
-  let sawQuota = false;
-  for (const model of VIDEO_MODELS) {
-    usedModel = model;
-    out = (await (await callModel(model)).json()) as GenerateReply;
-    if (!out.error) break;
-    const m = out.error.message || "";
-    const quota = out.error.code === 429 || /quota|rate.?limit|too many requests/i.test(m);
-    if (quota) sawQuota = true;
+  const res = await ask<Record<string, unknown>>({
+    system:
+      "You are a senior social-media editor who watches a client's finished video and reports " +
+      "exactly what is in it. You never invent a detail you were not shown or told.",
+    user: `${sightNote}${heardNote}${missingNote}\n\n${prompt}`,
+    images: eyes.frames.map((url) => ({
+      url,
+      // The whole point is reading small text — a logo lock-up, a phone number
+      // along a footer. Low detail downsamples exactly that away.
+      detail: "high" as const,
+    })),
     /*
-     * A retired model is the same situation as an exhausted one: this name
-     * cannot answer, the next might. Google withdraws them without notice —
-     * `gemini-2.0-flash` was the fallback here and had already gone, so the
-     * chain that existed to survive a quota error died on its first hop and
-     * looked exactly like having no fallback at all.
-     */
-    const gone = out.error.code === 404 || /no longer available|not found/i.test(m);
-    if (!quota && !gone) break;
-  }
-
-  if (out.error) {
-    const message = out.error.message || "Gemini error";
-    const permanent =
-      !sawQuota && (out.error.code === 400 || /not available|not found/i.test(message));
-
-    /*
-     * Out of quota is not a failure, and retrying at once makes it worse.
+     * The most thinking the portal buys anywhere, and the one place it is
+     * plainly worth it.
      *
-     * The free tier allows twenty generations, and Gemini says exactly how
-     * long to wait — "Please retry in 28.4s". This cleared the lease and
-     * requeued, so the next run asked again immediately, was refused again,
-     * and wrote a second identical error under the first. The card ended up
-     * showing the same paragraph twice beside the word Failed, for a video
-     * that would have captioned itself half a minute later.
-     *
-     * Holding the lease is the whole fix: a claimed job is not re-claimed
-     * until it expires, so leaving `locked_at` set is a back-off written in
-     * machinery that already exists.
+     * This is not a chat reply: it reads a dozen frames, reconciles them with
+     * a transcript and a page of brand rules, and produces copy that goes onto
+     * a paying client's feed. The failure mode of a model that glances is a
+     * fluent caption about a video it did not really look at — which is
+     * indistinguishable from a good one until the client reads it.
      */
-    const outOfQuota =
-      sawQuota || out.error.code === 429 || /quota|rate.?limit|too many requests/i.test(message);
-
-    const patch: Record<string, string | number | null> = {
-      last_error: outOfQuota
-        ? `Out of Gemini quota for now — this will try itself again shortly. (${message})`
-        : message,
-    };
-    // Released on an ordinary error so the next run picks it straight up;
-    // held on a quota one, which is what makes the back-off.
-    if (!outOfQuota) patch.locked_at = null;
+    effort: "high",
+    // Without this the reply is never parsed at all — see CAPTION_SCHEMA.
+    schema: CAPTION_SCHEMA,
+    schemaName: "video_caption",
+    model: env.gemini.model,
     /*
-     * And it costs no attempt. The claim raises the count before anything is
-     * known, and four of them ends the job for good — spending that budget on
-     * refusals that burned no tokens and analysed no video is how a working
+     * Room for the thinking *and* the reply, which come out of the same
+     * budget. At 12,000 this ran out mid-JSON on a busy video: the response
+     * still carried the half of the object it had managed to write, so it
+     * did not read as an empty reply, and the parse failure was reported as
+     * a broken schema. Twice the room, and nothing extra is charged for room
+     * that goes unused.
+     */
+    maxTokens: 24_000,
+    // A dozen high-detail frames at high effort is not a quick call.
+    timeoutMs: 180_000,
+  });
+
+  if (!res.ok) {
+    const message = res.error || "The model returned nothing.";
+    /*
+     * Retriable failures cost no attempt.
+     *
+     * The claim raises the count before anything is known, and four of them
+     * ends the job for good — so spending that budget on rate limits and
+     * outages, which analysed no video and burned no tokens, is how a working
      * video reaches "gave up after repeated failures" without ever having
-     * been read.
+     * been read once.
      */
-    if (outOfQuota) {
+    if (res.retriable) {
       await execute(
         "UPDATE video_analysis SET attempts = GREATEST(attempts - 1, 0) WHERE deliverable_id = ?",
         [deliverableId]
       ).catch(() => {});
     }
-    await setState(deliverableId, permanent ? "failed" : "queued", patch);
-    return { ok: false, state: permanent ? "failed" : "queued", error: message };
-  }
-
-  const text = (out.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-  let parsed: Record<string, unknown>;
-  try {
-    // With grounding on, the reply is prose that contains JSON rather than
-    // pure JSON, so the object is extracted before parsing.
-    const json = useGrounding ? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1) : text;
-    parsed = JSON.parse(json);
-  } catch {
-    await setState(deliverableId, "queued", {
-      last_error: "Gemini's reply wasn't valid JSON.",
+    await setState(deliverableId, res.retriable ? "queued" : "failed", {
+      last_error: message,
       locked_at: null,
     });
-    return { ok: false, state: "queued", error: "Gemini's reply wasn't valid JSON.", more: true };
+    return { ok: false, state: res.retriable ? "queued" : "failed", error: message, more: res.retriable };
   }
+
+  const parsed = res.data;
+  if (!parsed) {
+    await setState(deliverableId, "queued", {
+      last_error: "The reply was not the JSON it was required to be.",
+      locked_at: null,
+    });
+    return { ok: false, state: "queued", error: "The reply was not valid JSON.", more: true };
+  }
+
+  const usedModel = res.model;
+  const tokensUsed = res.tokens;
+  const out = { usageMetadata: { totalTokenCount: res.tokens } };
 
   const arr = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-  /*
-   * Five tags: the client, the account, and three from the video.
-   *
-   * The first two are built here rather than asked for. The portal knows the
-   * company name and the handle exactly, and a model asked for them returns a
-   * plausible spelling of the handle — which is a tag belonging to somebody
-   * else, posted on the client's own account.
-   *
-   * Deduped against the model's three because it is told not to repeat them
-   * and sometimes does, and a repeat would silently cost one of the three
-   * that carry the actual video.
-   */
-  const tag = (v: string | null | undefined): string | null => {
-    const clean = String(v ?? "").replace(/[^p{L}p{N}]/gu, "");
-    return clean ? `#${clean.toLowerCase()}` : null;
-  };
-  const fromVideo = arr(parsed.hashtags)
-    .map((h) => (h.startsWith("#") ? h : `#${h}`))
-    .map((h) => h.trim())
-    .filter(Boolean);
+  const tag = hashTag;
+
   /*
    * Who, and where. Both from the portal, neither from the model.
    *
@@ -903,17 +1221,12 @@ async function generate(
    * actually searched for, and a reel about a dosa shop that never says which
    * town it is in is competing with every dosa shop.
    */
-  const ours = [
+  const chosen = [
     tag(d.company_name),
     tag(d.ig_username),
     tag(ctx?.city),
-    tag(ctx?.country),
-  ].filter(Boolean) as string[];
-  const seen = new Set(ours.map((t) => t.toLowerCase()));
-  const chosen = [
-    ...ours,
-    ...fromVideo.filter((t) => !seen.has(t.toLowerCase())).slice(0, 3),
-  ];
+    tag(s(parsed.video_keyword)),
+  ].filter((t): t is string => Boolean(t));
 
   /*
    * The same terms twice: once as words, once as tags.
@@ -983,44 +1296,63 @@ async function generate(
    * provenance.
    */
   const audit = await hasColumn("video_analysis", "brand_seen");
+  /*
+   * Whether a person is on camera — the one feature the portal could not
+   * answer for itself, and the one an agency argues about most. The model is
+   * watching the whole video anyway, so this is a field in a reply that was
+   * being made regardless.
+   */
+  const hasFace = await hasColumn("video_analysis", "has_face");
 
-  await execute(
-    `UPDATE video_analysis
-        SET state = 'done', summary = ?, spoken_language = ?, topic = ?, mood = ?,
-            on_screen_text = ?, scenes_json = ?, caption = ?, hook = ?, hashtags = ?,
-            ${audit ? "brand_seen = ?, context_used = ?, grounded = ?," : ""}
-            raw_json = ?, tokens_used = ?, duration_ms = ?, model = ?,
-            last_error = NULL, locked_at = NULL
-      WHERE deliverable_id = ?`,
-    [
-      s(parsed.summary),
-      s(parsed.spoken_language),
-      s(parsed.topic),
-      s(parsed.mood),
-      arr(parsed.on_screen_text).join("\n") || null,
-      JSON.stringify(parsed.scenes ?? []),
-      checked.caption,
-      s(parsed.hook),
-      hashtags || null,
-      ...(audit
-        ? [
-            brandSeen,
-            // Kept so a caption can be traced to the briefing it was written
-            // from, including which sources were reachable at the time.
-            ctx ? `${contextBlock}\n\n[sources: ${ctx.sources.join(", ")}]` : null,
-            useGrounding ? 1 : 0,
-          ]
-        : []),
-      JSON.stringify(parsed),
-      out.usageMetadata?.totalTokenCount ?? null,
-      Date.now() - started,
-      // Which model actually answered. On a busy day the first one is out of
-      // quota and the caption came from the fallback — worth being able to see
-      // rather than guess at from the timing.
-      usedModel,
-      deliverableId,
-    ]
-  );
+  /*
+   * Columns and values written as one thing.
+   *
+   * They used to be two lists — a SQL string with `?` in it and an array of
+   * values — with two optional groups spliced into each. The optional groups
+   * were spliced in at *different points* in the two, so the moment the
+   * `has_face` column existed every value after it shifted one place: the
+   * on-screen text went into `scenes_json`, which is a JSON column, and MySQL
+   * refused it with `Invalid JSON text: "Invalid value." at position 0`.
+   *
+   * Every caption failed, and the message named a column nothing was wrong
+   * with. Worse, it only appeared once the database was migrated — so the
+   * feature broke on the machines that were most up to date.
+   *
+   * Keyed by column name, the value cannot be separated from the column it
+   * belongs to. Insertion order is what MySQL sees, and it does not matter
+   * what that order is.
+   */
+  const fields: Record<string, SqlParam> = {
+    summary: s(parsed.summary),
+    spoken_language: s(parsed.spoken_language),
+    topic: s(parsed.topic),
+    mood: s(parsed.mood),
+    on_screen_text: arr(parsed.on_screen_text).join("\n") || null,
+    scenes_json: JSON.stringify(parsed.scenes ?? []),
+    caption: checked.caption,
+    hook: s(parsed.hook),
+    hashtags: hashtags || null,
+    raw_json: JSON.stringify(parsed),
+    tokens_used: tokensUsed,
+    duration_ms: Date.now() - started,
+    // Which model actually answered. On a busy day the first one is out of
+    // quota and the caption came from the fallback — worth being able to see
+    // rather than guess at from the timing.
+    model: usedModel,
+  };
+  if (hasFace) {
+    fields.has_face = typeof parsed.has_face === "boolean" ? (parsed.has_face ? 1 : 0) : null;
+  }
+  if (audit) {
+    fields.brand_seen = brandSeen;
+    // Kept so a caption can be traced to the briefing it was written from,
+    // including which sources were reachable at the time.
+    fields.context_used = ctx ? `${contextBlock}\n\n[sources: ${ctx.sources.join(", ")}]` : null;
+    fields.grounded = 0;
+  }
+
+  const written = buildCaptionUpdate(deliverableId, fields);
+  await execute(written.sql, written.params);
 
   /*
    * Name it here, the moment we know what it is.
@@ -1033,7 +1365,45 @@ async function generate(
    */
   await nameFromTopic(deliverableId, s(parsed.topic));
 
-  return { ok: true, state: "done", caption: checked.caption, more: false };
+  /*
+   * Counted here, not at the start of the call.
+   *
+   * A rate limit, a timeout or a truncated reply produced no caption and cost
+   * the client nothing they can use — charging those against a budget of
+   * three would leave a video with no caption and no way to ask for one.
+   */
+  await recordCaption(deliverableId);
+
+  /*
+   * The alternates get the same phone check as the caption itself.
+   *
+   * They are one click from being the caption — the studio lists them to be
+   * picked — so an invented number surviving in one of them is exactly as bad
+   * as one surviving in the main copy, and much easier to miss.
+   */
+  const alternates = arr(parsed.alternate_captions)
+    .map((alt) => correctPhones(alt, phones, ctx?.phone ?? null).caption)
+    .filter((alt): alt is string => Boolean(alt && alt.trim()));
+
+  /*
+   * Composed on the way out, kept apart on the way in.
+   *
+   * The row keeps the body and the tag block in separate columns, because
+   * that is what lets a re-apply be idempotent and what stops the publisher
+   * appending the same tags a second time. But everything that *shows* a
+   * caption — the studio, the task modal, the Copy button — wants the thing
+   * that will actually be posted, and showing the body alone read as the
+   * keywords and hashtags simply never having been written.
+   */
+  return {
+    ok: true,
+    state: "done",
+    caption: composeCaption(checked.caption, hashtags),
+    alternates,
+    hashtags: hashtags || null,
+    cta: s(parsed.cta),
+    more: false,
+  };
 }
 
 /**
@@ -1079,16 +1449,21 @@ export async function applyCaption(deliverableId: number): Promise<{ ok: boolean
   await nameFromTopic(deliverableId, a.topic);
 
   /*
-   * The body, and the tags, and never both in one column.
+   * The task gets the whole caption; the analysis row keeps the halves.
    *
-   * This wrote the tags into the caption *and* into `hashtags`, and
-   * `composeCaption` — whose whole job is putting the two together for
-   * Instagram — then appended them again. Every published reel carried the
-   * same hashtags twice, on a client's account, and the caption studio
-   * showed the doubled copy back as though somebody had written it.
+   * Stored apart, the caption panel showed the three lines and the contact
+   * line and nothing else — so the keyword line and the hashtags read as
+   * never having been written, and Copy handed over an incomplete post.
+   *
+   * They are still stored apart on the analysis row, which is what makes
+   * re-applying idempotent, and `hashtags` still goes in its own column so
+   * the publisher can put them back if somebody edits them out of the body.
+   * Composing twice is harmless: `composeCaption` returns a body that already
+   * ends in its own tag block untouched, which is the guard that stopped
+   * every published reel carrying the same hashtags twice.
    */
   await execute("UPDATE deliverables SET caption = ?, hashtags = ? WHERE id = ?", [
-    a.caption,
+    composeCaption(a.caption, a.hashtags),
     a.hashtags,
     deliverableId,
   ]);

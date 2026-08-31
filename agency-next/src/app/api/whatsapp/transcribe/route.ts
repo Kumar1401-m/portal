@@ -8,7 +8,7 @@
  * this those messages were logged as "[voice note]" and nobody knew what was
  * asked until someone played them back.
  *
- * The service could not do this itself: transcription needs the Gemini key,
+ * The service could not do this itself: transcription needs the model key,
  * which belongs to the portal and should not be copied onto a box running a
  * browser automation. So the service posts the audio here and gets words back,
  * then treats them exactly as if the client had typed them — same parser, same
@@ -19,6 +19,7 @@
  */
 import { isAuthorizedWhatsAppRequest, unauthorized } from "@/lib/api-auth";
 import { env } from "@/lib/env";
+import { ask, modelReady, transcribeBlob } from "@/lib/model";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,9 +31,40 @@ export const maxDuration = 60;
  */
 const MAX_BASE64_CHARS = 8 * 1024 * 1024;
 
+/**
+ * The extension the format is read from.
+ *
+ * It ignores the multipart content type entirely and decides from the filename
+ * alone, so this mapping is not cosmetic — get it wrong and a perfectly good
+ * voice note comes back "Unsupported file format". WhatsApp sends
+ * `audio/ogg; codecs=opus`; `.opus` and `.oga` are both refused, `.ogg` is
+ * accepted, which is not guessable and was checked against the live API.
+ */
+function extensionFor(mimeType: string): string {
+  const type = mimeType.split(";")[0].trim().toLowerCase();
+  const known: Record<string, string> = {
+    "audio/ogg": "ogg",
+    "audio/opus": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "mp4",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/aac": "m4a",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/webm": "webm",
+    "audio/flac": "flac",
+  };
+  return known[type] || "ogg";
+}
+
+/** Nothing outside plain ASCII — so English needs no translating. */
+const looksEnglish = (s: string) => !/[^\x00-\x7F]/.test(s);
+
 export async function POST(request: Request) {
   if (!isAuthorizedWhatsAppRequest(request)) return unauthorized();
-  if (!env.gemini.enabled) {
+  if (!modelReady()) {
     return Response.json({ ok: false, error: "No transcription model configured." }, { status: 503 });
   }
 
@@ -55,113 +87,63 @@ export async function POST(request: Request) {
     );
   }
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${env.gemini.model}` +
-    `:generateContent?key=${env.gemini.apiKey}`;
+  /*
+   * Their words first, then what those words mean — and in that order for a
+   * reason. `text` is fed straight into the command parser, so it has to be
+   * exactly what was said: a model that helpfully returns "The client is
+   * approving the video" instead of "sare" breaks approval outright. A
+   * dedicated transcription model cannot do anything else, which is the
+   * safest possible guarantee of that.
+   *
+   * `english` is read by a person scrolling the transcript, where a Telugu
+   * voice note transcribed into Telugu tells them no more than "[voice note]"
+   * did.
+   */
+  const bytes = Buffer.from(audio, "base64");
+  const heard = await transcribeBlob(
+    new Blob([new Uint8Array(bytes)], { type: mimeType }),
+    `voice.${extensionFor(mimeType)}`
+  );
+
+  if (heard.error) {
+    console.warn("[whatsapp] transcription failed:", heard.error);
+    return Response.json({ ok: false, error: heard.error }, { status: 502 });
+  }
+
+  const text = heard.text || "";
+  // Said out loud, because the symptom — a client whose voice notes are simply
+  // never acted on — looks nothing like its cause.
+  if (!text) console.warn("[whatsapp] transcription came back empty");
 
   /*
-   * Their words, and then what those words mean in English.
+   * The translation is a second call, and only when there is something to
+   * translate.
    *
-   * Both, because they are read by different things. `text` is fed straight
-   * into the command parser, so it has to be what was actually said — a model
-   * that helpfully answers "The client is approving the video" instead of
-   * "sare" breaks approval outright. `english` is read by a person scrolling
-   * the transcript, and a Telugu voice note transcribed into Telugu told them
-   * no more than "[voice note]" did.
-   *
-   * One call rather than two: the audio is already uploaded, and a second
-   * round trip to translate a sentence we are holding in memory doubles both
-   * the wait and the cost of every voice note that arrives.
+   * It used to ride along with the transcription in one request. It cannot
+   * any more: the transcription endpoint returns words and nothing else. That
+   * is a fair trade — a client who spoke English costs exactly one call, as
+   * before, and the parser now reads output from a model that is incapable of
+   * paraphrasing them.
    */
-  const instruction = [
-    "Transcribe this voice message, then translate the transcription into English.",
-    'Reply with JSON only: {"text":"...","english":"..."}',
-    '"text" is exactly what was said, in the speaker\'s own language and words — do not translate, summarise, answer or explain it.',
-    '"english" is a plain English translation of that same sentence, or the identical string when they already spoke English.',
-    'If nothing intelligible was said, reply {"text":"","english":""}.',
-  ].join(" ");
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { inline_data: { mime_type: mimeType, data: audio } },
-              { text: instruction },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          // A minute of speech is comfortably more than 400 tokens, and the
-          // budget is also what a thinking model spends before it writes a
-          // word — too tight and the reply comes back empty, which reads as
-          // "the client said nothing" rather than "we cut them off".
-          maxOutputTokens: 1200,
-          responseMimeType: "application/json",
-        },
-      }),
-      signal: AbortSignal.timeout(45_000),
+  let english = "";
+  if (text && !looksEnglish(text)) {
+    const t = await ask({
+      system:
+        "You translate one short message into English. Reply with the translation and nothing else — " +
+        "no quotes, no notes, no explanation. Do not answer it, summarise it or comment on it.",
+      user: text,
+      model: env.gemini.fastModel,
+      effort: "low",
+      maxTokens: 800,
+      timeoutMs: 20_000,
     });
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      console.warn("[whatsapp] transcription failed:", res.status, detail.slice(0, 200));
-      return Response.json(
-        { ok: false, error: `Transcription failed (HTTP ${res.status}).` },
-        { status: 502 }
-      );
-    }
-
-    const j = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
-    };
-    const cand = j.candidates?.[0];
-    const raw = (cand?.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("")
-      .trim();
-
-    /*
-     * A model that ignores the format must not cost us the transcription.
-     *
-     * Before the translation was asked for this endpoint returned whatever
-     * came back, and that is exactly the fallback: unparsable JSON means we
-     * have prose, and prose from this prompt is the transcript. Approval —
-     * which only ever needed `text` — keeps working on a day the JSON does
-     * not, and only the English half is lost.
-     */
-    let text = raw;
-    let english = "";
-    try {
-      const parsed = JSON.parse(
-        raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()
-      ) as { text?: unknown; english?: unknown };
-      if (typeof parsed.text === "string") {
-        text = parsed.text.trim();
-        english = typeof parsed.english === "string" ? parsed.english.trim() : "";
-      }
-    } catch {
-      console.warn("[whatsapp] transcription was not JSON, using it verbatim:", raw.slice(0, 120));
-    }
-
-    // Said out loud, because the symptom of an empty transcript — a client
-    // whose voice notes are simply never acted on — looks nothing like its
-    // cause, and the cause is usually the token budget above.
-    if (!text) console.warn("[whatsapp] transcription came back empty", { finishReason: cand?.finishReason });
-
-    // Only when it says something the transcript did not: a client who spoke
-    // English gets the same sentence back, and printing it twice in the
-    // timeline is noise.
-    return Response.json({ ok: true, text, english: english && english !== text ? english : "" });
-  } catch (err) {
-    return Response.json(
-      { ok: false, error: err instanceof Error ? err.message : "Transcription failed." },
-      { status: 502 }
-    );
+    // Losing the translation costs a person one click to play the note back;
+    // losing the transcript would cost the client their approval.
+    if (t.ok) english = t.text.trim();
+    else console.warn("[whatsapp] translation failed:", t.error);
   }
+
+  // Only when it says something the transcript did not: a client who spoke
+  // English gets the same sentence back, and printing it twice is noise.
+  return Response.json({ ok: true, text, english: english && english !== text ? english : "" });
 }

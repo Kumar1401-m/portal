@@ -165,18 +165,47 @@ const politeEnough = (text, label) => {
   const route = read("app/api/whatsapp/transcribe/route.ts");
   const router = readFileSync(`${SRC}/../../whatsapp-service/src/lib/message-router.js`, "utf8");
 
-  // Both, because they are read by different things — see below.
-  assert.match(route, /"text":"\.\.\.","english":"\.\.\."/, "the model is asked for both");
-  assert.match(route, /responseMimeType: "application\/json"/, "in a shape that can be parsed");
-  assert.match(route, /do not translate, summarise, answer or explain it/, "and told to leave the words alone");
+  /*
+   * The transcript comes from a model that CANNOT do anything but transcribe.
+   *
+   * It used to be one general-purpose call asked, in the prompt, to return the
+   * words untouched alongside a translation. That request was always honoured
+   * and never guaranteed — and the failure it guards against is severe: a model
+   * that helpfully returns "The client is approving the video" instead of
+   * "sare" breaks approval outright, because the parser is looking for the
+   * word, not the meaning.
+   *
+   * A dedicated transcription endpoint cannot paraphrase. That is now a
+   * property of the model rather than a hope about the prompt.
+   */
+  assert.ok(route.includes("transcribeBlob("), "the words come from a transcription model");
+  assert.ok(
+    route.includes("do not translate, summarise, answer or explain it") ||
+      route.includes("Do not answer it, summarise it or comment on it."),
+    "and the translator is told to leave the sentence alone"
+  );
 
   /*
-   * The fallback is the point of the try/catch, not decoration: this endpoint
-   * used to return whatever prose came back, and approval depends on it. A day
-   * the JSON does not parse must cost the English half only.
+   * The container is decided by the filename, and only by the filename.
+   *
+   * OpenAI ignores the multipart content type. WhatsApp sends audio/ogg with
+   * opus inside; `.opus` and `.oga` are both refused outright and `.ogg` is
+   * accepted, which is not guessable and was checked against the live API. Get
+   * this wrong and every voice note in the system fails identically.
    */
-  assert.match(route, /let text = raw;/, "unparsable JSON still yields a transcript");
-  assert.match(route, /console\.warn\("\[whatsapp\] transcription was not JSON/, "loudly");
+  assert.ok(route.includes('"audio/ogg": "ogg"'), "a WhatsApp voice note is named .ogg");
+  assert.ok(!route.includes('"opus"'), "never .opus, which the API rejects");
+
+  /*
+   * Losing the translation costs a person one click to play the note back;
+   * losing the transcript would cost the client their approval. So the
+   * translation is a separate call that is allowed to fail on its own.
+   */
+  assert.ok(route.includes("if (t.ok) english"), "a failed translation still yields a transcript");
+  assert.ok(
+    route.includes('console.warn("[whatsapp] translation failed:'),
+    "loudly"
+  );
 
   // A client who spoke English would otherwise have their sentence printed
   // twice in the timeline, once labelled as a translation of itself.

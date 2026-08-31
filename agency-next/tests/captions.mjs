@@ -59,15 +59,13 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
    */
   const src = readFileSync(`${SRC}/lib/video-ai.ts`, "utf8");
 
-  for (const field of ["d.company_name", "d.ig_username", "ctx?.city", "ctx?.country"]) {
+  for (const field of ["d.company_name", "d.ig_username", "ctx?.city"]) {
     assert.ok(src.includes(`tag(${field})`), `${field} comes from the portal, not the model`);
   }
-  assert.match(src, /EXACTLY THREE hashtags/, "the model is asked for three, and three only");
-  assert.ok(src.includes(".slice(0, 3)"), "and no more than three are taken");
-  assert.match(
-    src,
-    /not the business name, its handle, its city or its country/,
-    "and told not to repeat the four the portal supplies"
+  assert.ok(src.includes("tag(s(parsed.video_keyword))"), "and the fourth is two or three words from the video");
+  assert.ok(
+    src.includes("business name, not its handle, not its city"),
+    "and told not to repeat the three the portal supplies"
   );
 
   // One bracket with commas — not a bracket each, which reads as debris.
@@ -84,9 +82,12 @@ const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
     src.includes("Never attribute a") && src.includes("logo or a footer to a business other than"),
     "and never to the wrong business"
   );
-  assert.match(src, /Emoji: one or two/, "emoji where they mean something, not per line");
+  // Asked for rather than rationed: a caption with none reads like a notice,
+  // and the old cap of "one or two" produced captions with one.
+  assert.ok(src.includes("USE EMOJI."), "emoji are asked for");
+  assert.ok(src.includes("never on a price, an interest rate"), "but never where they read as a promise");
   assert.match(src, /Then a contact line/, "then the contact details");
-  ok("the client, the account, the city, the country, and three the video earned");
+  ok("the brand, the account, the town, and what the video is about");
 }
 
 await finish(pass);

@@ -7,6 +7,8 @@ import { requireUser, SUPER_ADMIN_ROLES, type Role } from "@/lib/auth";
 /** Uploading the finished video is editing work — deliberately excludes crm. */
 const VIDEO_UPLOAD_ROLES: Role[] = ["super_admin", "admin", "poster_designer", "video_editor"];
 import { canAccessClient } from "@/lib/crm";
+import { MAX_FRAMES } from "@/lib/frames";
+import { audioKey } from "@/lib/audio";
 import {
   presignUpload,
   buildVideoKey,
@@ -50,6 +52,162 @@ export async function getVideoUploadUrl(
   return { ok: true, uploadUrl: signed.uploadUrl, publicUrl: signed.publicUrl, key };
 }
 
+/**
+ * A slot to put this video's extracted speech in.
+ *
+ * The browser decodes the audio track to a small mono WAV and puts it here
+ * itself, for the same reason it uploads the video itself: a Server Action
+ * body is a megabyte and this is several. One key per task, overwritten — a
+ * deliverable has one video, so it has one sound track.
+ */
+export async function getAudioUploadUrl(deliverableId: number): Promise<PresignResult> {
+  const user = await requireUser(VIDEO_UPLOAD_ROLES);
+
+  const d = await queryOne<{ id: number; client_id: number }>(
+    "SELECT id, client_id FROM deliverables WHERE id = ?",
+    [deliverableId]
+  );
+  if (!d) return { ok: false, error: "Task not found." };
+  if (!(await canAccessClient(user, d.client_id))) return { ok: false, error: "Not authorized." };
+
+  const key = audioKey(d.id);
+  const signed = await presignUpload(key, 600);
+  if (!signed) return { ok: false, error: "Couldn't prepare the audio upload." };
+
+  return { ok: true, uploadUrl: signed.uploadUrl, publicUrl: signed.publicUrl, key };
+}
+
+/**
+ * Store the frames the browser decoded, and record where they went.
+ *
+ * They arrive as data URIs in the request body rather than being uploaded to
+ * R2 by the browser: the video is the thing that has to bypass the server, and
+ * a handful of thumbnails is not worth twelve presigns and twelve PUTs.
+ *
+ * But not all of them at once. A Server Action request body is capped at 1 MB
+ * — Next's own limit, an order of magnitude below the ~4.5 MB platform cap
+ * this was written against — and twelve frames of base64 is roughly twice
+ * that. Over it the action never runs at all: the framework rejects the
+ * request with a 413 that reaches the browser as an opaque "an error occurred
+ * in the Server Components render", naming neither the size nor this function.
+ *
+ * So the caller sends them in batches (see `saveFrames`) and each call says
+ * where its batch begins. Batching rather than raising the limit because the
+ * cap is a property of the host, and a run of unusually detailed frames should
+ * not be the thing that decides whether a caption gets written.
+ *
+ * They are put in R2 rather than kept in the database. A base64 image in a
+ * MySQL row is a quarter of a megabyte of text on a table that is read whole
+ * by every analysis, and R2 is already here, already cleaned up on replace,
+ * and already what this portal stores blobs in.
+ *
+ * Best-effort by design. Every failure here means the analysis reads the
+ * transcript alone — a worse caption, never a failed upload.
+ */
+export async function saveVideoFrames(
+  deliverableId: number,
+  frames: string[],
+  /** Where this batch sits in the whole strip, so the keys stay in order. */
+  startIndex = 0
+): Promise<{ ok: boolean; stored: number; error?: string }> {
+  const user = await requireUser(VIDEO_UPLOAD_ROLES);
+
+  const d = await queryOne<{ id: number; client_id: number }>(
+    "SELECT id, client_id FROM deliverables WHERE id = ?",
+    [deliverableId]
+  );
+  if (!d) return { ok: false, stored: 0, error: "Task not found." };
+  if (!(await canAccessClient(user, d.client_id))) {
+    return { ok: false, stored: 0, error: "Not authorized." };
+  }
+  if (!(await hasColumn("video_analysis", "frames_json"))) {
+    return { ok: false, stored: 0, error: "The frames column has not been applied yet." };
+  }
+
+  const keys: string[] = [];
+  for (const [i, dataUrl] of frames.entries()) {
+    // Counted across the whole strip, not within this batch, or a second
+    // batch would overwrite the first batch's files.
+    const at = Math.max(0, Math.trunc(startIndex)) + i;
+    if (at >= MAX_FRAMES) break;
+
+    // Only what this actually produces. A data URI is a URL the server is
+    // about to fetch and store under its own name, so accepting an arbitrary
+    // one would let a caller have us store anything at all.
+    const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!match) continue;
+    const bytes = Buffer.from(match[1], "base64");
+    if (!bytes.byteLength || bytes.byteLength > 2 * 1024 * 1024) continue;
+
+    const key = `frames/${Math.trunc(deliverableId)}/${at}.jpg`;
+    const signed = await presignUpload(key, 600);
+    if (!signed) break;
+    const put = await fetch(signed.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "image/jpeg" },
+      body: new Uint8Array(bytes),
+    }).catch(() => null);
+    if (!put?.ok) continue;
+    keys.push(key);
+  }
+
+  if (!keys.length) return { ok: false, stored: 0, error: "No frames could be stored." };
+
+  /*
+   * The first batch replaces whatever was there; every later one adds to it.
+   * Replacing on the first is what clears a previous video's frames, and
+   * adding on the rest is what stops the last batch being the only one kept.
+   * Merged by key, so a retried batch rewrites its own entries rather than
+   * doubling them.
+   */
+  const before =
+    startIndex === 0
+      ? []
+      : frameKeys(
+          (
+            await queryOne<{ frames_json: unknown }>(
+              "SELECT frames_json FROM video_analysis WHERE deliverable_id = ?",
+              [deliverableId]
+            )
+          )?.frames_json
+        );
+  const all = [...new Set([...before, ...keys])].sort((a, b) => frameIndex(a) - frameIndex(b));
+
+  /*
+   * Written onto the analysis row, creating it if this is the first thing to
+   * touch it. The upload starts the analysis moments later, so the row may
+   * not exist yet — and the frames arriving before the job is queued is the
+   * normal order of events, not an edge case.
+   */
+  await execute(
+    `INSERT INTO video_analysis (deliverable_id, state, frames_json)
+     VALUES (?, 'queued', ?)
+     ON DUPLICATE KEY UPDATE frames_json = VALUES(frames_json)`,
+    [deliverableId, JSON.stringify(all)]
+  );
+
+  return { ok: true, stored: keys.length };
+}
+
+/** The stored keys, whatever shape MySQL handed the JSON column back in. */
+function frameKeys(raw: unknown): string[] {
+  let val = raw;
+  if (typeof val === "string") {
+    try {
+      val = JSON.parse(val);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(val) ? val.filter((k): k is string => typeof k === "string") : [];
+}
+
+/** `frames/272/7.jpg` -> 7, so a merged strip sorts back into playing order. */
+function frameIndex(key: string): number {
+  const n = Number(key.split("/").pop()?.split(".")[0]);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export type AttachResult = {
   ok: boolean;
   error?: string;
@@ -65,7 +223,9 @@ export type AttachResult = {
 export async function attachUploadedVideo(
   deliverableId: number,
   key: string,
-  publicUrl: string
+  publicUrl: string,
+  /** True when the browser is about to send frames — see startAnalysisAfterUpload. */
+  framesFirst = false
 ): Promise<AttachResult> {
   const user = await requireUser(VIDEO_UPLOAD_ROLES);
 
@@ -84,6 +244,17 @@ export async function attachUploadedVideo(
   if (d.cloud_video_key && d.cloud_video_key !== key) {
     await deleteObject(d.cloud_video_key).catch(() => false);
   }
+
+  /*
+   * And bin the speech that came out of it, always.
+   *
+   * The audio key is per task, so a new upload normally overwrites it — but
+   * only if the browser manages to extract any. A video whose audio cannot be
+   * decoded would otherwise inherit the previous cut's sound track and be
+   * captioned, confidently, from words that are not in it.
+   */
+  await deleteObject(audioKey(deliverableId)).catch(() => false);
+
 
   // Move it along to "ready for review" only from the editing stages, so an
   // already-approved or posted task isn't dragged backwards.
@@ -159,7 +330,7 @@ export async function attachUploadedVideo(
    * Best-effort throughout. A failed analysis must never make a successful
    * upload report failure.
    */
-  await startAnalysisAfterUpload(deliverableId);
+  await startAnalysisAfterUpload(deliverableId, !framesFirst);
 
   /*
    * And give it a name, if it is still called "Video 6".

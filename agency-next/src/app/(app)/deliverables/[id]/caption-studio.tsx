@@ -1,13 +1,10 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { Sparkles, Copy, Check, Save, Loader2, Wand2 } from "lucide-react";
-import {
-  generateCaptionAction,
-  saveCaptionAction,
-  type CaptionState,
-} from "../actions";
+import { saveCaptionAction, type CaptionState } from "../actions";
+import { finishAnalysisAfterUpload } from "../../editor/actions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -15,22 +12,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-function GenerateButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? (
-        <>
-          <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-        </>
-      ) : (
-        <>
-          <Wand2 className="h-4 w-4" /> Generate with AI
-        </>
-      )}
-    </Button>
-  );
-}
+/**
+ * How many times the writer is asked "are you done yet".
+ *
+ * Twelve polls at two and a half seconds is thirty seconds of watching, which
+ * is about what a dozen high-detail frames at high thinking takes. It stops
+ * rather than spinning for ever: the job carries on server-side either way,
+ * and a spinner with no end reads as a broken page.
+ */
+const CAPTION_POLLS = 12;
 
 function SaveButton() {
   const { pending } = useFormStatus();
@@ -47,19 +37,97 @@ export function CaptionStudio({
   initialCaption,
   defaultLanguage,
   isPoster,
+  hasVideo = false,
   locked = false,
 }: {
   deliverableId: number;
   initialCaption: string;
   defaultLanguage: string;
   isPoster: boolean;
+  /**
+   * Whether there is a finished file to read.
+   *
+   * Decides one badge, and it is worth its own prop rather than a guess: a
+   * caption written from the brief alone can read perfectly and still
+   * describe a video nobody has made yet.
+   */
+  hasVideo?: boolean;
   /** The work is published; this is the record of it, not a draft. */
   locked?: boolean;
 }) {
-  const [genState, genAction] = useActionState<CaptionState, FormData>(
-    generateCaptionAction,
-    { ok: false }
-  );
+  const [genState, setGenState] = useState<CaptionState>({ ok: false });
+  const [busy, startGen] = useTransition();
+  /*
+   * What it is doing right now, in one line.
+   *
+   * A caption takes the better part of a minute — a dozen frames read at the
+   * highest thinking the portal buys — and a spinner that says nothing for
+   * that long reads as a hung page. This says which step it is on, and it is
+   * the ONLY thing on the screen that says anything about it: a button that
+   * also narrates, plus a warning about long videos, plus this, is the same
+   * sentence three times.
+   */
+  const [step, setStep] = useState<string | null>(null);
+
+  /**
+   * Run the caption writer, polling it as it goes.
+   *
+   * Polled rather than awaited in one call, and that is not only about the
+   * message. The writer runs as several steps across most of a minute, and a
+   * serverless function can be killed partway through any of them — in which
+   * case a single long request returns nothing at all, having spent one of the
+   * three regenerations this video gets in 48 hours. Each poll does what it
+   * safely can and says whether more remains.
+   */
+  function generate(form: HTMLFormElement) {
+    const fd = new FormData(form);
+    // The selects above are choices for THIS caption, not settings on the
+    // client — so they travel with the run rather than being saved anywhere.
+    const overrides = {
+      tone: String(fd.get("tone") || "") || undefined,
+      language: String(fd.get("language") || "") || undefined,
+      goal: String(fd.get("goal") || "") || undefined,
+      length: String(fd.get("length") || "") || undefined,
+      includeContact: fd.get("include_contact") !== null,
+    };
+    setStep("Starting…");
+    startGen(async () => {
+      for (let i = 0; i < CAPTION_POLLS; i++) {
+        let res;
+        try {
+          res = await finishAnalysisAfterUpload(deliverableId, i === 0, overrides);
+        } catch {
+          setGenState({ ok: false, error: "Couldn't generate a caption." });
+          setStep(null);
+          return;
+        }
+        if (!res.ok) {
+          setGenState({ ok: false, error: res.error || "Couldn't generate a caption." });
+          setStep(null);
+          return;
+        }
+        if (res.state === "done") {
+          setGenState({
+            ok: true,
+            caption: res.caption ?? undefined,
+            alternates: res.alternates,
+            provider: "gemini",
+            fromVideo: hasVideo,
+          });
+          setStep(null);
+          return;
+        }
+        setStep(res.message ?? "Writing the caption…");
+        if (!res.more) {
+          setStep(null);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      setStep(null);
+      setGenState({ ok: false, error: "Still working — reopen this page in a moment." });
+    });
+  }
   const [saveState, saveAction] = useActionState(saveCaptionAction, { ok: false });
 
   const [caption, setCaption] = useState(initialCaption);
@@ -92,8 +160,7 @@ export function CaptionStudio({
   }
 
   const providerLabel: Record<string, string> = {
-    gemini: "Gemini AI",
-    openai: "OpenAI",
+    gemini: "Gemini",
     heuristic: "Draft (no AI key)",
   };
 
@@ -136,7 +203,13 @@ export function CaptionStudio({
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Options + generate */}
-        <form action={genAction} className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            generate(e.currentTarget);
+          }}
+          className="space-y-4"
+        >
           <input type="hidden" name="deliverable_id" value={deliverableId} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1.5">
@@ -187,8 +260,24 @@ export function CaptionStudio({
               />
               Include contact details block
             </label>
-            <GenerateButton />
+            <Button type="submit" disabled={busy}>
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4" />
+              )}
+              Generate with AI
+            </Button>
           </div>
+
+          {/* One line, and only one. It says the step rather than repeating
+              that something is happening — the spinner already said that. */}
+          {step ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {step}
+            </p>
+          ) : null}
           {genState.error ? (
             <p className="text-sm text-destructive">{genState.error}</p>
           ) : null}

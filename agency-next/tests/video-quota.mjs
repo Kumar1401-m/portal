@@ -1,12 +1,21 @@
 /**
- * Running out of Gemini quota is a wait, not a failure.
+ * A rate limit is a wait, not a failure.
  *
- * The free tier allows twenty generations and the API says exactly how long to
- * wait — "Please retry in 28.4s". The job cleared its lease and requeued, so
- * the next run asked again immediately, was refused again, and wrote a second
- * identical error under the first. The card showed the same paragraph twice
- * beside the word Failed, for a video that would have captioned itself half a
- * minute later.
+ * The lesson survived changing provider, which is why this file did. On the
+ * old free tier the model refused twenty generations in and the job cleared
+ * its lease and requeued, so the next run asked again immediately, was refused
+ * again, and wrote a second identical error under the first — the card showed
+ * the same paragraph twice beside the word Failed, for a video that would have
+ * captioned itself half a minute later.
+ *
+ * Nothing about that was Gemini-specific. Every provider rate-limits, every
+ * provider has bad minutes, and a background job with a four-attempt budget
+ * can still destroy itself on refusals that read no video and burned no
+ * tokens. These checks hold the three rules that stop it:
+ *
+ *   a refusal that could work later is not a permanent failure
+ *   it does not spend an attempt
+ *   and it holds its lease rather than asking again at once
  */
 import assert from "node:assert/strict";
 import { finish } from "./finish.mjs";
@@ -15,135 +24,86 @@ import { pathToFileURL } from "node:url";
 
 const SRC = process.env.PORTAL_SRC;
 const src = readFileSync(`${SRC}/lib/video-ai.ts`, "utf8");
+const client = readFileSync(`${SRC}/lib/model.ts`, "utf8");
 const ai = await import(pathToFileURL(`${SRC}/lib/video-ai.ts`).href);
 const db = await import(pathToFileURL(`${SRC}/lib/db.ts`).href);
 
 let pass = 0;
 const ok = (n) => { pass++; console.log(`  ok  ${n}`); };
 
-/* ---------------- it is recognised ---------------- */
-{
-  const line = src.split("const outOfQuota =")[1]?.split(";")[0] ?? "";
-  assert.ok(line.includes("429"), "the status Gemini actually returns");
-  for (const word of ["quota", "rate", "too many requests"]) {
-    assert.ok(line.toLowerCase().includes(word), `and the wording, for "${word}"`);
-  }
-  ok("an exhausted quota is told apart from a broken video");
-}
-
-/* ---------------- and it is not retried into the ground ---------------- */
+/* ---------------- it is recognised, in one place ---------------- */
 {
   /*
-   * The lease is the back-off. A claimed job is not re-claimed until it
-   * expires, so leaving `locked_at` alone holds the job without needing a
-   * retry-after column, a scheduler change, or anything else new.
+   * Decided by the client rather than by each caller sniffing error strings.
+   * Four callers each with their own idea of what "temporary" means is how
+   * they came to disagree, and the one that got it wrong was the background
+   * job — the only one where being wrong is permanent.
    */
   assert.ok(
-    src.includes("if (!outOfQuota) patch.locked_at = null;"),
-    "the lease is released on an ordinary error and held on a quota one"
+    client.includes("retriable: res.status === 429 || res.status >= 500"),
+    "a rate limit and a provider outage are the retriable ones"
   );
-  // The claim is what the held lease defeats — if that guard ever goes, so does this.
-  assert.match(
-    src,
-    /locked_at IS NULL OR locked_at < DATE_SUB\(NOW\(\), INTERVAL \? MINUTE\)/,
-    "and the claim still refuses a job whose lease is live"
+  assert.ok(
+    client.includes('"The model took too long to answer."') && client.includes("const aborted = err instanceof Error && err.name === \"AbortError\""),
+    "and so is a timeout"
   );
-  ok("a quota error holds its lease instead of asking again at once");
+  assert.ok(
+    /aborted[\s\S]{0,200}retriable: true/.test(client),
+    "which is marked as such rather than failing the job"
+  );
+  ok("a refusal that could work later is told apart from one that never will");
 }
 
-/* ---------------- and it does not read as broken ---------------- */
-{
-  assert.match(
-    src,
-    /Out of Gemini quota for now — this will try itself again shortly/,
-    "the card says it is waiting, not that the video failed"
-  );
-  // "Failed" stays for the things that genuinely are.
-  assert.ok(
-    src.includes('out.error.code === 400 || /not available|not found/i.test(message)'),
-    "a bad request or a missing model is still permanent"
-  );
-  ok("waiting for quota reads as waiting");
-}
-
-/* ---------------- and the next model is tried before giving up ---------------- */
+/* ---------------- a bad key is not waited out ---------------- */
 {
   /*
-   * The refusal is about one model, and the reply says which: `limit: 20,
-   * model: gemini-3.7-flash`. A different model has its own untouched
-   * allowance, so the caption can still arrive today rather than tomorrow.
+   * The other half, and the one that is easy to lose. If everything were
+   * retriable, a wrong key would queue for ever and the card would say
+   * "trying again" until somebody read the logs. 401 and 400 are answers,
+   * not weather.
    */
-  assert.ok(src.includes("const VIDEO_MODELS = ["), "there is a list, not one model");
   assert.ok(
-    src.includes("for (const model of VIDEO_MODELS) {"),
-    "and the call walks it"
+    src.includes('await setState(deliverableId, res.retriable ? "queued" : "failed"'),
+    "an answer that will not change marks the job failed"
   );
   assert.ok(
-    src.includes("GEMINI_VIDEO_FALLBACKS"),
-    "the fallbacks are configurable without a deploy"
+    src.includes("more: res.retriable"),
+    "and only a retriable one tells the caller to come back"
   );
-
-  // Only on quota. A video Gemini cannot read is a video none of them can
-  // read, and walking the list to be told so three times costs three uploads.
-  const loop = src.split("for (const model of VIDEO_MODELS) {")[1].split("}")[0];
-  assert.ok(loop.includes("if (!out.error) break;"), "a success stops the loop");
-  assert.ok(
-    loop.includes("if (!quota && !gone) break;"),
-    "and so does any error that is neither quota nor a retired model"
-  );
-
-  // The lite model takes no video, so it must not be a fallback for this.
-  const list = src.split("const VIDEO_MODELS = [")[1].split("];")[0];
-  assert.ok(!list.includes("flash-lite"), "the caption studio's model is not on the list");
-
-  /*
-   * Checked against the live API, not chosen from memory. `gemini-2.0-flash`
-   * was the fallback here and had already been retired — so the chain that
-   * existed to survive a quota error died on its first hop and behaved
-   * exactly like having no fallback at all.
-   */
-  assert.ok(!list.includes("gemini-2.0"), "no model that Google has already retired");
-
-  assert.ok(src.includes("model = ?"), "and the row records which model answered");
-  ok("a model out of quota hands over to one that is not");
-}
-
-/* ---------------- a retired model is not the end of the chain ---------------- */
-{
-  const loop = src.split("for (const model of VIDEO_MODELS) {")[1].split("}")[0];
-  assert.ok(loop.includes("const gone ="), "a withdrawn model is recognised");
-  assert.ok(loop.includes("if (!quota && !gone) break;"), "and hands on to the next one");
-
-  /*
-   * Only the last error survives the loop, and the last model may be the
-   * retired one — which classifies as permanent and marks the job failed, for
-   * a video whose only problem was that today's allowance had run out.
-   */
-  assert.ok(src.includes("let sawQuota = false;"), "a quota refusal is remembered across the loop");
-  assert.ok(
-    src.includes("!sawQuota && (out.error.code === 400"),
-    "and a run that hit quota is never marked permanently failed"
-  );
-  ok("a run that ran out of quota comes back tomorrow instead of dying");
+  ok("a permanent refusal fails fast instead of retrying for ever");
 }
 
 /* ---------------- and the give-up budget is not spent on waiting ---------------- */
 {
   /*
    * Four attempts ends a job for good. The claim raises the count before
-   * anything is known, so every quota refusal spent one — and a video that
-   * had used them, for reasons long since fixed, was marked failed on the
-   * next run before Gemini was called at all. The button appeared to do
-   * nothing, and no amount of deploying could change it, because nothing
-   * that was deployed ever ran.
+   * anything is known, so every rate-limited call spent one — and a video that
+   * had used them, for reasons long since fixed, was marked failed on the next
+   * run before the model was called at all. The button appeared to do nothing,
+   * and no amount of deploying could change it, because nothing that was
+   * deployed ever ran.
    */
   assert.ok(
     src.includes("attempts = GREATEST(attempts - 1, 0)"),
     "a refusal that burned no tokens gives its attempt back"
   );
+  assert.ok(
+    /if \(res\.retriable\) \{[\s\S]{0,200}attempts = GREATEST/.test(src),
+    "and only a retriable one — a real failure still costs an attempt"
+  );
   const upsert = src.split("ON DUPLICATE KEY UPDATE state = 'queued'")[1].split("`")[0];
   assert.ok(upsert.includes("attempts = 0"), "and asking again starts the budget over");
-  ok("waiting for quota never uses up the attempts meant for real failures");
+  ok("waiting for a rate limit never uses up the attempts meant for real failures");
+}
+
+/* ---------------- the lease is the back-off ---------------- */
+{
+  assert.match(
+    src,
+    /locked_at IS NULL OR locked_at < DATE_SUB\(NOW\(\), INTERVAL \? MINUTE\)/,
+    "the claim refuses a job whose lease is still live"
+  );
+  ok("two runs cannot analyse the same video at once");
 }
 
 /* ---------------- asking again revives a failed job ---------------- */

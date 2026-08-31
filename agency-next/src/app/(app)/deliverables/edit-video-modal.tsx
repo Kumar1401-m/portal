@@ -13,6 +13,17 @@ import { Modal } from "@/components/ui/modal";
 import { VideoUpload, CaptionLine, type CaptionNote } from "./video-upload";
 import { useToast } from "@/components/ui/toast";
 import { deleteDeliverable } from "./upload-actions";
+import { finishAnalysisAfterUpload } from "../editor/actions";
+
+/**
+ * How many times the video writer is asked "are you done yet".
+ *
+ * Twelve polls at two and a half seconds is thirty seconds of watching, which
+ * is about what a dozen high-detail frames at high reasoning effort takes. It
+ * stops rather than spinning forever: the job carries on server-side either
+ * way, and a spinner that never ends reads as a broken page.
+ */
+const CAPTION_POLLS = 12;
 import {
   ServiceCategoryPicker,
   type CategoryOptions,
@@ -48,6 +59,8 @@ export function EditVideoModal({
   // service picker live rather than the value the task was saved with.
   const [service, setService] = useState<ServiceKey>(serviceOf(d));
   const isPoster = service === "poster_designing";
+  /** What the send actually requires — see the Send To Approval button below. */
+  const canSend = isPoster || Boolean(caption.trim());
   const [genPending, startGen] = useTransition();
   /*
    * The caption the uploader is writing by itself.
@@ -68,6 +81,14 @@ export function EditVideoModal({
    * thing in different words.
    */
   const [captionNote, setCaptionNote] = useState<CaptionNote>(null);
+  /*
+   * Captions left inside the 48-hour window, once a run has reported it.
+   *
+   * Null until then rather than assumed full: the count lives on the analysis
+   * row and reading it for every task in a list would be a query per row, for
+   * a number most people never look at.
+   */
+  const [left, setLeft] = useState<number | null>(null);
   const toast = useToast();
   const captioning = genPending || autoCaptioning;
 
@@ -128,20 +149,38 @@ export function EditVideoModal({
     });
   }
 
+  /**
+   * Write the caption, using whichever writer can actually see the work.
+   *
+   * There are two, and they are not equal. The video writer reads a dozen
+   * frames of the finished cut at the highest reasoning effort the portal
+   * buys, hears the transcript, and reproduces the client's agreed caption
+   * structure. The brief writer reads what somebody typed weeks ago. This
+   * button used to always call the second one — even on a task with the
+   * finished video sitting right under it — so "Generate with AI" produced
+   * a caption about the plan rather than about the reel, and ignored the
+   * structure entirely.
+   *
+   * So: a video goes to the video writer, and everything else (a poster, a
+   * task with nothing uploaded yet) keeps the brief writer, which is the only
+   * thing it could use anyway.
+   */
   function generate() {
     setCaptionNote({ text: "Writing a caption…", tone: "busy" });
     startGen(async () => {
+      if (!isPoster && (d.cloud_video_link || d.edited_link)) {
+        await fromVideo();
+        return;
+      }
+
       const fd = new FormData();
       fd.set("deliverable_id", String(d.id));
       const res = await generateCaptionAction({ ok: false }, fd);
       if (res.ok && res.caption) {
         setCaption(res.caption);
-        // Which source it came from is the difference between a caption about
-        // what is on screen and one about what somebody typed weeks ago, so
-        // say it rather than leaving both looking equally authoritative.
         setCaptionNote({
-          text: res.fromVideo
-            ? "Written from the video."
+          text: isPoster
+            ? "Written from the brief."
             : "Written from the brief — upload the video for one based on the footage.",
           tone: "done",
         });
@@ -152,6 +191,44 @@ export function EditVideoModal({
         });
       }
     });
+  }
+
+  /**
+   * The video writer, which takes about half a minute and reports as it goes.
+   *
+   * Polled rather than awaited in one call: it runs as several steps and a
+   * serverless function can be killed partway through any of them, so each
+   * call does what it safely can and says whether more remains.
+   */
+  async function fromVideo() {
+    for (let i = 0; i < CAPTION_POLLS; i++) {
+      let res;
+      try {
+        // Forced on the first pass only: the rest of the loop is polling the
+        // job it just started, and forcing again would restart it each time.
+        res = await finishAnalysisAfterUpload(d.id, i === 0);
+      } catch {
+        setCaptionNote({ text: "Couldn't generate a caption.", tone: "error" });
+        return;
+      }
+
+      if (typeof res.left === "number") setLeft(res.left);
+
+      if (!res.ok) {
+        setCaptionNote({ text: res.error || "Couldn't generate a caption.", tone: "error" });
+        return;
+      }
+      if (res.state === "done") {
+        if (res.caption) setCaption(res.caption);
+        setCaptionNote({ text: "Written from the video.", tone: "done" });
+        return;
+      }
+
+      setCaptionNote({ text: res.message ?? "Writing the caption…", tone: "busy" });
+      if (!res.more) return;
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+    setCaptionNote({ text: "Still working — reopen this in a moment.", tone: "busy" });
   }
 
   return (
@@ -259,8 +336,10 @@ export function EditVideoModal({
                 <button
                   type="button"
                   onClick={generate}
-                  disabled={captioning}
-                  className={buttonClasses({ variant: "secondary", size: "sm" })}
+                  disabled={captioning || left === 0}
+                  /* The primary action of this panel, and it did not look like
+                     one — a grey button beside an empty box reads as optional. */
+                  className={buttonClasses({ variant: "default", size: "sm" })}
                 >
                   {captioning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -282,6 +361,36 @@ export function EditVideoModal({
               {/* The one line. Everything the caption AI has to say, from
                   either route, appears here and nowhere else. */}
               {captionNote ? <CaptionLine note={captionNote} /> : null}
+
+              {/*
+                What a regenerate costs, said before it is spent.
+                
+                Reading a dozen high-detail frames at the highest reasoning
+                effort the portal buys is the most expensive call it makes, and
+                the button beside this invites pressing it again. Three is
+                enough to get one reel's copy right; a fourth in two days is
+                hoping a different answer falls out of the same video, and the
+                cure for that is the caption structure on the client, not
+                paying again.
+
+                Shown for a video only — a poster is written from its brief by
+                a different, much cheaper writer, and is not limited.
+              */}
+              {!isPoster && (d.cloud_video_link || d.edited_link) ? (
+                <p
+                  className={
+                    left === 0
+                      ? "rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
+                      : "rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground"
+                  }
+                >
+                  {left === null
+                    ? "Regenerate: 3 times per video, per 48 hours."
+                    : left === 0
+                      ? "No regenerations left for 48 hours — edit the caption here instead."
+                      : `${left} of 3 regenerations left in this 48 hours.`}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">
@@ -358,12 +467,31 @@ export function EditVideoModal({
               Save Draft
             </button>
             {canSendToClient ? (
+              /*
+               * Dark and dead until there is a caption to send.
+               *
+               * A post is the video and its words together. Sent without them
+               * the client approves a clip, and the copy that publishes
+               * underneath it on their feed is copy they were never shown —
+               * and nothing about the send would have looked wrong.
+               *
+               * Left orange and merely refused on the press, it reads as a
+               * broken button. Greyed, it reads as a step that has not
+               * happened yet, which is exactly what it is.
+               */
               <button
                 type="submit"
                 name="mode"
                 value="approval"
-                disabled={pending}
-                className={buttonClasses()}
+                /*
+                 * A poster has no caption to wait for — the words are on the
+                 * design. Greying the button on one left every poster with a
+                 * dead Send and a tooltip asking for a caption that no part of
+                 * this portal would ever have written.
+                 */
+                disabled={pending || !canSend}
+                title={canSend ? undefined : "Generate or write the caption first"}
+                className={buttonClasses(canSend ? {} : { variant: "secondary", className: "opacity-60" })}
               >
                 {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Send To Approval

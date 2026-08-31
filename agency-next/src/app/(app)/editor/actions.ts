@@ -11,6 +11,8 @@ import {
   getAnalysis,
   getPendingAnalyses,
   nameAnalysedVideos,
+  captionBudget,
+  type CaptionOverrides,
 } from "@/lib/video-ai";
 
 export type AnalyseState = {
@@ -21,6 +23,12 @@ export type AnalyseState = {
   /** True while there is more work — the client polls again. */
   more?: boolean;
   caption?: string | null;
+  /** Four other complete captions, so one can be chosen instead of re-paid for. */
+  alternates?: string[];
+  /** Captions left for this video inside the 48-hour window. */
+  left?: number;
+  /** How many it gets in total, so the screen can say "2 of 3". */
+  limit?: number;
 };
 
 /** Everyone who can act on a video shares the same access rule. */
@@ -96,14 +104,31 @@ export async function analyseVideoAction(
  * they uploaded afterwards, so nobody has to remember to turn it off.
  */
 export async function finishAnalysisAfterUpload(
-  deliverableId: number
+  deliverableId: number,
+  /**
+   * Throw away a finished analysis and write a new caption.
+   *
+   * False for the uploader, which is nudging a job along and must not pay for
+   * a second caption on a video that already has one. True for a person
+   * pressing Generate: handing back the caption already on screen is what a
+   * broken button looks like. The three-per-48-hours ceiling is what makes
+   * that safe to offer.
+   */
+  force = false,
+  /**
+   * The caption studio's per-run choices — tone, language, goal, length, and
+   * whether contact details go in this one. Absent from the uploader, which
+   * has nobody to ask.
+   */
+  overrides?: CaptionOverrides
 ): Promise<AnalyseState & { applied?: boolean }> {
   if (!deliverableId) return { ok: false, error: "Missing task." };
 
   const access = await assertAccess(deliverableId);
   if (!access.ok) return { ok: false, error: access.error };
 
-  const result = await runAnalysis(deliverableId);
+  if (force) await queueAnalysis(deliverableId, true);
+  const result = await runAnalysis(deliverableId, overrides);
 
   let applied = false;
   if (result.state === "done") {
@@ -125,11 +150,16 @@ export async function finishAnalysisAfterUpload(
     return { ok: false, state: result.state, error: result.error };
   }
 
+  const budget = await captionBudget(deliverableId);
+
   return {
     ok: true,
     state: result.state,
     more: result.more,
     caption: result.caption ?? null,
+    alternates: result.alternates,
+    left: budget.left,
+    limit: budget.limit,
     applied,
     message:
       result.state === "done"
@@ -213,10 +243,23 @@ export async function applyCaptionAction(
  * whole thing is best-effort: a failed analysis must never make a successful
  * video upload look broken.
  */
-export async function startAnalysisAfterUpload(deliverableId: number): Promise<void> {
+export async function startAnalysisAfterUpload(
+  deliverableId: number,
+  /**
+   * Whether to take the first step now, or only get in the queue.
+   *
+   * False for a video whose frames the browser is still decoding. The model
+   * cannot take a video — it reads frames — so running before they arrive
+   * spends a real call on the sound track alone, and worse, that call can
+   * finish: the job is marked done, and the frames land against an analysis
+   * nothing will ever look at again. Queueing is enough; the uploader polls
+   * this to completion the moment it has something to look at.
+   */
+  runNow = true
+): Promise<void> {
   try {
     await queueAnalysis(deliverableId);
-    await runAnalysis(deliverableId);
+    if (runNow) await runAnalysis(deliverableId);
   } catch (err) {
     console.warn(
       "[video-ai] post-upload analysis did not start:",
