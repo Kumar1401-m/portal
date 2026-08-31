@@ -356,9 +356,13 @@ export default async function SettingsPage() {
             detail={`${env.db.database} @ ${env.db.host}:${env.db.port}`}
           />
           <Status
-            label="AI captions (Gemini)"
+            label="AI (Gemini)"
             ok={env.gemini.enabled}
-            detail={env.gemini.enabled ? env.gemini.model : "set GEMINI_API_KEY in .env.local"}
+            detail={
+              env.gemini.enabled
+                ? `${env.gemini.model} · ${env.gemini.fastModel}`
+                : "set GEMINI_API_KEY in .env.local"
+            }
           />
           <Status
             label="Outbound email (SMTP)"
