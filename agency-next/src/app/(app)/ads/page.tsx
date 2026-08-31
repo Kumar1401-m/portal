@@ -11,13 +11,15 @@ import {
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { crmClientIds } from "@/lib/crm";
 import { getClientsMini } from "@/lib/deliverables";
-import { adSummary, adsReadiness, lastAdSync } from "@/lib/ads";
+import { adSummary, adPerformance, adsReadiness, lastAdSync } from "@/lib/ads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { RangePicker } from "@/components/admin/range-picker";
 import { resolveRange } from "@/lib/date-range";
 import { SyncButton } from "./sync-button";
+import { AdTable } from "./ad-table";
+import { AdCompare } from "./ad-compare";
 import { ClientPicker } from "./client-picker";
 import { fmtDate } from "@/lib/utils";
 import { prettyLocal } from "@/lib/posting";
@@ -85,12 +87,23 @@ export default async function AdsPage({
   const { from, to, key } = resolveRange(sp.range, sp.from, sp.to);
   // Every client the viewer may see, not only the ones that spent in this
   // range — a client who paused last month is exactly who gets looked up.
-  const [data, syncedAt, clients] = await Promise.all([
+  const [data, syncedAt, clients, ads] = await Promise.all([
     adSummary(from, to),
     lastAdSync(),
     getClientsMini(await crmClientIds(user)),
+    // Empty until the ad-level sync has run at least once, and empty is the
+    // right thing to render then — a table of nothing beats a promise of it.
+    adPerformance(from, to),
   ]);
   const t = data.totals;
+
+  /*
+   * How many ads each client actually ran, counted off the rows already
+   * fetched rather than asked for again. "How many did we make for them" was
+   * unanswerable anywhere in the portal — an account total has no count in it.
+   */
+  const adCount = new Map<number, number>();
+  for (const a of ads) adCount.set(a.clientId, (adCount.get(a.clientId) ?? 0) + 1);
 
   // One currency is the normal case and reads best; two means the totals row
   // has to break down rather than pretend to a single figure.
@@ -103,9 +116,14 @@ export default async function AdsPage({
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Megaphone className="h-6 w-6 text-primary" /> Ad management
           </h1>
+          {/* "Straight from Meta" was the one claim on the page that could not
+              be checked: `adSummary` reads the stored daily rows, deliberately,
+              because a board that calls the Graph API per client on every load
+              is slow when it matters. When it was last pulled is the honest
+              version, and the button beside it is how you make it "now". */}
           <p className="text-sm text-muted-foreground">
-            {fmtDate(from)} – {fmtDate(to)} · straight from Meta
-            {syncedAt ? `, last refreshed ${prettyLocal(syncedAt) ?? "—"}` : ", never refreshed yet"}.
+            {fmtDate(from)} – {fmtDate(to)} ·{" "}
+            {syncedAt ? `last refreshed ${prettyLocal(syncedAt) ?? "—"}` : "not refreshed yet"}.
           </p>
         </div>
         {/* Wraps, or the three of them are 509px on a 390px screen and drag
@@ -164,6 +182,7 @@ export default async function AdsPage({
               <THead>
                 <tr>
                   <th>Client</th>
+                  <th className="text-right">Ads</th>
                   <th className="text-right">Spent</th>
                   <th className="text-right">Impressions</th>
                   <th className="text-right">Reach</th>
@@ -194,12 +213,33 @@ export default async function AdsPage({
                         </div>
                       ) : null}
                     </TD>
+                    {/* A dash, not a zero: the ad-level pull may simply not
+                        have run yet, and "0 ads" would be a claim we cannot
+                        make from an account total. */}
+                    <TD className="text-right tabular-nums text-muted-foreground">
+                      {adCount.get(r.clientId) ?? "—"}
+                    </TD>
                     <TD className="text-right font-medium tabular-nums">
                       {money(r.spend, r.currency)}
                     </TD>
                     <TD className="text-right tabular-nums">{num(r.impressions)}</TD>
-                    <TD className="text-right tabular-nums text-muted-foreground">
-                      {num(r.reach)}
+                    {/*
+                      Reach is people, and it used to be a SUM of the daily
+                      column — which counts the same person once for every day
+                      they were reached, so it grew with the length of the
+                      range and looked exactly like the numbers beside it. Now
+                      it is Meta's deduplicated figure, and a dash when the
+                      range on screen is not the one it covers.
+                    */}
+                    <TD
+                      className="text-right tabular-nums text-muted-foreground"
+                      title={
+                        r.reach === null
+                          ? "Reach cannot be added up across days. It is only shown for the period Meta counted it over."
+                          : undefined
+                      }
+                    >
+                      {r.reach === null ? "—" : num(r.reach)}
                     </TD>
                     <TD className="text-right tabular-nums text-muted-foreground">
                       {num(r.clicks)}
@@ -239,6 +279,29 @@ export default async function AdsPage({
           </CardContent>
         </Card>
       )}
+
+      {/* Ad by ad. Below the client totals because "what is this costing us"
+          is the question people open this board with, and "which ad" is the
+          one they ask second. */}
+      {ads.length > 0 ? (
+        <>
+          <AdCompare ads={ads} />
+          <AdTable ads={ads} showClient rangeKey={key} />
+        </>
+      ) : data.rows.length > 0 ? (
+        <Card>
+          <CardContent className="space-y-2 p-6 text-sm">
+            <p className="font-medium">No ad-by-ad detail yet.</p>
+            <p className="text-muted-foreground">
+              The totals above come from the ad account; naming the individual ads needs a
+              second pull from Meta, which happens on the next{" "}
+              <b>Refresh from Meta</b>. If it stays empty after a refresh, the{" "}
+              <code className="rounded bg-muted px-1">ad_performance</code> table has not been
+              applied from Settings → Database.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Absence, explained. A client missing from the table above is either
           quiet or unconnected, and those need different actions. */}

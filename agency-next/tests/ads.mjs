@@ -363,7 +363,13 @@ const insert = (clientId, date, spend, currency, impressions, clicks, leads) =>
   // The board has no way to write a number, and that is the point.
   const page = readFileSync(`${SRC}/app/(app)/ads/page.tsx`, "utf8");
   assert.ok(!/<Input|<input/.test(page), "the board has no field to type a figure into");
-  assert.match(page, /straight from Meta/, "and it says where the numbers came from");
+  /*
+   * It used to say "straight from Meta", which was the one claim on the board
+   * that could not be checked — `adSummary` reads the stored daily rows, on
+   * purpose. It now says when they were last pulled, which is the same
+   * promise made truthfully. See ad-refresh.mjs.
+   */
+  assert.match(page, /last refreshed \$\{prettyLocal\(syncedAt\)/, "and it says how current they are");
   assert.match(page, /last refreshed/, "and when they were last checked");
 
   const wf = JSON.parse(readFileSync(`${SRC}/../../n8n/workflows/ads-sync.json`, "utf8"));

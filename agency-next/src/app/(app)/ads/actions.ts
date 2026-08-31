@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser, ADMIN_ROLES } from "@/lib/auth";
-import { syncAllAds, adsReadiness } from "@/lib/ads";
+import { requireUser, ADMIN_ROLES, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
+import { canAccessClient } from "@/lib/crm";
+import { queryOne } from "@/lib/db";
+import { syncAllAds, syncClientAds, adsReadiness } from "@/lib/ads";
 
 export type SyncState = {
   ok: boolean;
@@ -46,5 +48,54 @@ export async function syncAdsAction(): Promise<SyncState> {
       `Refreshed ${r.synced} client${r.synced === 1 ? "" : "s"}, ${r.rows} day` +
       `${r.rows === 1 ? "" : "s"} of data.`,
     failures: r.failures.length ? r.failures : undefined,
+  };
+}
+
+/**
+ * Pull one client's ads from Meta, now.
+ *
+ * The board's button refreshes everybody, which is what a board wants and the
+ * wrong thing to offer from one client's page: it spends a Graph call per
+ * client and reports nine other people's token problems to somebody who came
+ * to look at one account.
+ *
+ * The same `syncClientAds` the nightly job and the whole-book refresh both
+ * use, so there is no second idea of what refreshing means.
+ */
+export async function syncOneClientAction(clientId: number): Promise<SyncState> {
+  const user = await requireUser(ADMIN_OR_CRM_ROLES);
+  // A crm may refresh their own clients and no others — the same gate the page
+  // itself applies, applied again here, because a server action is reachable
+  // without the page.
+  if (!clientId || !(await canAccessClient(user, clientId))) {
+    return { ok: false, message: "That client isn't yours." };
+  }
+
+  const readiness = await adsReadiness();
+  if (!readiness.ready) return { ok: false, message: readiness.reason };
+
+  const c = await queryOne<{ company_name: string }>(
+    "SELECT company_name FROM clients WHERE id = ?",
+    [clientId]
+  );
+  const r = await syncClientAds(clientId);
+
+  revalidatePath(`/ads/${clientId}`);
+  revalidatePath("/ads");
+
+  if (!r.ok) {
+    return {
+      ok: false,
+      message: r.error,
+      // Named and hinted in the same shape the board uses, so the button can
+      // render either result without knowing which page it is on.
+      failures: [{ client: c?.company_name ?? "This client", error: r.error ?? "Refresh failed.", hint: r.hint }],
+    };
+  }
+  return {
+    ok: true,
+    message: r.rows
+      ? `${r.rows} day${r.rows === 1 ? "" : "s"} of data refreshed.`
+      : "Meta had nothing new for the last four weeks.",
   };
 }

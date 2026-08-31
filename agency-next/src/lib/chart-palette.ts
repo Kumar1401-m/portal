@@ -44,3 +44,29 @@ export const ENGAGEMENT = [
 ] as const;
 
 export type EngagementKey = (typeof ENGAGEMENT)[number]["key"];
+
+/**
+ * The ad board's three measures, each on its own frame.
+ *
+ * Spend, leads and cost per lead share nothing but their x axis, so they are
+ * never two series on one chart — three small multiples instead, one measure
+ * each. That is also why these hues need only be told apart *between cards*
+ * rather than between adjacent marks.
+ *
+ * Assigned by measure and never cycled, like the block above: a range with no
+ * leads in it must not slide cost per lead into the colour leads was using.
+ *
+ * Run through the validator against both surfaces rather than picked:
+ *
+ *   light #fcfcfb — lightness, chroma, CVD ΔE 9.2, normal-vision ΔE 24.0 pass
+ *   dark  #1a1a19 — all five pass, contrast included
+ *
+ * The one warning is the green against the light surface at 2.74:1, which the
+ * skill says must be discharged rather than dismissed: every chart writes its
+ * headline value out in text, and the whole day-by-day table sits underneath.
+ */
+export const ADS: Record<"spend" | "leads" | "costPerLead", ChartHue> = {
+  spend: { light: "#eb6834", dark: "#d95926" },
+  leads: { light: "#1baf7a", dark: "#199e70" },
+  costPerLead: { light: "#2a78d6", dark: "#3987e5" },
+};

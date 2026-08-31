@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
-import { syncAdsAction, type SyncState } from "./actions";
+import { syncAdsAction, syncOneClientAction, type SyncState } from "./actions";
 import { buttonClasses } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 
@@ -17,14 +17,27 @@ import { useToast } from "@/components/ui/toast";
  * advertisements requires ads_read" is a sentence with a fix in it, and one
  * that fades in six seconds is one nobody acts on.
  */
-export function SyncButton() {
+export function SyncButton({
+  clientId,
+}: {
+  /**
+   * Refresh this client alone, from their own page.
+   *
+   * Omitted on the board, which refreshes the whole book. Offering the board's
+   * button on one client's page would spend a Graph call per client and report
+   * nine other people's token problems to somebody who came to look at one
+   * account — so the scope follows the page, and it is the same button either
+   * way rather than two that drift apart.
+   */
+  clientId?: number;
+} = {}) {
   const [pending, start] = useTransition();
   const [state, setState] = useState<SyncState | null>(null);
   const toast = useToast();
 
   function run() {
     start(async () => {
-      const res = await syncAdsAction();
+      const res = clientId ? await syncOneClientAction(clientId) : await syncAdsAction();
       setState(res);
       toast(
         res.ok

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { requireUser, ADMIN_OR_CRM_ROLES } from "@/lib/auth";
 import { canAccessClient, crmClientIds } from "@/lib/crm";
-import { clientAdDetail } from "@/lib/ads";
+import { clientAdDetail, adPerformance, lastAdSync } from "@/lib/ads";
 import { resolveRange } from "@/lib/date-range";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
@@ -25,10 +25,15 @@ import { Table, THead, TBody, TR, TD } from "@/components/ui/table";
 import { buttonClasses } from "@/components/ui/button";
 import { RangePicker } from "@/components/admin/range-picker";
 import { ClientPicker } from "../client-picker";
+import { SyncButton } from "../sync-button";
+import { AdCharts } from "../ad-charts";
+import { AdTable } from "../ad-table";
+import { AdCompare } from "../ad-compare";
 import { getAudience } from "@/lib/audience";
 import { AudienceTile } from "@/components/admin/audience-tile";
 import { getClientsMini } from "@/lib/deliverables";
 import { fmtDate } from "@/lib/utils";
+import { prettyLocal } from "@/lib/posting";
 
 export const metadata = { title: "Client ads · NVK Hub" };
 export const dynamic = "force-dynamic";
@@ -79,10 +84,15 @@ export default async function ClientAdsPage({
   const { from, to, key } = resolveRange(sp.range, sp.from, sp.to);
   // The audience call goes to Meta, so it runs alongside rather than after —
   // and it returns null on any failure, so it can never hold this page up.
-  const [detail, audience, clients] = await Promise.all([
+  const [detail, audience, clients, syncedAt, ads] = await Promise.all([
     clientAdDetail(clientId, from, to),
     getAudience(clientId),
     getClientsMini(await crmClientIds(user)),
+    // This client's own last refresh, not the newest row anywhere: a nightly
+    // run that failed on this one account would otherwise report minutes.
+    lastAdSync(clientId),
+    // Ad by ad, for this client alone.
+    adPerformance(from, to, clientId),
   ]);
   if (!detail) notFound();
 
@@ -101,14 +111,31 @@ export default async function ClientAdsPage({
               <Megaphone className="h-6 w-6 text-primary" />
               {client.company}
             </h1>
+            {/*
+              What it is, rather than what it sounded like.
+
+              This said "straight from Meta", and the page does not go to Meta
+              at all — `clientAdDetail` reads the stored daily rows, on purpose,
+              because a page that calls the Graph API on every load is slow
+              when it matters and blank when a token lapses. So the claim was
+              the one thing on the page that could not be checked, sitting over
+              numbers somebody is about to read to a client on the phone.
+              Saying when it was last pulled is both honest and more useful,
+              and the button beside it is how you make it "now".
+            */}
             <p className="text-sm text-muted-foreground">
-              {fmtDate(from)} – {fmtDate(to)} · straight from Meta.
+              {fmtDate(from)} – {fmtDate(to)} ·{" "}
+              {syncedAt
+                ? `last refreshed ${prettyLocal(syncedAt) ?? "—"}`
+                : "not refreshed from Meta yet"}
+              .
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <ClientPicker clients={clients} current={clientId} range={key} />
           <RangePicker current={key} basePath={`/ads/${clientId}`} />
+          <SyncButton clientId={clientId} />
         </div>
       </div>
 
@@ -258,6 +285,20 @@ export default async function ClientAdsPage({
                 </CardContent>
               </Card>
             </div>
+          ) : null}
+
+          {/* Above the table, not instead of it. The table is where a figure
+              is read off; the charts are the shape it makes, which is the
+              thing a run of numbers does not have until it is drawn. */}
+          <AdCharts days={days} currency={ccy} />
+
+          {/* Which of *their* ads worked. The day-by-day table below says when
+              the money went; this says what it went on. */}
+          {ads.length > 0 ? (
+            <>
+              <AdCompare ads={ads} />
+              <AdTable ads={ads} />
+            </>
           ) : null}
 
           <Card className="overflow-hidden">

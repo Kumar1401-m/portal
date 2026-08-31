@@ -17,18 +17,28 @@ export function PortalHeader({
   notifications,
   unread,
   actionCounts,
+  hasAds,
 }: {
   companyName: string;
   avatarUrl: string | null;
   notifications: NotificationRow[];
   unread: number;
   actionCounts: { content: number; invoices: number };
+  /**
+   * Whether this client has ever had an ad run.
+   *
+   * A tab that always opens on "no ads ran in this period" is a tab that
+   * teaches the client the portal is half-built. Most clients here are content
+   * only, so it appears for the ones it is about.
+   */
+  hasAds: boolean;
 }) {
   const pathname = usePathname();
   const NAV = [
     { label: "Dashboard", href: "/portal", badge: 0 },
     { label: "Content", href: "/portal/content", badge: actionCounts.content },
     { label: "Invoices", href: "/portal/invoices", badge: actionCounts.invoices },
+    ...(hasAds ? [{ label: "Ads", href: "/portal/ads", badge: 0 }] : []),
   ];
 
   return (
